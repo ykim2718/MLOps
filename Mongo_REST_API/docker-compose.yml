@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  ycontrol:
+    build: .
+    # container_name: mongo_api # Remove 'container_name' to enable auto-naming for scaling
+    # container_name을 직접 지정하면 나중에 docker-compose up --scale ycontrol_api=3 처럼 컨테이너 개수를 늘리는 
+    # (Scaling) 기능을 사용할 수 없습니다.
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - MONGO_URI=mongodb://host.docker.internal:27017/yControl
+      - ALLOWED_COLLECTIONS=heatbeat,schedule_board,schedule_log,project_log,watching_usa
+      - PORT=3000
+  yimprove:
+    build: .
+    restart: always
+    ports:
+      - "3001:3001"
+    environment:
+      - MONGO_URI=mongodb://host.docker.internal:27017/yImprove
+      - ALLOWED_COLLECTIONS=heatbeat,macro_trend,micro_trend,real_time_news_ebest
+      - PORT=3001

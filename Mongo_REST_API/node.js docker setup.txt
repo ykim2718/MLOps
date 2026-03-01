@@ -1,0 +1,10 @@
+docker pull node:latest
+docker images                                # list downloaded images
+docker run --rm node:latest node -v    # v25.7.0
+node -v
+docker run -it --rm node:latest      # Node.js REPL(자바스크립트 실행기)' 모드로 진입
+>> process.version    # 'v25.7.0'
+
+docker run -it --rm node:latest /bin/bash    # bash shell
+root@2603f10ada7a:/#  node-v      # v25.7.0
+root@2603f10ada7a:/#  npm -v     # 11.10.1
