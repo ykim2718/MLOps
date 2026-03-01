@@ -11,8 +11,8 @@ services:
       - "3000:3000"
     environment:
       - MONGO_URI=mongodb://host.docker.internal:27017/yControl
+      - API_PORT=3000
       - ALLOWED_COLLECTIONS=heatbeat,schedule_board,schedule_log,project_log,watching_usa
-      - PORT=3000
   yimprove:
     build: .
     restart: always
@@ -20,5 +20,5 @@ services:
       - "3001:3001"
     environment:
       - MONGO_URI=mongodb://host.docker.internal:27017/yImprove
-      - ALLOWED_COLLECTIONS=heatbeat,macro_trend,micro_trend,real_time_news_ebest
-      - PORT=3001
+      - API_PORT=3001
+      - ALLOWED_COLLECTIONS=heatbeat,macro_trend,micro_trend,real_time_news__ebest

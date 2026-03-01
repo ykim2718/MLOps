@@ -1,45 +1,43 @@
 /*
  * mongodb_access.js
- * Updated to ES Modules & Async/Await (2026 Standard)
  cmd>> docker exec -it mongo_api_docker-mongo_api0 node api/mongodb_access.js
  cmd>> docker exec -it mongo_api_docker-mongo_api-1 npm run dev
- bash>> node api/mongo_rest_api.js
+ bash>> node api/mongo_access.js
  bash>> npm run dev
  */
 
-import { MongoClient } from 'mongodb';
+ // 별도 임포트 없이 실행 가능 (Node.js 18+)
 
-// Docker 컨테이너에서 로컬 MongoDB에 접속하기 위한 주소
-const url = process.env.MONGO_URI || 'mongodb://host.docker.internal:3000';
-const dbName = 'yControl'; // mongo_rest_api.js와 데이터베이스 이름을 맞춤
-const collectionName = 'project_log'; // mongo_rest_api.js에서 사용하는 컬렉션 이름
+const API_PORT = process.env.API_PORT || '3000';
+const COLLECTION_NAME = process.env.COLLECTION_NAME ||'log';
 
-async function run() {
-    const client = new MongoClient(url);
+async function getData() {
+  // 1. URL과 쿼리 파라미터 수동 조합
+  const params = new URLSearchParams({
+    // find: JSON.stringify({ "_id": "control" })
+    // aggregate: JSON.stringify([{ "$match": { "_id": "arbiter" } }])
+    aggregate: JSON.stringify([
+      {"$sort": { "time": -1 } },
+      {"$limit": 2}
+    ])
+  });
 
-    try {
-        // 데이터베이스 연결
-        await client.connect();
-        console.log('Successfully connected to MongoDB');
+  const url = `http://localhost:${API_PORT}/api/${COLLECTION_NAME}?${params.toString()}`;
 
-        const db = client.db(dbName);
-        const collection = db.collection(collectionName); // 테스트를 위해 project_log 컬렉션 접근
+  try {
+    console.log(`🔗 API 서버에 접속 중: ${url}`);
+    
+    const response = await fetch(url);
+    const result = await response.json();
 
-        // 최신 문서 1개 찾아오기 (find는 커서를 반환하므로 toArray()나 next() 필요)
-        const doc = await collection.find({})
-            .sort({ _id: -1 })
-            .limit(1)
-            .toArray();
-
-        console.log('Latest Document:', doc);
-
-    } catch (err) {
-        console.error('Connection error:', err);
-    } finally {
-        // 연결 종료
-        await client.close();
-        process.exit(0);
+    if (response.ok) {
+      console.log("✅ 성공:", JSON.stringify(result, null, 2));
+    } else {
+      console.error(`❌ 오류 (${response.status}):`, result.message || result.error);
     }
+  } catch (error) {
+    console.error("❌ 연결 실패 또는 네트워크 오류");
+  }
 }
 
-run();
+getData();

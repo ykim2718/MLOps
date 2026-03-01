@@ -1,25 +1,18 @@
 import express from 'express';
 import { MongoClient } from 'mongodb';
-import qs from 'qs';
-import dotenv from 'dotenv';
-import cors from 'cors';
-
-dotenv.config();
 
 const app = express();
 
 // 환경 변수 설정
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://host.docker.internal:27017/yControl';
-const PORT = process.env.PORT || 3000;
+const API_PORT = process.env.API_PORT || 3000;
 
 // 허용된 컬렉션 목록 설정
 const rawCollections = process.env.ALLOWED_COLLECTIONS || 'log';
 const ALLOWED_COLLECTIONS = rawCollections.split(',').map(item => item.trim());
 
-app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.set('query parser', (str) => qs.parse(str, { allowDots: true }));  // Express의 쿼리 파서를 qs로 교체
 
 
 // --- 미들웨어: Read-Only 설정 ---
@@ -52,8 +45,8 @@ async function startServer() {
     console.log(`✅ MongoDB Connected: ${connectedDbName}`);
 
     // 3️⃣ DB 연결이 성공한 '후에' 서버 실행
-    app.listen(PORT, () => {
-      console.log(`🚀 API Server running on port ${PORT}`);
+    app.listen(API_PORT, () => {
+      console.log(`🚀 API Server running on port ${API_PORT}`);
       console.log(`🔒 Allowed Collections: ${ALLOWED_COLLECTIONS.join(', ')}`);
       console.log(`🛡️ Mode: Read-Only (GET Only)`);
     });
@@ -66,22 +59,6 @@ async function startServer() {
 startServer();
 
 
-// 숫자 형변환 유틸리티
-const autoConvert = (obj) => {
-  const newObj = {};
-  for (let key in obj) {
-    const value = obj[key];
-    if (typeof value === 'object' && value !== null) {
-      newObj[key] = autoConvert(value);
-    } else {
-      // 숫자 형태의 문자열이면 숫자로, 아니면 그대로 유지
-      newObj[key] = (!isNaN(value) && value.trim() !== "") ? Number(value) : value;
-    }
-  }
-  return newObj;
-};
-
-
 // --- API 라우트 ---
 app.get('/api/:collectionName', async (req, res) => {
   try {
@@ -90,30 +67,92 @@ app.get('/api/:collectionName', async (req, res) => {
     // 1. [보안] 허용된 컬렉션인지 검사
     if (!ALLOWED_COLLECTIONS.includes(collectionName)) {
       console.warn(`[Access Denied] ${collectionName}`);
-      return res.status(403).json({ 
+      return res.status(403).json({   // 403 (Forbidden)
         error: "Forbidden", 
         message: "접근 권한이 없는 컬렉션입니다." 
       });
     }
 
-    // 2. 쿼리 파싱 및 숫자 변환
-    const query = autoConvert(req.query);
+    let result;
+    let applied;
 
-    // 3. 데이터 조회 (Native Driver 사용으로 _id string 쿼리 완벽 지원)
-    const result = await db.collection(collectionName)
-      .find(query)
-      .sort({ _id: -1 }) // 가장 최근 데이터 순
-      .limit(1)          // 마지막 하나만 리턴
-      .toArray();
+    // 2. 쿼리 파라미터 검증
+    const { find, aggregate } = req.query;
+    const findStr = find ? find.trim() : null;
+    const aggStr = aggregate ? aggregate.trim() : null;
 
+    if (!find && !aggregate) {
+      return res.status(400).json({ 
+        error: "Bad Request", 
+        message: "find 또는 aggregate 파라미터가 누락되었습니다." 
+      });
+    }
+
+    if (find && aggregate) {  // 둘 다 데이터가 들어온 경우 (동시 사용 불가)
+      return res.status(400).json({ 
+        error: "Bad Request", 
+        message: "find와 aggregate는 동시에 사용할 수 없습니다. 하나만 선택해 주세요." 
+      });
+    }
+
+    const rawQueryString = find || aggregate;
+    const blacklistedOperators = ['$where', '$accumulator', '$function'];
+    if (blacklistedOperators.some(op => rawQueryString.includes(op))) {
+      console.warn(`[Security Alert] Blocked request containing: ${rawQueryString}`);
+      return res.status(400).json({ error: "Forbidden operator used" });
+    }
+
+    // 3. Fetch by find or aggregate
+    try {
+      if (find) {
+        // --- Find 모드 ---
+        const query = JSON.parse(find);
+
+        // 쿼리 객체가 비어있는지 체크 (예: {})
+        if (Object.keys(query).length === 0) {
+          return res.status(398).json({ error: "Bad Request", message: "find 쿼리가 비어있습니다. 필터 조건을 입력해주세요." });
+        }
+
+        console.log(`🔎 [${collectionName}] Find:`, JSON.stringify(query));
+        result = await db.collection(collectionName).find(query).toArray();
+        applied = query;
+
+      } else if (aggregate) {
+        // --- Aggregate 모드 ---
+        const pipeline = JSON.parse(aggregate);
+        const finalPipeline = Array.isArray(pipeline) ? pipeline : [pipeline];
+
+        // 파이프라인 배열이 비어있는지 체크
+        if (finalPipeline.length === 0) {
+          return res.status(400).json({ error: "Bad Request", message: "aggregate 파이프라인이 비어있습니다." });
+        }
+
+        console.log(`📊 [${collectionName}] Aggregate:`, JSON.stringify(finalPipeline));
+        result = await db.collection(collectionName).aggregate(finalPipeline).toArray();
+        applied = finalPipeline;
+      }
+      console.log(`📊 [${collectionName}] result:`, result.length);
+
+    } catch (parseErr) {
+      // JSON 형식이 잘못되었거나 빈 문자열인 경우 처리
+      return res.status(400).json({ 
+        error: "Bad Request", 
+        message: "유효하지 않은 JSON 형식이거나 빈 값입니다.",
+        details: parseErr.message 
+      });
+    }
+
+    // 3. 결과 응답
     res.json({
       collection: collectionName,
-      query_applied: query,
+      type: aggregate ? 'aggregate' : 'find',
       count: result.length,
+      query: applied,
       data: result
     });
 
   } catch (err) {
+    console.error('Server Error:', err);
     res.status(500).json({ error: "Server Error", details: err.message });
   }
 });
