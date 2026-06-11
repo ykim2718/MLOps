@@ -1,0 +1,95 @@
+services:
+  # 1) 메타데이터 DB — prefect/mlflow/optuna/catalog 4개 논리 DB를 한 인스턴스에서 운영.
+  #    init SQL 은 아래 configs.init_sql 로 yml 안에 인라인되어, 최초 기동 시 4개 DB 를 만든다.
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      # POSTGRES_DB 는 지정하지 않는다(기본 DB=postgres). 4개 DB 는 init_sql 이 생성.
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    configs:
+      # 컨테이너 최초 기동 시 /docker-entrypoint-initdb.d/*.sql 이 자동 실행된다.
+      - source: init_sql
+        target: /docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      retries: 10
+
+  # 2) 오브젝트 스토리지 — 실제 대용량 데이터/모델/아티팩트 (S3 호환). 콘솔: http://localhost:9001
+  minio:
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # 웹 콘솔
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      retries: 10
+
+  # 3) MLflow 추적 서버 + 모델 레지스트리. backend=postgres(mlflow DB), artifact=MinIO. UI: http://localhost:5000
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:latest
+    command: >
+      bash -c "pip install --quiet psycopg2-binary boto3 &&
+               mlflow server --host 0.0.0.0 --port 5000
+               --backend-store-uri postgresql://postgres:postgres@postgres:5432/mlflow
+               --artifacts-destination s3://mlflow"
+    ports:
+      - "5000:5000"
+    environment:
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  # 4) Prefect 서버 + 대시보드(UI). backend=postgres(prefect DB). 브라우저: http://localhost:4200
+  server:
+    image: prefecthq/prefect:3-latest
+    command: prefect server start --host 0.0.0.0
+    ports:
+      - "4200:4200"
+    environment:
+      PREFECT_SERVER_DATABASE_CONNECTION_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/prefect
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # 5) 워커: 실제로 잡을 실행. 동시 실행 수를 여기서 제한.
+  worker:
+    image: prefecthq/prefect:3-latest
+    # default 라는 process work pool 에서 잡을 가져와 실행.
+    # --limit 8 = 한 워커가 동시에 8개까지만 실행(자원에 맞춰 조정).
+    command: >
+      bash -c "prefect work-pool create default --type process --overwrite &&
+               prefect worker start --pool default --limit 8"
+    environment:
+      PREFECT_API_URL: http://server:4200/api
+    depends_on:
+      - server
+
+# init SQL 을 yml 안에 인라인(별도 init-db.sql 파일 불필요).
+# postgres 서비스의 configs 로 /docker-entrypoint-initdb.d/ 에 마운트되어 최초 1회 실행된다.
+configs:
+  init_sql:
+    content: |
+      CREATE DATABASE prefect;
+      CREATE DATABASE mlflow;
+      CREATE DATABASE optuna;
+      CREATE DATABASE catalog;
+
+volumes:
+  pg-data:
+  minio-data:
