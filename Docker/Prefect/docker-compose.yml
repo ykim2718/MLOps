@@ -7,6 +7,9 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       # POSTGRES_DB 는 지정하지 않는다(기본 DB=postgres). 4개 DB 는 init_sql 이 생성.
+    ports:
+      # 호스트의 catalog.py / data_uploader.ps1 이 localhost:5432 로 접속할 수 있도록 노출.
+      - "5432:5432"
     volumes:
       - pg-data:/var/lib/postgresql/data
     configs:
@@ -34,6 +37,23 @@ services:
       test: ["CMD", "mc", "ready", "local"]
       interval: 5s
       retries: 10
+
+  # 2-1) MinIO 버킷 생성 + 버저닝 ON. 한 번 실행되고 종료(one-shot)된다.
+  #      커뮤니티 콘솔에는 버킷/버저닝 메뉴가 없으므로 mc 로 자동 처리한다.
+  #      --ignore-existing: 이미 있으면 에러 없이 통과. mlflow 버킷은 run_id 로 격리되어 버저닝 불필요.
+  createbuckets:
+    image: minio/mc
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 minioadmin minioadmin &&
+      mc mb --ignore-existing local/datasets local/models local/mlflow &&
+      mc version enable local/datasets &&
+      mc version enable local/models
+      "
+    restart: "no"
 
   # 3) MLflow 추적 서버 + 모델 레지스트리. backend=postgres(mlflow DB), artifact=MinIO. UI: http://localhost:5000
   mlflow:
@@ -79,6 +99,10 @@ services:
       PREFECT_API_URL: http://server:4200/api
     depends_on:
       - server
+    # server 가 늦게 떠서 worker 가 API(:4200) 연결에 실패해 종료돼도,
+    # 자동으로 다시 띄워 server 가 준비될 때까지 재시도한다.
+    # (사용자가 직접 멈춘 경우에는 재시작하지 않음)
+    restart: unless-stopped
 
 # init SQL 을 yml 안에 인라인(별도 init-db.sql 파일 불필요).
 # postgres 서비스의 configs 로 /docker-entrypoint-initdb.d/ 에 마운트되어 최초 1회 실행된다.
