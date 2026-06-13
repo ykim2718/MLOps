@@ -38,7 +38,7 @@ $env:PYTHONPATH = $PSScriptRoot
 # Verify required tools/modules up front; show an install hint and abort if missing.
 function Assert-Prereqs {
     if (-not (Get-Command mc -ErrorAction SilentlyContinue)) {
-        throw "Missing: mc (MinIO Client) is not on PATH. Install it (see README 'Installing mc')."
+        throw "Missing: mc (MinIO Client) is not on PATH. Install it (see minio.md 'Installing mc')."
     }
     if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
         throw "Missing: python is not on PATH."

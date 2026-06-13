@@ -85,7 +85,7 @@ if ($Catalog) {
 # 2) MinIO section (needs mc)
 if ($ObjectStorage) {
     if (-not (Get-Command mc -ErrorAction SilentlyContinue)) {
-        throw "Missing: mc (MinIO Client) is not on PATH. Install it (see README 'Installing mc')."
+        throw "Missing: mc (MinIO Client) is not on PATH. Install it (see minio.md 'Installing mc')."
     }
     mc alias set $Alias $Endpoint $AccessKey $SecretKey | Out-Null
     if ($DatasetId -ne "") { $prefix = "$Alias/$Bucket/$DatasetId/" } else { $prefix = "$Alias/$Bucket/" }

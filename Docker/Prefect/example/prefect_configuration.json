@@ -1,0 +1,7 @@
+{
+  "member": "member1",
+  "experiment": "mnist-resnet50",
+  "dataset_path": "./artifacts/mnist",
+  "epochs": 10,
+  "n_trials": 20
+}
