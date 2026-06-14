@@ -113,7 +113,7 @@ services:
                prefect work-pool create default --type process --overwrite &&
                prefect worker start --pool default --limit 8"
     volumes:
-      - ./:/app                     # user 코드(catalog.py, example/)를 워커에서 접근(work-pool 실행 시)
+      - ./:/app                     # flow 코드(catalog.py, example/ 등)가 있는 폴더를 /app 으로 마운트 (./ 는 compose 폴더 — 코드가 다른 폴더면 그 경로로)
     working_dir: /app
     depends_on:
       - prefect_server
