@@ -20,6 +20,28 @@ THIS_DIR = os.path.dirname(os.path.abspath(__file__))          # .../example
 sys.path.insert(0, THIS_DIR)                                   # 단계 모듈(train_dp ...)
 sys.path.insert(0, os.path.dirname(THIS_DIR))                  # catalog.py (상위 폴더)
 
+
+def _load_compose_env():
+    """docker-compose.env(같은 폴더 또는 상위 폴더)를 읽어 os.environ 에 채운다.
+
+    MinIO 접속(MINIO_ENDPOINT/ACCESS/SECRET 등)을 docker-compose.yml 과 같은
+    한 곳(docker-compose.env)에서 가져온다. 이미 설정된 값은 덮어쓰지 않는다(setdefault).
+    """
+    for d in (THIS_DIR, os.path.dirname(THIS_DIR)):
+        path = os.path.join(d, "docker-compose.env")
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    k, v = line.split("=", 1)
+                    os.environ.setdefault(k.strip(), v.strip())
+            break
+
+
+_load_compose_env()                                           # catalog import 전에 환경변수 로드
+
 import train_dp, train_fe, train as train_mod, train_eval   # noqa: E402
 import test_dp, test_fe, test as test_mod, test_eval          # noqa: E402
 
@@ -73,11 +95,16 @@ def _upload(local_file, bucket, key):
     """로컬 산출물 1개를 MinIO 로 업로드. 스택이 없으면 경고만 출력하고 넘어간다."""
     try:
         import boto3
+        # 자격증명/엔드포인트: 환경변수 → Prefect 블록 → 기본값 (catalog.resolve)
+        # 서버/워커는 env 로, 팀원 로컬 실행은 Prefect 블록으로 자동 해석된다.
         s3 = boto3.client(
             "s3",
-            endpoint_url=os.environ.get("MINIO_ENDPOINT", "http://localhost:9000"),
-            aws_access_key_id=os.environ.get("MINIO_ACCESS_KEY", "minioadmin"),
-            aws_secret_access_key=os.environ.get("MINIO_SECRET_KEY", "minioadmin"),
+            endpoint_url=catalog.resolve("MINIO_ENDPOINT", "minio_endpoint",
+                                         default="http://localhost:9000", secret=False),
+            aws_access_key_id=catalog.resolve("MINIO_ACCESS_KEY", "minio-access-key",
+                                              default="minioadmin"),
+            aws_secret_access_key=catalog.resolve("MINIO_SECRET_KEY", "minio-secret-key",
+                                                  default="minioadmin"),
         )
         s3.upload_file(local_file, bucket, key)
         return True

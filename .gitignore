@@ -1,0 +1,3 @@
+# 자격증명/시크릿이 담긴 실제 환경변수 파일은 커밋하지 않는다.
+# 새 환경에서는 docker-compose.env_example 를 복사해 docker-compose.env 로 채운다.
+docker-compose.env

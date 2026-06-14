@@ -20,6 +20,9 @@ PostgreSQL `catalog` DB 의 `datasets` 테이블을 다룬다.
        python catalog.py find sydney_202605 fab=fab2  # 검색(metadata 키=값)
 
 연결 주소는 환경변수 POSTGRESQL_CATALOG_DSN 으로 덮어쓸 수 있다(로컬/원격 서버 공용).
+환경변수가 없으면 Prefect 서버의 블록(`catalog-dsn` Secret 등)에서 가져온다 → resolve() 참고.
+즉 팀원은 자격증명을 하드코딩하거나 docker-compose.env 를 보지 않고도(Prefect 서버에 연결만
+돼 있으면) 동작한다(관리자가 register_blocks.py 로 블록을 등록해 둔 경우).
 """
 import os
 import sys
@@ -27,9 +30,55 @@ import sys
 import psycopg2
 from psycopg2.extras import Json, RealDictCursor
 
-DSN = os.environ.get(
-    "POSTGRESQL_CATALOG_DSN", "postgresql://postgres:postgres@localhost:5432/catalog"
-)
+def _load_compose_env():
+    """docker-compose.env(같은 폴더 또는 상위 폴더)를 읽어 os.environ 에 채운다.
+
+    docker-compose.yml 과 같은 한 곳(docker-compose.env)에서 자격증명/엔드포인트를
+    가져오기 위한 헬퍼. 이미 설정된 환경변수는 덮어쓰지 않으므로(setdefault),
+    셸이나 .ps1 스크립트가 준 값이 항상 우선한다.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    for d in (here, os.path.dirname(here)):
+        path = os.path.join(d, "docker-compose.env")
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    k, v = line.split("=", 1)
+                    os.environ.setdefault(k.strip(), v.strip())
+            break
+
+
+_load_compose_env()
+
+
+def resolve(env_name, block_name, *, default=None, secret=True):
+    """자격증명/설정 1개를 해석한다: 환경변수 우선 → Prefect 블록 → default.
+
+    - 서버 / 관리자 / .ps1 경로: 환경변수(os.environ)가 이미 있어 그대로 사용(블록 조회 안 함).
+    - 팀원 로컬 실행: 환경변수가 없으면 PREFECT_API_URL 로 연결된 Prefect 서버의
+      Secret(secret=True) 또는 Variable(secret=False) 블록에서 가져온다
+      (관리자가 register_blocks.py 로 등록해 둔 값).
+    prefect 미설치 / 서버 미연결 / 블록 없음 등으로 실패하면 조용히 default 로 떨어진다.
+    """
+    v = os.environ.get(env_name)
+    if v:
+        return v
+    try:
+        if secret:
+            from prefect.blocks.system import Secret
+            return Secret.load(block_name).get()
+        from prefect.variables import Variable
+        return Variable.get(block_name)
+    except Exception:
+        return default
+
+
+def _dsn():
+    return resolve("POSTGRESQL_CATALOG_DSN", "catalog-dsn",
+                   default="postgresql://postgres:postgres@localhost:5432/catalog")
 
 DDL = """
 CREATE TABLE IF NOT EXISTS datasets (
@@ -51,7 +100,7 @@ CREATE TABLE IF NOT EXISTS datasets (
 
 
 def _conn():
-    return psycopg2.connect(DSN)
+    return psycopg2.connect(_dsn())
 
 
 # --------------------------------------------------------------------------- #
@@ -167,9 +216,9 @@ def _ext_counts(minio_path):
     """minio_path 아래 객체를 확장자별로 세어 {ext: count} 로 반환."""
     import boto3
     from urllib.parse import urlparse
-    ep = os.environ.get("MINIO_ENDPOINT", "http://localhost:9000")
-    ak = os.environ.get("MINIO_ACCESS_KEY", "minioadmin")
-    sk = os.environ.get("MINIO_SECRET_KEY", "minioadmin")
+    ep = resolve("MINIO_ENDPOINT", "minio_endpoint", default="http://localhost:9000", secret=False)
+    ak = resolve("MINIO_ACCESS_KEY", "minio-access-key", default="minioadmin")
+    sk = resolve("MINIO_SECRET_KEY", "minio-secret-key", default="minioadmin")
     s3 = boto3.client("s3", endpoint_url=ep,
                       aws_access_key_id=ak, aws_secret_access_key=sk)
     u = urlparse(minio_path)                       # s3://bucket/key/...

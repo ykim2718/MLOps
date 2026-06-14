@@ -1,12 +1,14 @@
+# 모든 자격증명/엔드포인트는 docker-compose.env 에 모아두고, 각 서비스가 env_file 로 읽는다.
+# (docker-compose.env 는 .gitignore 로 제외 — 새 환경에서는 docker-compose.env_example 를 복사해 채운다.)
+# 컨테이너 안에서 셸 변수를 쓰려면 $$VAR 로 적는다($$ → 컨테이너 셸이 env_file 값을 확장; $ 단독은 compose 가 먼저 해석함).
 services:
   # 1) 메타데이터 DB — prefect/mlflow/optuna/catalog 4개 논리 DB를 한 인스턴스에서 운영.
   #    init SQL 은 아래 configs.init_sql 로 yml 안에 인라인되어, 최초 기동 시 4개 DB 를 만든다.
+  #    POSTGRES_USER / POSTGRES_PASSWORD 는 docker-compose.env 에서 주입(POSTGRES_DB 는 미지정 → 기본 DB=postgres).
   postgres:
     image: postgres:16
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      # POSTGRES_DB 는 지정하지 않는다(기본 DB=postgres). 4개 DB 는 init_sql 이 생성.
+    env_file:
+      - docker-compose.env
     ports:
       # 호스트의 catalog.py / data_uploader.ps1 이 localhost:5432 로 접속할 수 있도록 노출.
       - "5432:5432"
@@ -17,20 +19,20 @@ services:
       - source: init_sql
         target: /docker-entrypoint-initdb.d/init.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER"]
       interval: 5s
       retries: 10
 
   # 2) 오브젝트 스토리지 — 실제 대용량 데이터/모델/아티팩트 (S3 호환). 콘솔: http://localhost:9001
+  #    MINIO_ROOT_USER / MINIO_ROOT_PASSWORD 는 docker-compose.env 에서 주입.
   minio:
     image: minio/minio
     command: server /data --console-address ":9001"
+    env_file:
+      - docker-compose.env
     ports:
       - "9000:9000"   # S3 API
       - "9001:9001"   # 웹 콘솔
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
     volumes:
       - minio-data:/data
     healthcheck:
@@ -41,14 +43,17 @@ services:
   # 2-1) MinIO 버킷 생성 + 버저닝 ON. 한 번 실행되고 종료(one-shot)된다.
   #      커뮤니티 콘솔에는 버킷/버저닝 메뉴가 없으므로 mc 로 자동 처리한다.
   #      --ignore-existing: 이미 있으면 에러 없이 통과. mlflow 버킷은 run_id 로 격리되어 버저닝 불필요.
+  #      자격증명은 docker-compose.env 의 $$MINIO_ROOT_USER / $$MINIO_ROOT_PASSWORD 로 확장한다.
   createbuckets:
     image: minio/mc
+    env_file:
+      - docker-compose.env
     depends_on:
       minio:
         condition: service_healthy
     entrypoint: >
       /bin/sh -c "
-      mc alias set local http://minio:9000 minioadmin minioadmin &&
+      mc alias set local http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD &&
       mc mb --ignore-existing local/datasets local/models local/mlflow &&
       mc version enable local/datasets &&
       mc version enable local/models
@@ -56,19 +61,19 @@ services:
     restart: "no"
 
   # 3) MLflow 추적 서버 + 모델 레지스트리. backend=postgres(mlflow DB), artifact=MinIO. UI: http://localhost:5000
+  #    MLFLOW_S3_ENDPOINT_URL / AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY 는 docker-compose.env 에서 주입.
+  #    backend-store-uri 의 계정은 $$POSTGRES_USER / $$POSTGRES_PASSWORD 로 확장한다.
   mlflow:
     image: ghcr.io/mlflow/mlflow:latest
     command: >
       bash -c "pip install --quiet psycopg2-binary boto3 &&
                mlflow server --host 0.0.0.0 --port 5000
-               --backend-store-uri postgresql://postgres:postgres@postgres:5432/mlflow
+               --backend-store-uri postgresql://$$POSTGRES_USER:$$POSTGRES_PASSWORD@postgres:5432/mlflow
                --artifacts-destination s3://mlflow"
+    env_file:
+      - docker-compose.env
     ports:
       - "5000:5000"
-    environment:
-      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
-      AWS_ACCESS_KEY_ID: minioadmin
-      AWS_SECRET_ACCESS_KEY: minioadmin
     depends_on:
       postgres:
         condition: service_healthy
@@ -76,31 +81,44 @@ services:
         condition: service_healthy
 
   # 4) Prefect 서버 + 대시보드(UI). backend=postgres(prefect DB). 브라우저: http://localhost:4200
-  server:
+  #    PREFECT_SERVER_DATABASE_CONNECTION_URL 은 docker-compose.env 에서 주입.
+  prefect_server:
     image: prefecthq/prefect:3-latest
     command: prefect server start --host 0.0.0.0
+    env_file:
+      - docker-compose.env
     ports:
       - "4200:4200"
-    environment:
-      PREFECT_SERVER_DATABASE_CONNECTION_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/prefect
     depends_on:
       postgres:
         condition: service_healthy
 
   # 5) 워커: 실제로 잡을 실행. 동시 실행 수를 여기서 제한.
-  worker:
+  #    (A) 중앙 실행 모델: user는 잡 제출만 하고 이 워커가 대신 실행 → client computer 엔 자격증명 불필요.
+  #        그래서 워커에 자격증명을 주입한다. 단, 워커는 도커 네트워크 안이라
+  #        엔드포인트는 서비스명(minio / postgres)을 쓴다(localhost 아님).
+  prefect_worker:
     image: prefecthq/prefect:3-latest
-    # default 라는 process work pool 에서 잡을 가져와 실행.
-    # --limit 8 = 한 워커가 동시에 8개까지만 실행(자원에 맞춰 조정).
-    command: >
-      bash -c "prefect work-pool create default --type process --overwrite &&
-               prefect worker start --pool default --limit 8"
+    env_file:
+      - docker-compose.env          # 자격증명 주입: MINIO_ACCESS_KEY/SECRET, AWS_*, POSTGRES_*
     environment:
-      PREFECT_API_URL: http://server:4200/api
+      # PREFECT_API_URL 은 호스트(localhost:4200)와 변수명이 겹쳐 충돌하므로 env_file 이 아니라 여기서 지정.
+      PREFECT_API_URL: http://prefect_server:4200/api
+      # env_file 의 MINIO_ENDPOINT(localhost)를 컨테이너 주소로 덮어쓴다(environment 가 env_file 보다 우선).
+      MINIO_ENDPOINT: http://minio:9000
+    # POSTGRESQL_CATALOG_DSN 은 비밀번호가 들어가므로, env_file 의 계정으로 컨테이너 주소 DSN 을 만들어 export.
+    # default work pool 에서 잡을 가져와 실행. --limit 8 = 동시 최대 8개(자원에 맞춰 조정).
+    command: >
+      bash -c "export POSTGRESQL_CATALOG_DSN=postgresql://$$POSTGRES_USER:$$POSTGRES_PASSWORD@postgres:5432/catalog &&
+               prefect work-pool create default --type process --overwrite &&
+               prefect worker start --pool default --limit 8"
+    volumes:
+      - ./:/app                     # user 코드(catalog.py, example/)를 워커에서 접근(work-pool 실행 시)
+    working_dir: /app
     depends_on:
-      - server
-    # server 가 늦게 떠서 worker 가 API(:4200) 연결에 실패해 종료돼도,
-    # 자동으로 다시 띄워 server 가 준비될 때까지 재시도한다.
+      - prefect_server
+    # prefect_server 가 늦게 떠서 prefect_worker 가 API(:4200) 연결에 실패해 종료돼도,
+    # 자동으로 다시 띄워 prefect_server 가 준비될 때까지 재시도한다.
     # (사용자가 직접 멈춘 경우에는 재시작하지 않음)
     restart: unless-stopped
 
