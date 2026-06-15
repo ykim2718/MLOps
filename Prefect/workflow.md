@@ -244,7 +244,7 @@ study.optimize(objective, n_trials=20)
 - **자동 재시도 · 상태 관리**: 태스크 실패 시 재시도(retry), 캐싱, 타임아웃 등을 선언적으로 설정할 수 있어 파이프라인이 견고해집니다.
 - **관측성(Observability) 대시보드**: 웹 UI(기본 http://localhost:4200)에서 모든 flow/task run의 상태·로그·소요 시간·실패 지점을 실시간으로 확인할 수 있습니다.
 - **유연한 스케줄링 & 트리거**: cron/interval 스케줄, 이벤트 기반 트리거, 수동 실행(1회성)까지 다양하게 지원합니다.
-- **분산 실행(Worker / Work Pool)**: 워커와 work pool 구조로 잡을 분리 실행하고 **동시 실행 수를 제어**할 수 있어, 여러 팀원의 AI 학습 잡을 한 서버에서 관리하기에 적합합니다. (로컬 PC에서 워커를 붙이는 방법은 [prefect.md — Appendix B](prefect.md#appendix-b-attaching-a-worker-to-a-work-pool-from-a-local-pc) 참고)
+- **분산 실행(Worker / Work Pool)**: 워커와 work pool 구조로 잡을 분리 실행하고 **동시 실행 수를 제어**할 수 있어, 여러 팀원의 AI 학습 잡을 한 서버에서 관리하기에 적합합니다. (로컬 컴퓨터에서 워커를 붙이는 방법은 [prefect.md — Appendix D](prefect.md#appendix-d-worker-attachment-to-a-work-pool-from-a-user-computer) 참고)
 - **하이브리드 아키텍처**: 메타데이터(상태·로그)는 중앙 서버/DB가 관리하고, 실제 코드와 데이터는 사용자 인프라에서 실행되어 보안·확장성에 유리합니다.
 - **다른 ML 도구와의 조합**: MLflow·Optuna·MinIO 등과 함께 써서 "실행 오케스트레이션은 Prefect, 실험 추적/튜닝/데이터 보관은 각 도구"로 역할을 나누기 좋습니다.
 
@@ -574,7 +574,7 @@ import boto3
 import catalog                      # catalog.py 헬퍼 (Appendix B)
 
 s3 = boto3.client("s3", endpoint_url="http://localhost:9000",
-                  aws_access_key_id="minioadmin", aws_secret_access_key="minioadmin")
+                  aws_access_key_id="<ACCESS_KEY>", aws_secret_access_key="<SECRET_KEY>")
 
 # 1) 검색: dataset_id + metadata 키로 카탈로그 조회 (어떤 버전들이 있는지 확인)
 for row in catalog.find("sydney_202605", fab="fab2"):
@@ -886,7 +886,7 @@ import mlflow, boto3
 
 # MinIO(S3 호환) 클라이언트
 s3 = boto3.client("s3", endpoint_url="http://localhost:9000",
-                  aws_access_key_id="minioadmin", aws_secret_access_key="minioadmin")
+                  aws_access_key_id="<ACCESS_KEY>", aws_secret_access_key="<SECRET_KEY>")
 
 def download(uri, local):  # s3://bucket/key -> local
     bucket, key = uri[5:].split("/", 1); s3.download_file(bucket, key, local)
