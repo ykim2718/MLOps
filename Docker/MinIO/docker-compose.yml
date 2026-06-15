@@ -1,11 +1,10 @@
 # MinIO — 제어 노드(머신 A)의 오브젝트 스토리지(S3 호환).
-# createbuckets 가 최초 기동 시 datasets/models/mlflow 버킷을 만들고 datasets/models 에 버저닝을 켠다.
+# 서버 기동 + 버킷/버저닝 설정을 한 서비스에서 처리한다(minio/minio 이미지에 mc 클라이언트가 포함됨).
 # 제어 노드 안 mlflow 등이 'minio' 라는 서비스명으로 접속하도록 공유 네트워크 mlops(external)에 붙는다.
-# (먼저 set_docker.ps1 이 'docker network create mlops' 로 만든다.)
+# (먼저 docker network create mlops 로 네트워크를 만든다.)
 services:
   minio:
     image: minio/minio
-    command: server /data --console-address ":9001"
     env_file:
       - docker-compose.env          # MINIO_ROOT_USER / MINIO_ROOT_PASSWORD 를 주입한다.
     ports:
@@ -13,6 +12,19 @@ services:
       - "9001:9001"                 # 웹 콘솔 — 사람이 브라우저로 접속하는 GUI.
     volumes:
       - minio-data:/data            # 데이터를 named volume 에 영속 저장한다(컨테이너를 지워도 보존).
+    # 서버를 백그라운드로 띄우고 → 준비되면 mc 로 버킷 생성 + 버저닝 → wait 로 서버를 포그라운드 유지.
+    # until ... 로 서버가 뜰 때까지 재시도한다(컨테이너 안이라 엔드포인트는 localhost:9000).
+    # --ignore-existing 으로 이미 있으면 통과(멱등). mlflow 버킷은 run_id 로 격리되어 버저닝이 불필요하다.
+    # $$VAR 는 compose 가 $ 로 바꿔 컨테이너 셸이 env_file 값으로 확장한다.
+    entrypoint: >
+      /bin/sh -c "
+      minio server /data --console-address ':9001' &
+      until mc alias set local http://localhost:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD 2>/dev/null; do sleep 1; done &&
+      mc mb --ignore-existing local/datasets local/models local/mlflow &&
+      mc version enable local/datasets &&
+      mc version enable local/models &&
+      wait
+      "
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
       interval: 5s
@@ -21,31 +33,10 @@ services:
       - mlops
     restart: unless-stopped
 
-  # 버킷 생성 + 버저닝 ON 을 한 번 실행하고 종료한다(one-shot).
-  # 커뮤니티 콘솔에는 버킷/버저닝 메뉴가 없으므로 mc 로 자동 처리한다.
-  # --ignore-existing 으로 이미 있으면 에러 없이 통과한다. mlflow 버킷은 run_id 로 격리되어 버저닝이 불필요하다.
-  createbuckets:
-    image: minio/mc
-    env_file:
-      - docker-compose.env
-    depends_on:
-      minio:
-        condition: service_healthy
-    entrypoint: >
-      /bin/sh -c "
-      mc alias set local http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD &&
-      mc mb --ignore-existing local/datasets local/models local/mlflow &&
-      mc version enable local/datasets &&
-      mc version enable local/models
-      "
-    networks:
-      - mlops
-    restart: "no"
-
 volumes:
   minio-data:
 
-# 제어 노드 서비스들이 공유하는 외부 네트워크. set_docker.ps1 이 미리 생성한다.
+# 제어 노드 서비스들이 공유하는 외부 네트워크. 미리 docker network create mlops 로 만든다.
 networks:
   mlops:
     external: true

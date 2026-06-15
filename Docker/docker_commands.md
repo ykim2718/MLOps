@@ -57,6 +57,28 @@ docker compose -f <file>.yml up -d --scale <service>=3
 ## 6. Exec & One-off
 
 ```powershell
-docker compose exec <service> bash                 # 떠 있는 컨테이너 안으로 셸 접속한다.
+docker compose exec <service> <command>            # 떠 있는 컨테이너 안에서 명령을 1회 실행한다.
 docker compose run --rm <service> <command>        # 1회용 컨테이너로 명령을 실행하고 종료한다.
 ```
+
+## 7. Container Shell — 들어가기 / 나오기
+
+떠 있는 컨테이너 안으로 **셸을 띄워 직접 들어가** 파일을 확인하거나 명령을 실행할 수 있습니다.
+
+```powershell
+# 들어가기 — 떠 있는 컨테이너의 대화형 셸에 접속한다(-it = 입력 가능한 터미널).
+docker compose exec -it <service> bash             # bash 가 없는 경우 sh 로 대체한다.
+docker compose exec -it <service> sh               # alpine 등 경량 이미지(bash 미포함)
+
+# 컨테이너 이름으로 직접 접속(compose 밖에서 — docker ps 로 이름 확인).
+docker exec -it <container> bash
+```
+
+나오기는 컨테이너를 멈추지 않고 셸만 빠져나옵니다.
+
+```text
+exit            # 셸 종료 후 호스트로 복귀(또는 Ctrl-D). 컨테이너는 계속 떠 있다.
+Ctrl-P, Ctrl-Q  # docker attach 로 붙은 경우, 컨테이너를 멈추지 않고 분리(detach)한다.
+```
+
+> `exec` 로 들어간 셸을 `exit` 하면 그 셸 세션만 끝나고 **컨테이너는 계속 실행** 됩니다. 컨테이너 자체를 멈추려면 [§2](#2-start--stop) 의 `docker compose stop` / `down` 을 씁니다. 셸이 없는 컨테이너에는 1회용 셸 컨테이너로 같은 네트워크에 붙어 접근합니다(`docker run -it --rm --network <network> <image> sh`).

@@ -26,7 +26,7 @@ docker network create mlops
 docker compose up -d
 ```
 
-실행 후 MLflow UI 는 **http://localhost:5000** 에서 열립니다(다른 컴퓨터에서는 `http://<MLflow 호스트>:5000`).
+실행 후 MLflow UI 는 **`http://<MLflow 호스트>:5000`** 에서 열립니다(같은 컴퓨터에서는 `localhost`).
 
 ```yaml
 services:
@@ -63,7 +63,7 @@ networks:
 ```python
 import mlflow
 
-mlflow.set_tracking_uri("http://localhost:5000")   # 다른 컴퓨터면 http://<MLflow 호스트>:5000
+mlflow.set_tracking_uri("http://<MLflow 호스트>:5000")   # 같은 PC 면 localhost
 with mlflow.start_run(run_name="train"):
     mlflow.log_params({"lr": 0.01, "n_estimators": 150})   # → mlflow DB
     mlflow.log_metric("train_acc", 0.97)                   # → mlflow DB
@@ -86,7 +86,7 @@ with mlflow.start_run(run_name="train"):
 import mlflow
 from mlflow.tracking import MlflowClient
 
-mlflow.set_tracking_uri("http://localhost:5000")
+mlflow.set_tracking_uri("http://<MLflow 호스트>:5000")   # 같은 PC 면 localhost
 
 # 학습 run 에서 나온 모델을 레지스트리에 "이름 + 버전" 으로 등록한다.
 mlflow.register_model(model_uri="runs:/<run_id>/model", name="mnist-classifier")

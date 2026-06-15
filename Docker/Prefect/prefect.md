@@ -44,7 +44,7 @@ docker network create mlops
 docker compose -f docker-compose.server.yml up -d
 ```
 
-실행 후 Prefect 대시보드는 **http://localhost:4200** 에서 열립니다(다른 컴퓨터에서는 `http://<머신 A 주소>:4200`).
+실행 후 Prefect 대시보드는 **`http://<머신 A 주소>:4200`** 에서 열립니다(같은 컴퓨터에서는 `localhost`).
 
 ```yaml
 # docker-compose.server.yml
