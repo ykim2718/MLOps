@@ -1,6 +1,6 @@
 # AI/ML Workflow Automation — Prefect + MinIO + MLflow + Optuna + PostgreSQL
 
-Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄우고 실행하기 위한 환경입니다. 이 문서는 **전체 워크플로우의 인덱스(개요)** 로, 각 도구의 상세는 해당 컴포넌트 문서로 연결합니다.
+Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄우고 실행하기 위한 환경입니다. 이 문서는 **전체 워크플로우의 인덱스 (개요)** 로, 각 도구의 상세는 해당 컴포넌트 문서로 연결합니다.
 
 이 프로젝트는 **Prefect 를 "실행 오케스트레이터" 로 두고**, 실험 추적·하이퍼파라미터 튜닝·데이터 보관/버전관리를 담당하는 다른 도구들과 **역할을 나눠 함께 쓰는 것** 을 목적으로 합니다. "언제·무엇을·어떤 순서로 실행할지" 는 Prefect 가 맡고, "그 실행에서 나온 실험 기록·튜닝 결과·데이터/모델" 은 각 도구가 맡습니다.
 
@@ -8,30 +8,30 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄우고 실행하기 
 
 ## 1. Goals
 
-이 워크플로우는 여러 팀원이 한 서버를 공유하며 AI 학습을 돌릴 때, **데이터·실험·결과를 잃지 않고 추적·재현·공유** 하기 위한 다음을 목표로 합니다.
+이 워크플로우는 여러 팀원이 한 server 를 공유하며 AI 학습을 돌릴 때, **데이터·실험·결과를 잃지 않고 추적·재현·공유** 하기 위한 다음을 목표로 합니다.
 
-1. **Lineage(계보 추적)** — 데이터·코드·결과를 양방향으로 역추적합니다(데이터+코드 → 결과, 결과 → 데이터+코드).
-2. **Monitoring(모니터링)** — Prefect / MLflow / MinIO 대시보드로 진행·결과 현황을 한눈에 봅니다.
-3. **Reproducibility(재현성)** — 데이터 버전·모델 구조·하이퍼파라미터·시드를 고정해 동일 결과를 보장합니다.
-4. **Reusability(재사용성)** — 한 번 만든 워크플로우·피처를 다른 프로젝트에서도 다시 씁니다.
-5. **Persistence(영속성)** — 학습된 모델·상태를 스토리지에 안전하게 저장·유지합니다.
-6. **Resource Management(자원 관리)** — GPU/CPU 공유 자원을 work pool 과 `--limit` 으로 분배해 충돌 없이 돌립니다.
-7. **Scheduled Automation(예약형 자동화)** — cron/interval 스케줄로 무인 실행을 돌립니다.
-8. **Data Versioning(데이터 버전 관리)** — 데이터 카탈로그로 검색·선택적 다운로드를 제공합니다(메타데이터는 PostgreSQL `catalog` DB, 실제 데이터는 MinIO).
+1. **Lineage (계보 추적)** — 데이터·코드·결과를 양방향으로 역추적합니다 (데이터+코드 → 결과, 결과 → 데이터+코드).
+2. **Monitoring (모니터링)** — Prefect / MLflow / MinIO 대시보드로 진행·결과 현황을 한눈에 봅니다.
+3. **Reproducibility (재현성)** — 데이터 버전·모델 구조·하이퍼파라미터·시드를 고정해 동일 결과를 보장합니다.
+4. **Reusability (재사용성)** — 한 번 만든 워크플로우·피처를 다른 프로젝트에서도 다시 씁니다.
+5. **Persistence (영속성)** — 학습된 모델·상태를 스토리지에 안전하게 저장·유지합니다.
+6. **Resource Management (자원 관리)** — GPU/CPU 공유 자원을 work pool 과 `--limit` 으로 분배해 충돌 없이 돌립니다.
+7. **Scheduled Automation (예약형 자동화)** — cron/interval 스케줄로 무인 실행을 돌립니다.
+8. **Data Versioning (데이터 버전 관리)** — 데이터 catalog 로 검색·선택적 다운로드를 제공합니다 (메타데이터는 PostgreSQL `catalog` DB, 실제 데이터는 MinIO).
 
 ## 2. Stack
 
-스택의 서비스는 도커로 실행합니다. 각 컴포넌트는 자기 폴더(`Docker/<컴포넌트>/`)의 `docker-compose.yml` 로 띄우며, 상세 설치·사용법은 아래 문서를 참고합니다.
+스택의 서비스는 도커로 실행합니다. 각 컴포넌트는 자기 폴더 (`Docker/<컴포넌트>/`) 의 `docker-compose.yml` 로 띄우며, 상세 설치·사용법은 아래 문서를 참고합니다.
 
-| Component | Service | Role | Dashboard | 상세 문서 |
+| Component | Service | Role | Dashboard | Docs |
 |-----------|---------|------|-----------|-----------|
-| **Prefect** | `prefect_server` · `prefect_worker` | 오케스트레이션(파이프라인 실행/스케줄링). 서버는 잡 수집·UI, 워커는 잡 실행을 맡습니다. | http://localhost:4200 | [prefect.md](../Docker/Prefect/prefect.md) |
-| **MinIO** | `minio` | 대용량 데이터/모델/아티팩트 저장(S3 호환). 버킷은 `datasets`·`models`·`mlflow` 입니다. | http://localhost:9001 | [minio.md](../Docker/MinIO/minio.md) |
-| **MLflow** | `mlflow` | 실험(params·metrics) 추적, 모델 레지스트리. backend=`postgres`, artifact=`minio`. | http://localhost:5000 | [mlflow.md](../Docker/MLflow/mlflow.md) |
+| **Prefect** | `prefect_server` · `prefect_worker` | 오케스트레이션 (파이프라인 실행/스케줄링). server 는 job 수집·UI, worker 는 job 실행을 맡습니다. | http://localhost:4200 | [prefect.md](../Docker/Prefect/prefect.md) |
+| **MinIO** | `minio` | 대용량 데이터/모델/아티팩트 저장 (S3 호환). 버킷은 `datasets`·`models`·`mlflow` 입니다. | http://localhost:9001 | [minio.md](../Docker/MinIO/minio.md) |
+| **MLflow** | `mlflow` | 실험 (params·metrics) 추적, 모델 레지스트리. backend=`postgres`, artifact=`minio`. | http://localhost:5000 | [mlflow.md](../Docker/MLflow/mlflow.md) |
 | **PostgreSQL** | `postgres` | 모든 도구의 메타데이터 DB. `prefect`·`mlflow`·`optuna`·`catalog` 4개 논리 DB 를 운영합니다. | :5432 | [postgresql.md](../Docker/PostgreSQL/postgresql.md) |
-| **Optuna** | (라이브러리) | 하이퍼파라미터 튜닝(trial 탐색). study storage 로 `postgres` 의 `optuna` DB 를 씁니다. | — | [§5](#5-optuna) |
+| **Optuna** | (라이브러리) | 하이퍼파라미터 튜닝 (trial 탐색). study storage 로 `postgres` 의 `optuna` DB 를 씁니다. | — | [§5](#5-optuna) |
 
-> 이 스택은 **제어 노드(머신 A)** 에 `postgres`·`minio`·`mlflow`·`prefect_server` 를 모아 띄우고, **워커 노드(머신 B)** 에 `prefect_worker` 를 띄워 네트워크로 붙이는 remote worker 구조입니다(상세는 [prefect.md](../Docker/Prefect/prefect.md)).
+> 이 스택은 **Control Node (머신 A)** 에 `postgres`·`minio`·`mlflow`·`prefect_server` 를 모아 띄우고, **Worker Node (머신 B)** 에 `prefect_worker` 를 띄워 네트워크로 붙이는 remote worker 구조입니다 (상세는 [prefect.md](../Docker/Prefect/prefect.md)).
 
 ## 3. Data Flow
 
@@ -48,13 +48,13 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄우고 실행하기 
    └─ data/models ────▶ [ MinIO ]
 ```
 
-> 공통 원칙: **DB = 작은 구조화 메타데이터, 대용량 바이너리 = MinIO + 경로(URI) 참조.** 모델 가중치·데이터셋·plot 같은 실제 데이터는 DB 에 넣지 않고 MinIO 에 두며, DB 에는 그 경로·버전ID·해시만 기록합니다.
+> 공통 원칙: **DB = 작은 구조화 메타데이터, 대용량 바이너리 = MinIO + 경로 (URI) 참조.** 모델 가중치·데이터셋·plot 같은 실제 데이터는 DB 에 넣지 않고 MinIO 에 두며, DB 에는 그 경로·버전ID·해시만 기록합니다.
 
 ---
 
 ## 4. Pipeline
 
-`data preparation(dp) → feature engineering(fe) → training(train) → test` 순으로 진행하며, 각 단계의 산출물이 다음 단계의 입력이 됩니다. 각 단계는 Prefect `@task` 로 감싸고 `@flow` 가 순서를 강제합니다(앞 단계 산출물이 있어야 다음 단계가 실행됩니다). 각 단계를 오케스트레이션하는 방식은 아래 [§7. Orchestrator](#7-orchestrator) 를 참고합니다.
+`data preparation(dp) → feature engineering(fe) → training(train) → test` 순으로 진행하며, 각 단계의 산출물이 다음 단계의 입력이 됩니다. 각 단계는 Prefect `@task` 로 감싸고 `@flow` 가 순서를 강제합니다 (앞 단계 산출물이 있어야 다음 단계가 실행됩니다). 각 단계를 오케스트레이션하는 방식은 아래 [§7. Orchestrator](#7-orchestrator) 를 참고합니다.
 
 ```
 [train raw] → train_dp → [transformed] → train_fe → [feature + fe_train.json]
@@ -64,19 +64,19 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄우고 실행하기 
            → test(model/ 로드) → [test.json] → test_eval → [test_eval.json]
 ```
 
-> **train ↔ test 연결의 핵심**: test 는 train 에서 두 가지를 그대로 가져옵니다 — ① `model/`(학습된 모델), ② `fe_train.json`(train 에 fit 된 변환기). 변환을 test 에 새로 fit 하면 train/test skew 가 생기므로, fe 는 train 에서 fit 하고 test 에는 그 결과를 적용합니다.
+> **train ↔ test 연결의 핵심**: test 는 train 에서 두 가지를 그대로 가져옵니다 — ① `model/` (학습된 모델), ② `fe_train.json` (train 에 fit 된 변환기). 변환을 test 에 새로 fit 하면 train/test skew 가 생기므로, fe 는 train 에서 fit 하고 test 에는 그 결과를 적용합니다.
 
 ### Every Stage Uses MinIO, MLflow, Optuna
 
-모든 단계(`dp`·`fe`·`train`·`test`·`eval`)를 세 도구로 동일하게 감쌉니다.
+모든 단계 (`dp`·`fe`·`train`·`test`·`eval`) 를 세 도구로 동일하게 감쌉니다.
 
-- **MinIO** — 각 단계의 입력을 버킷에서 내려받고(download), 출력을 버킷에 올리며(upload), `catalog` 에 버전·계보를 기록합니다.
+- **MinIO** — 각 단계의 입력을 버킷에서 내려받고 (download), 출력을 버킷에 올리며 (upload), `catalog` 에 버전·계보를 기록합니다.
 - **MLflow** — 각 단계의 파라미터·지표·산출물을 같은 run 아래 로깅합니다.
-- **Optuna** — 각 단계의 튜닝 가능한 설정(`optuna.json`)을 탐색합니다(test 는 학습에서 고른 best 설정을 재사용합니다).
+- **Optuna** — 각 단계의 튜닝 가능한 설정 (`optuna.json`) 을 탐색합니다 (test 는 학습에서 고른 best 설정을 재사용합니다).
 
 ## 5. Optuna
 
-Optuna 는 하이퍼파라미터를 trial 단위로 탐색하는 튜닝 도구입니다. `objective`(목적 함수)를 매 trial 마다 호출해 하이퍼파라미터를 제안받고 점수를 반환받으며, 그 점수로 다음 trial 을 더 똑똑하게 고릅니다. 이 스택에는 Optuna 전용 도커 서비스가 없고, **라이브러리로 코드에 포함** 되어 study 기록만 PostgreSQL 의 `optuna` DB 에 저장합니다.
+Optuna 는 하이퍼파라미터를 trial 단위로 탐색하는 튜닝 도구입니다. `objective` (목적 함수) 를 매 trial 마다 호출해 하이퍼파라미터를 제안받고 점수를 반환받으며, 그 점수로 다음 trial 을 더 똑똑하게 고릅니다. 이 스택에는 Optuna 전용 도커 서비스가 없고, **라이브러리로 코드에 포함** 되어 study 기록만 PostgreSQL 의 `optuna` DB 에 저장합니다.
 
 ```python
 import optuna
@@ -90,9 +90,9 @@ study = optuna.create_study(
 study.optimize(objective, n_trials=20)
 ```
 
-- **공유 DB(기본)** — `postgresql://.../optuna`. 여러 워커·여러 PC 가 하나의 study 를 분산 병렬로 탐색하거나 기록을 중앙에 보존할 때 유리합니다.
-- **로컬 파일(대안)** — `sqlite:///optuna.db`. 단일 PC 에서 가볍게 쓸 때 적합합니다.
-- Optuna 가 DB 에 넣는 것은 trial 메타데이터(파라미터·점수)뿐이고, 모델 가중치 같은 실제 산출물은 MinIO 에 저장합니다.
+- **공유 DB (기본)** — `postgresql://.../optuna`. 여러 worker·여러 PC 가 하나의 study 를 분산 병렬로 탐색하거나 기록을 중앙에 보존할 때 유리합니다.
+- **로컬 파일 (대안)** — `sqlite:///optuna.db`. 단일 PC 에서 가볍게 쓸 때 적합합니다.
+- Optuna 가 DB 에 넣는 것은 trial 메타데이터 (파라미터·점수) 뿐이고, 모델 가중치 같은 실제 산출물은 MinIO 에 저장합니다.
 
 ---
 
@@ -100,17 +100,17 @@ study.optimize(objective, n_trials=20)
 
 여러 데이터셋·모델을 만들고 비교·재현하려면 산출물을 **버전 관리** 하고 무엇이 어디 있는지 **검색** 할 수 있어야 합니다. 이 스택은 실제 데이터를 MinIO 에, 가벼운 메타데이터·버전 이력·계보를 PostgreSQL `catalog` DB 에 두는 방식으로 처리합니다.
 
-`catalog` 은 `catalog` DB 안의 테이블 하나(`datasets`)이며, MinIO 의 실제 데이터를 가리키는 **메타데이터 장부** 입니다. 이 장부를 다루는 **카탈로그 접근 계층**(테이블 생성·버전 등록·검색)이 워크플로우에서 데이터의 위치·버전·계보를 기록합니다.
+`catalog` 은 `catalog` DB 안의 테이블 하나 (`datasets`) 이며, MinIO 의 실제 데이터를 가리키는 **메타데이터 장부** 입니다. 이 장부를 다루는 **catalog 접근 계층** (테이블 생성·버전 등록·검색) 이 워크플로우에서 데이터의 위치·버전·계보를 기록합니다.
 
 ### Versioning
 
-데이터셋을 갱신할 때 이전 버전을 덮어쓰지 않고 보존합니다. 버전을 경로에 박아(`.../v1/`, `.../v2/`) 새 버전은 새 경로로 올리고, `catalog` 테이블에는 버전마다 새 레코드를 추가합니다.
+데이터셋을 갱신할 때 이전 버전을 덮어쓰지 않고 보존합니다. 버전을 경로에 박아 (`.../v1/`, `.../v2/`) 새 버전은 새 경로로 올리고, `catalog` 테이블에는 버전마다 새 레코드를 추가합니다.
 
 - **MinIO 경로 규칙**: `s3://datasets/<DatasetId>/<Version>/...`
-- **이름 규칙(`DatasetId`·`Version`)**: 소문자·숫자·`_`·`.` 만 사용합니다(공백·대문자·`-` 불가). 이 값이 그대로 MinIO 경로와 catalog 키가 되기 때문입니다.
+- **이름 규칙 (`DatasetId`·`Version`)**: 소문자·숫자·`_`·`.` 만 사용합니다 (공백·대문자·`-` 불가). 이 값이 그대로 MinIO 경로와 catalog 키가 되기 때문입니다.
 
 ```python
-import catalog                       # 카탈로그 접근 계층
+import catalog                       # catalog 접근 계층
 
 catalog.ensure_schema()              # datasets 테이블 멱등 생성(flow 시작 시 1회)
 catalog.register("sydney_202605", "v2", "s3://datasets/sydney_202605/v2/",
@@ -121,7 +121,7 @@ rows = catalog.find("sydney_202605", fab="fab2")               # 검색(dataset_
 
 ### Lineage
 
-`catalog` 레코드의 `prefect_run_id`(데이터를 만든 실행)와, MLflow run 태그에 박는 입력 데이터 버전을 **서로 참조** 해 두면 데이터 ↔ 코드 ↔ 결과를 양방향으로 추적할 수 있습니다.
+`catalog` 레코드의 `prefect_run_id` (데이터를 만든 실행) 와, MLflow run 태그에 박는 입력 데이터 버전을 **서로 참조** 해 두면 데이터 ↔ 코드 ↔ 결과를 양방향으로 추적할 수 있습니다.
 
 ```
 데이터(버전) ──사용──▶ 코드(Prefect run) ──생성──▶ 결과(MLflow run / 모델)
@@ -130,18 +130,18 @@ rows = catalog.find("sydney_202605", fab="fab2")               # 검색(dataset_
 ```
 
 - **순방향** — 어떤 데이터 버전을 어떤 flow run 이 만들었고, 그 run 에서 나온 MLflow run·모델이 무엇인지 추적합니다.
-- **역방향** — 운영 모델의 MLflow run 태그(`input_dataset`/`input_version`) → `catalog.find(...)` → `minio_path` 로 원본까지 거슬러 올라갑니다.
+- **역방향** — 운영 모델의 MLflow run 태그 (`input_dataset`/`input_version`) → `catalog.find(...)` → `minio_path` 로 원본까지 거슬러 올라갑니다.
 
 ### Output Placement & Name Collision
 
-전 팀원이 같은 MinIO 버킷에 결과물을 쓰므로 이름이 겹칠 수 있습니다. MLflow run(`run_id`)·Prefect run(`id`)·Optuna trial(`study_name`+`number`)은 **자동으로 격리** 되고, 직접 저장하는 파일만 경로에 고유 키를 넣어 분리합니다.
+전 팀원이 같은 MinIO 버킷에 결과물을 쓰므로 이름이 겹칠 수 있습니다. MLflow run (`run_id`)·Prefect run (`id`)·Optuna trial (`study_name`+`number`) 은 **자동으로 격리** 되고, 직접 저장하는 파일만 경로에 고유 키를 넣어 분리합니다.
 
 ```python
-# member / experiment 는 잡 설정·환경변수·flow 파라미터 중 하나로 받는다.
+# member / experiment 는 job 설정·환경변수·flow 파라미터 중 하나로 받는다.
 out_uri = f"s3://models/{member}/{experiment}/{run_id}/model.pt"
 ```
 
-| 결과물 | 저장 위치 |
+| Artifact | Location |
 |--------|-----------|
 | 학습된 모델 가중치 | MinIO `s3://models/...` |
 | MLflow params·metrics | PostgreSQL `mlflow` DB |
@@ -154,7 +154,7 @@ out_uri = f"s3://models/{member}/{experiment}/{run_id}/model.pt"
 
 ## 7. Orchestrator
 
-오케스트레이터 flow 는 잡 설정(member·experiment·n_trials 등)을 읽어 각 단계(`train_dp` … `test_eval`)를 `@task` 로 감싸 순서대로 실행하고, 각 단계 산출물을 MinIO 에 업로드한 뒤 카탈로그에 등록합니다.
+오케스트레이터 flow 는 job 설정 (member·experiment·n_trials 등) 을 읽어 각 단계 (`train_dp` … `test_eval`) 를 `@task` 로 감싸 순서대로 실행하고, 각 단계 산출물을 MinIO 에 업로드한 뒤 catalog 에 등록합니다.
 
 ```python
 @flow(name="ai-full-pipeline")
@@ -167,13 +167,13 @@ def full_pipeline():
 ```
 
 - **버전**: `ctx["version"] = "run-<runid8>"` — 한 번 돌릴 때마다 새 데이터 버전이 생기고 `prefect_run_id` 로 계보가 연결됩니다.
-- **graceful**: catalog/MinIO 가 떠 있지 않아도(스택 미기동) 등록·업로드는 경고만 출력하고 로컬 파이프라인은 끝까지 실행됩니다.
+- **graceful**: catalog/MinIO 가 떠 있지 않아도 (스택 미기동) 등록·업로드는 경고만 출력하고 로컬 파이프라인은 끝까지 실행됩니다.
 
 ### Execution
 
-서버 연결(`PREFECT_API_URL`)을 설정한 뒤(상세는 [prefect.md](../Docker/Prefect/prefect.md)), 두 방식으로 실행합니다.
+server 연결 (`PREFECT_API_URL`) 을 설정한 뒤 (상세는 [prefect.md](../Docker/Prefect/prefect.md)), 두 방식으로 실행합니다.
 
 - **즉시 1회 실행** — 플로우를 직접 호출하면 그 자리에서 한 번 실행되고 종료됩니다.
-- **deployment 등록 후 트리거** — `full_pipeline.serve(name="...")` 로 등록·대기시킨 뒤, `prefect deployment run "ai-full-pipeline/<deployment-name>"` 으로 on-demand/스케줄 실행합니다.
+- **deployment 등록 후 trigger** — `full_pipeline.serve(name="...")` 로 등록·대기시킨 뒤, `prefect deployment run "ai-full-pipeline/<deployment-name>"` 으로 on-demand/스케줄 실행합니다.
 
-> 빠른 단발 테스트는 즉시 실행을, 반복 실행·스케줄링·여러 팀원 잡 관리는 deployment 방식을 씁니다. 실행 결과는 Prefect 대시보드(http://localhost:4200)의 Flow Runs 에서 확인합니다.
+> 빠른 단발 테스트는 즉시 실행을, 반복 실행·스케줄링·여러 팀원 job 관리는 deployment 방식을 씁니다. 실행 결과는 Prefect 대시보드 (http://localhost:4200) 의 Flow Runs 에서 확인합니다.
