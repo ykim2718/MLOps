@@ -1,20 +1,23 @@
-# Prefect 스택 리셋 후 재기동 스크립트
+# Prefect 기동 스크립트 — 역할(server/worker)을 골라 해당 compose 파일을 띄운다.
 #
-# 주의: 이 프로젝트(compose)와 무관한 컨테이너(mongo, redis, flask 등)는 건드리지 않는다.
+#   .\set_docker.ps1                 # 기본값: server (제어 노드, 머신 A)
+#   .\set_docker.ps1 -Role worker    # worker (워커 노드, 머신 B)
+#
+# server 는 제어 노드의 다른 서비스(postgres/minio/mlflow)와 서비스명으로 통신하므로 공유 네트워크 mlops 가 필요하다.
+# worker 는 다른 컴퓨터에서 CONTROL_PLANE_HOST(머신 A IP)로 접속하므로 mlops 네트워크가 필요 없다.
+param(
+    [ValidateSet('server', 'worker')]
+    [string]$Role = 'server'
+)
 
-# 0) compose 스택이 떠 있으면 깔끔히 내린다 (compose 컨테이너는 이걸로 관리, 볼륨은 유지)
-docker compose down
+$compose = "docker-compose.$Role.yml"
 
-# 1) 과거에 '단독'으로 띄운 잔재 컨테이너만 정리 (compose 포트와 충돌하는 것들)
-#    - minio          : 예전에 수동으로 띄운 MinIO (9000/9001 점유)
-#    - prefect-server : 삭제된 setup_prefect.ps1 이 만들던 서버 (4200 점유)
-foreach ($name in 'minio', 'prefect-server') {
-    if (docker ps -aq --filter "name=^$name$") {
-        Write-Host "Removing leftover standalone container: $name" -ForegroundColor Yellow
-        docker stop $name | Out-Null
-        docker rm   $name | Out-Null
-    }
+if ($Role -eq 'server') {
+    # 공유 네트워크 mlops 가 없으면 1회 만든다(이미 있으면 그대로 둔다).
+    docker network inspect mlops *> $null
+    if ($LASTEXITCODE -ne 0) { docker network create mlops | Out-Null }
 }
 
-# 2) 전체 스택 기동 (postgres + minio + mlflow + server + worker)
-docker compose up -d
+# 해당 역할의 compose 스택을 내렸다가(볼륨은 유지) 다시 백그라운드로 띄운다.
+docker compose -f $compose down
+docker compose -f $compose up -d

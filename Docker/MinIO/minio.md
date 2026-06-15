@@ -8,50 +8,75 @@
 
 ## 1. MinIO Installation
 
-MinIO는 이 스택에서 **도커 컨테이너로 실행**됩니다. 아래는 `docker-compose.yml`의 `minio`(및 버킷 초기화용 `createbuckets`) 부분입니다.
+MinIO 는 도커 컨테이너로 실행됩니다. 아래는 MinIO 의 `docker-compose.yml`(서버 `minio` + 버킷 초기화용 `createbuckets`)입니다. `docker compose up -d` 를 실행하면 도커가 `minio/minio` 이미지를 자동으로 내려받아 컨테이너로 띄우므로 **MinIO 를 호스트에 따로 설치할 필요가 없습니다.** 함께 정의된 `createbuckets` 가 버킷 생성과 버저닝까지 끝냅니다.
 
-> 이 블록은 전체 `docker-compose.yml`의 일부입니다. `docker-compose.yml`이 있는 폴더에서 **`docker compose up -d`** 를 실행하면 도커가 `minio/minio` 이미지를 자동으로 내려받아 컨테이너로 실행하므로 **MinIO를 따로 설치할 필요가 없습니다.** 함께 정의된 `createbuckets`가 버킷 생성과 버저닝까지 끝냅니다.
+이 컨테이너는 같은 호스트의 다른 서비스(예: 실험 추적 서버)가 `minio` 라는 **서비스명으로 접속** 하도록 공유 네트워크 `mlops` 에 붙습니다. 따라서 컨테이너를 띄우기 전에 그 네트워크가 있어야 하며, 함께 제공되는 `set_docker.ps1` 이 네트워크를 먼저 보장한 뒤 스택을 기동합니다.
+
+```powershell
+# (최초 1회) 예시 파일을 복사해 루트 계정을 채운다. docker-compose.env 는 git 에 커밋하지 않는다.
+Copy-Item docker-compose.env_example docker-compose.env
+
+# 공유 네트워크 mlops 를 보장하고 컨테이너를 백그라운드로 띄운다.
+.\set_docker.ps1
+```
 
 ```yaml
+services:
   minio:
     image: minio/minio
     command: server /data --console-address ":9001"
+    env_file:
+      - docker-compose.env          # MINIO_ROOT_USER / MINIO_ROOT_PASSWORD 를 주입한다.
     ports:
       - "9000:9000"   # S3 API
       - "9001:9001"   # 웹 콘솔
-    environment:
-      MINIO_ROOT_USER: <ROOT_USER>           # 실제 값은 docker-compose.env 에서 주입(노출 금지)
-      MINIO_ROOT_PASSWORD: <ROOT_PASSWORD>
     volumes:
       - minio-data:/data
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
       interval: 5s
       retries: 10
+    networks:
+      - mlops
+    restart: unless-stopped
 
-  # 버킷 생성 + 버저닝 ON (1회 실행 후 종료). 커뮤니티 콘솔엔 이 메뉴가 없어 mc 로 자동 처리.
+  # 버킷 생성 + 버저닝 ON 을 1회 실행하고 종료한다. 커뮤니티 콘솔엔 이 메뉴가 없어 mc 로 자동 처리한다.
   createbuckets:
     image: minio/mc
+    env_file:
+      - docker-compose.env
     depends_on:
       minio:
         condition: service_healthy
     entrypoint: >
       /bin/sh -c "
-      mc alias set local http://minio:9000 <ACCESS_KEY> <SECRET_KEY> &&
+      mc alias set local http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD &&
       mc mb --ignore-existing local/datasets local/models local/mlflow &&
       mc version enable local/datasets &&
       mc version enable local/models
       "
+    networks:
+      - mlops
     restart: "no"
+
+volumes:
+  minio-data:
+
+networks:
+  mlops:
+    external: true
 ```
 
-- `image: minio/minio` — 공식 MinIO 서버 이미지
-- `command: server /data --console-address ":9001"` — `/data`를 저장소로 쓰고 웹 콘솔을 `:9001`에 띄움
-- `ports` — **두 포트는 용도가 다릅니다**: `9000` = **S3 API**(코드·`mc`·boto3 등 프로그램이 데이터를 읽고 쓰는 엔드포인트), `9001` = **웹 콘솔**(사람이 브라우저로 보는 GUI). 서로 다른 클라이언트를 위한 별개 채널이라 둘 다 노출합니다.
-- `environment` — 루트 계정(= username / password): `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD`
-- `volumes: minio-data:/data` — 데이터를 named volume에 **영속 저장**(컨테이너를 지워도 데이터 보존)
-- `healthcheck` — `mc ready local`로 기동 완료를 확인(다른 서비스가 이 상태를 기다림)
-- `createbuckets` — **별도 1회용 서비스**. minio가 준비되면 `minio/mc`로 `datasets`/`models`/`mlflow` 버킷을 만들고 `datasets`/`models`에 **버저닝을 켠 뒤 종료**합니다. 커뮤니티 웹 콘솔에는 버킷/버저닝 관리 메뉴가 없어 이렇게 자동 처리하므로, 보통 **`mc`를 직접 설치하지 않아도** 버킷·버저닝이 준비됩니다.
+구성 요소의 의미는 다음과 같습니다.
+
+- `image: minio/minio` 는 공식 MinIO 서버 이미지를 사용한다는 뜻입니다.
+- `command: server /data --console-address ":9001"` 는 `/data` 를 저장소로 쓰고 웹 콘솔을 `:9001` 에 띄웁니다.
+- `ports` 의 두 포트는 용도가 다릅니다. `9000` 은 **S3 API**(코드·`mc`·boto3 등 프로그램이 데이터를 읽고 쓰는 엔드포인트)이고, `9001` 은 **웹 콘솔**(사람이 브라우저로 보는 GUI)이라, 서로 다른 클라이언트를 위한 별개 채널이므로 둘 다 노출합니다.
+- `env_file` 은 루트 계정(`MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD`)을 yml 에 평문으로 두지 않고 `docker-compose.env` 에서 읽어 주입합니다.
+- `volumes: minio-data:/data` 는 데이터를 named volume 에 영속 저장하여, 컨테이너를 지워도 데이터가 보존되게 합니다.
+- `healthcheck` 는 `mc ready local` 로 기동 완료를 확인하여, 다른 서비스가 이 상태를 기다릴 수 있게 합니다.
+- `networks: mlops` 는 같은 호스트의 다른 서비스가 `minio` 서비스명으로 접속하도록 공유 외부 네트워크에 연결합니다.
+- `createbuckets` 는 별도 1회용 서비스입니다. minio 가 준비되면 `minio/mc` 로 `datasets`/`models`/`mlflow` 버킷을 만들고 `datasets`/`models` 에 버저닝을 켠 뒤 종료합니다. 커뮤니티 웹 콘솔에는 버킷/버저닝 관리 메뉴가 없어 이렇게 자동 처리하므로, 보통 `mc` 를 직접 설치하지 않아도 버킷·버저닝이 준비됩니다.
 
 ## 2. mc Installation
 
@@ -253,8 +278,8 @@ mc version enable local/models
 > ⚠️ MinIO **커뮤니티 콘솔(:9001)에는 버킷 생성·버저닝 관리 메뉴가 없습니다** (관리 기능이 상용 제품으로 분리됨). 따라서 위 `mc` CLI를 사용하세요. `mc`를 호스트에 설치하지 않았다면, **`mc`가 들어 있는 도커 컨테이너의 셸로 들어가서** 실행하면 됩니다(스택 컨테이너가 `docker compose up -d`로 실행 중일 때):
 >
 > ```bash
-> # 1) mc 가 포함된 컨테이너 셸로 진입 (1회용 컨테이너)
-> docker run -it --rm --network prefect_default --entrypoint /bin/sh minio/mc
+> # 1) mc 가 포함된 컨테이너 셸로 진입 (1회용 컨테이너 — 공유 네트워크 mlops 에 붙인다)
+> docker run -it --rm --network mlops --entrypoint /bin/sh minio/mc
 >
 > # 2) 아래는 '컨테이너 셸 안'에서 실행하는 명령들
 > mc alias set local http://minio:9000 <ACCESS_KEY> <SECRET_KEY>
@@ -288,7 +313,7 @@ mc ls --versions local/datasets/test.txt   # 버전이 2개로 보이면 version
 docker의 stack container가 실행중일 때,
 
 ```powershell
-docker run --rm --network prefect_default --entrypoint /bin/sh minio/mc -c "mc alias set local http://minio:9000 <ACCESS_KEY> <SECRET_KEY>; mc version info local/datasets; mc version info local/models; mc version info local/mlflow"
+docker run --rm --network mlops --entrypoint /bin/sh minio/mc -c "mc alias set local http://minio:9000 <ACCESS_KEY> <SECRET_KEY>; mc version info local/datasets; mc version info local/models; mc version info local/mlflow"
 ```
 
 python(boto3)이 설치되었을 경우,

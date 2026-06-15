@@ -1,16 +1,51 @@
-version: '3.8'
-
+# MinIO — 제어 노드(머신 A)의 오브젝트 스토리지(S3 호환).
+# createbuckets 가 최초 기동 시 datasets/models/mlflow 버킷을 만들고 datasets/models 에 버저닝을 켠다.
+# 제어 노드 안 mlflow 등이 'minio' 라는 서비스명으로 접속하도록 공유 네트워크 mlops(external)에 붙는다.
+# (먼저 set_docker.ps1 이 'docker network create mlops' 로 만든다.)
 services:
   minio:
-    image: quay.io/minio/minio
-    container_name: minio
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    volumes:
-      - d:/minio/data:/data
-    environment:
-      MINIO_ROOT_USER: admin
-      MINIO_ROOT_PASSWORD: password123
+    image: minio/minio
     command: server /data --console-address ":9001"
-    restart: always
+    env_file:
+      - docker-compose.env          # MINIO_ROOT_USER / MINIO_ROOT_PASSWORD 를 주입한다.
+    ports:
+      - "9000:9000"                 # S3 API — 코드/boto3/mc 가 데이터를 읽고 쓰는 엔드포인트.
+      - "9001:9001"                 # 웹 콘솔 — 사람이 브라우저로 접속하는 GUI.
+    volumes:
+      - minio-data:/data            # 데이터를 named volume 에 영속 저장한다(컨테이너를 지워도 보존).
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      retries: 10
+    networks:
+      - mlops
+    restart: unless-stopped
+
+  # 버킷 생성 + 버저닝 ON 을 한 번 실행하고 종료한다(one-shot).
+  # 커뮤니티 콘솔에는 버킷/버저닝 메뉴가 없으므로 mc 로 자동 처리한다.
+  # --ignore-existing 으로 이미 있으면 에러 없이 통과한다. mlflow 버킷은 run_id 로 격리되어 버저닝이 불필요하다.
+  createbuckets:
+    image: minio/mc
+    env_file:
+      - docker-compose.env
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD &&
+      mc mb --ignore-existing local/datasets local/models local/mlflow &&
+      mc version enable local/datasets &&
+      mc version enable local/models
+      "
+    networks:
+      - mlops
+    restart: "no"
+
+volumes:
+  minio-data:
+
+# 제어 노드 서비스들이 공유하는 외부 네트워크. set_docker.ps1 이 미리 생성한다.
+networks:
+  mlops:
+    external: true
