@@ -94,12 +94,13 @@ services:
     env_file:
       - docker-compose.env          # CONTROL_NODE_HOST, POSTGRES_*, MINIO_ACCESS_KEY/SECRET, AWS_*
     command: >
-      bash -c "export PREFECT_API_URL=http://$$CONTROL_NODE_HOST:4200/api &&
+      bash -c ": $${CONTROL_NODE_HOST:?set in docker-compose.env} $${POSTGRES_USER:?set in docker-compose.env} $${POSTGRES_PASSWORD:?set in docker-compose.env} &&
+               export PREFECT_API_URL=http://$$CONTROL_NODE_HOST:4200/api &&
                export MINIO_ENDPOINT=http://$$CONTROL_NODE_HOST:9000 &&
                export POSTGRESQL_CATALOG_DSN=postgresql://$$POSTGRES_USER:$$POSTGRES_PASSWORD@$$CONTROL_NODE_HOST:5432/catalog &&
                export POSTGRESQL_OPTUNA_DSN=postgresql://$$POSTGRES_USER:$$POSTGRES_PASSWORD@$$CONTROL_NODE_HOST:5432/optuna &&
-               prefect work-pool create default --type process --overwrite &&
-               prefect worker start --pool default --limit 8"
+               if [ ${CREATE_POOL:-true} = true ]; then prefect work-pool create ${WORK_POOL:-default} --type process --overwrite; fi &&
+               prefect worker start --pool ${WORK_POOL:-default} --limit ${WORKER_LIMIT:-8}"
     volumes:
       - ../../Prefect:/app          # flow 코드가 있는 폴더를 /app 으로 마운트한다.
     working_dir: /app
@@ -107,8 +108,10 @@ services:
 ```
 
 - worker 는 `CONTROL_NODE_HOST` 한 값으로 API (`:4200`)·MinIO (`:9000`)·catalog·optuna DB (`:5432`) 를 모두 가리킵니다. endpoint 에 비밀번호·호스트가 섞이므로 `command` 안에서 `env_file` 값으로 조립해 `export` 합니다.
+- **같은 파일로 첫 worker·추가 worker 모두 처리** — `command` 의 `CREATE_POOL`·`WORK_POOL`·`WORKER_LIMIT` 는 `docker compose up` 시점에 **셸에서 읽는 compose 변수**입니다 (미설정 시 `true`·`default`·`8`). 기본 `up -d` 는 **첫 worker** (pool 생성 후 시작) 이고, **추가 worker** 는 `up` 앞에 `CREATE_POOL=false` 를 붙여 pool 생성을 건너뜁니다. 특정 머신 전용은 `WORK_POOL=member2-pool` 로 지정합니다 (명령 예시는 Appendix D 참고).
 - `volumes: ../../Prefect:/app` 은 flow 코드가 있는 `MLOps/Prefect` 폴더를 마운트합니다. **Worker Node 에도 이 저장소가 같은 구조로 있어야** 합니다.
 - `restart: unless-stopped` 는 Control Node (API) 가 늦게 떠 연결에 실패해 종료돼도 자동으로 다시 붙게 합니다.
+- `command` 맨 앞의 `: $${VAR:?...}` 는 **필수 env (`CONTROL_NODE_HOST`·`POSTGRES_USER`·`POSTGRES_PASSWORD`) 가 비어 있으면 즉시 명확한 에러로 종료**시키는 가드입니다 — 빈 값으로 `http://:4200/api` 같은 깨진 주소를 만들어 모호하게 crash-loop 하는 것을 막습니다 (`$${VAR:?메시지}` 는 값이 unset·빈 값이면 메시지를 출력하고 종료).
 
 ### Concurrency & Scaling
 
@@ -122,13 +125,14 @@ worker 1개가 동시에 돌리는 job 수는 `--limit` 값 (현재 8) 입니다
 
 ```yaml
     command: >
-      bash -c "pip install -r /app/requirements.txt &&
+      bash -c ": $${CONTROL_NODE_HOST:?set in docker-compose.env} $${POSTGRES_USER:?set in docker-compose.env} $${POSTGRES_PASSWORD:?set in docker-compose.env} &&
+               pip install -r /app/requirements.txt &&
                export PREFECT_API_URL=http://$$CONTROL_NODE_HOST:4200/api &&
                export MINIO_ENDPOINT=http://$$CONTROL_NODE_HOST:9000 &&
                export POSTGRESQL_CATALOG_DSN=postgresql://$$POSTGRES_USER:$$POSTGRES_PASSWORD@$$CONTROL_NODE_HOST:5432/catalog &&
                export POSTGRESQL_OPTUNA_DSN=postgresql://$$POSTGRES_USER:$$POSTGRES_PASSWORD@$$CONTROL_NODE_HOST:5432/optuna &&
-               prefect work-pool create default --type process --overwrite &&
-               prefect worker start --pool default --limit 8"
+               if [ ${CREATE_POOL:-true} = true ]; then prefect work-pool create ${WORK_POOL:-default} --type process --overwrite; fi &&
+               prefect worker start --pool ${WORK_POOL:-default} --limit ${WORKER_LIMIT:-8}"
 ```
 
 매번 설치가 느리면 `Dockerfile` (`FROM prefecthq/prefect:3-python3.11` + `RUN pip install -r requirements.txt`) 로 한 번 빌드한 뒤 `image:` 대신 `build:` 로 쓰면 더 빠릅니다.
@@ -247,7 +251,24 @@ def my_pipeline():
 - **DSN** = Data Source Name (DB 접속 문자열)
 - **CPU / GPU** = Central / Graphics Processing Unit
 
-## Appendix B. docker-compose.env example
+## Appendix B. Prefect CLI
+
+`prefect` CLI 는 Prefect SDK 와 함께 설치되는 명령행 도구 (`pip install prefect`) 로, server·worker·work pool·deployment 를 다룹니다. 이 문서에서 쓰는 주요 명령만 정리합니다.
+
+| Category | Command | Description |
+|----------|---------|-------------|
+| Config | `prefect config set PREFECT_API_URL="http://<Control Node IP>:4200/api"` | client 가 바라볼 server 주소를 프로필에 1회 저장합니다 (§5). |
+| Config | `prefect config view` | 현재 프로필 설정을 확인합니다. |
+| Server | `prefect server start --host 0.0.0.0` | Prefect server (API·UI·스케줄러·work pool 대기열) 를 기동합니다 (§2). |
+| Work pool | `prefect work-pool create <name> --type process [--overwrite]` | work pool 을 만듭니다. `--overwrite` 는 멱등이라 재실행해도 안전합니다. |
+| Work pool | `prefect work-pool ls` | work pool 목록을 봅니다. |
+| Worker | `prefect worker start --pool <name> [--limit N] [--work-queue <q>]` | worker 를 기동해 그 pool (또는 특정 queue) 을 폴링하며 job 을 실행합니다 (§3). |
+| Deployment | `prefect deploy` 또는 `flow.deploy(name="...")` | work pool mode 용 deployment 를 server 에 등록합니다 (§4). |
+| Run | `prefect deployment run "<flow-name>/<deployment-name>"` | 등록된 deployment 를 trigger 합니다 (§5). |
+
+> `prefect config set` 으로 저장한 `PREFECT_API_URL` 은 그 머신의 프로필 (`~/.prefect`) 에 남아 이후 모든 CLI·SDK 호출에 적용됩니다. docker 컨테이너 안에서는 프로필 대신 `PREFECT_API_URL` 환경변수로 주입합니다 (§3 `command` 참고).
+
+## Appendix C. docker-compose.env example
 
 자격증명·endpoint 는 yml 에 평문으로 두지 않고 `docker-compose.env` 한 파일에 모읍니다. 컨테이너는 각 서비스가 `env_file` 로 읽습니다. 실제 값이 담긴 `docker-compose.env` 는 `.gitignore` 로 제외하고, 비밀값을 비운 아래 `docker-compose.env_example` 만 커밋합니다. Control Node 에는 server 섹션을, Worker Node 에는 worker 섹션을 채웁니다.
 
@@ -272,7 +293,7 @@ AWS_SECRET_ACCESS_KEY=CHANGE_ME
 - 명령 안에서 자격증명을 참조할 때는 `$$VAR` (예: `$$POSTGRES_USER`) 로 적습니다. `$$` 는 compose 가 `$` 로 바꿔 컨테이너 셸이 `env_file` 값으로 확장합니다.
 - 모든 `CHANGE_ME` 는 강한 값으로 교체하고, 실제 `docker-compose.env` 는 git 이 아니라 안전한 채널로 공유합니다.
 
-## Appendix C. Additional Worker Attachment
+## Appendix D. Additional Worker Attachment
 
 > **선택 사항입니다.** Worker Node 하나로 충분하면 이 절은 건너뛰어도 됩니다. user 가 자기 컴퓨터의 로컬 자원 (특히 GPU) 에서 학습을 돌려야 하거나, 처리량을 분산하고 싶을 때만 필요합니다.
 
@@ -310,3 +331,16 @@ prefect worker start --pool default
 prefect work-pool create member2-pool --type process
 prefect worker start --pool member2-pool
 ```
+
+docker 로 추가 worker 를 붙일 때도 위 pip 방식 대신 **같은 `docker-compose.worker.yml` 을 그 머신에서 재사용**합니다 (§3). `up` 명령 앞에 `CREATE_POOL`·`WORK_POOL` 환경변수를 붙여 분기합니다 — 이 셋 (`CREATE_POOL`/`WORK_POOL`/`WORKER_LIMIT`) 은 compose 가 `up` 시점에 셸에서 읽어 `command` 에 넣는 변수입니다 (미설정 시 `true`·`default`·`8`).
+
+```powershell
+# PowerShell — 추가 worker (pool 생성 건너뜀). 전용 pool 로 보내려면 WORK_POOL 도 지정.
+$env:CREATE_POOL="false"; $env:WORK_POOL="member2-pool"; docker compose -f docker-compose.worker.yml up -d
+```
+```bash
+# bash (Linux Worker Node) — 같은 의미
+CREATE_POOL=false WORK_POOL=member2-pool docker compose -f docker-compose.worker.yml up -d
+```
+
+전용 pool 은 한 번만 만들면 되므로, 그 pool 의 **첫 worker** 만 `CREATE_POOL=true` 로 띄웁니다.

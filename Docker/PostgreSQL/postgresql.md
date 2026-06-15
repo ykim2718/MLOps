@@ -80,7 +80,7 @@ networks:
 - `networks: mlops` 는 같은 호스트의 다른 서비스가 `postgres` 서비스명으로 접속하도록 공유 외부 네트워크에 연결합니다.
 - `restart: unless-stopped` 는 컨테이너가 비정상 종료되어도 자동으로 다시 띄웁니다 (사용자가 직접 멈춘 경우는 제외합니다).
 
-> ⚠️ init SQL 은 볼륨이 **비어 있는 최초 기동 때만** 실행됩니다. 이미 데이터가 있는 볼륨에서는 다시 실행되지 않으므로, DB 를 새로 만들고 싶으면 볼륨을 비우거나 (`docker compose down -v`) 아래 [Appendix A](#appendix-a-manual-database-provisioning) 처럼 수동으로 만듭니다.
+> ⚠️ init SQL 은 볼륨이 **비어 있는 최초 기동 때만** 실행됩니다. 이미 데이터가 있는 볼륨에서는 다시 실행되지 않으므로, DB 를 새로 만들고 싶으면 볼륨을 비우거나 (`docker compose down -v`) 아래 [Appendix B](#appendix-b-manual-database-provisioning) 처럼 수동으로 만듭니다.
 
 ## 3. Access
 
@@ -210,7 +210,26 @@ DROP ROLE analyst;         -- role 삭제
 
 > 기본적으로 모든 DB 는 `PUBLIC` (모든 role) 에 `CONNECT` 가 열려 있습니다. 특정 DB 를 **명시적으로 허가한 role 만** 접속하게 하려면 `REVOKE CONNECT ON DATABASE <db> FROM PUBLIC;` 로 기본 접속을 닫은 뒤 (2)·(3) 의 `GRANT CONNECT` 로 필요한 role 에만 엽니다. (PostgreSQL 15+ 부터 `public` 스키마의 `CREATE` 권한은 기본적으로 `PUBLIC` 에서 회수되어 있습니다.)
 
-## Appendix A. Manual Database Provisioning
+## Appendix A. SQL Commands
+
+본문 ([§5](#5-granular-database-access-control) 등) 에서 쓰는 SQL 명령을 정리합니다. 슈퍼유저로 접속해 실행하며, 스키마·테이블 권한은 **대상 DB 에 접속한 상태**에서 실행합니다.
+
+| Category | Command | Description |
+|----------|---------|-------------|
+| Role | `CREATE ROLE <name> LOGIN PASSWORD '<pwd>';` | 로그인 가능한 사용자 (role) 를 만듭니다. |
+| Grant (connect) | `GRANT CONNECT ON DATABASE <db> TO <role>;` | 그 DB 에 접속을 허용합니다. |
+| Grant (schema) | `GRANT USAGE, CREATE ON SCHEMA public TO <role>;` | 스키마 사용 (+ `CREATE` 면 테이블 생성) 을 허용합니다. |
+| Grant (read) | `GRANT SELECT ON ALL TABLES IN SCHEMA public TO <role>;` | 기존 테이블을 읽게 합니다. |
+| Grant (write) | `GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO <role>;` | 기존 테이블을 읽고 쓰게 합니다. |
+| Grant (sequence) | `GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO <role>;` | 시퀀스 (자동증가 PK) 를 쓰게 합니다. |
+| Default privileges | `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT <privs> ON TABLES TO <role>;` | 앞으로 생길 테이블에도 같은 권한을 자동 적용합니다. |
+| Revoke | `REVOKE <privs> ON <object> FROM <role>;` | 권한을 회수합니다. |
+| Drop | `DROP OWNED BY <role>;` · `DROP ROLE <role>;` | role 의 권한·소유 객체를 정리한 뒤 사용자를 삭제합니다. |
+| Database | `CREATE DATABASE <db>;` | 논리 DB 를 만듭니다 (init SQL·수동 프로비저닝). |
+
+> `\du` · `\l` · `\dp` 는 SQL 이 아니라 psql 클라이언트 메타명령입니다 ([§5](#5-granular-database-access-control) 참고).
+
+## Appendix B. Manual Database Provisioning
 
 init SQL 은 빈 볼륨의 최초 기동 때만 실행되므로, **이미 운영 중인 인스턴스에 DB 를 추가**하거나 **호스트에 직접 설치한 PostgreSQL 을 쓸 때**는 아래처럼 수동으로 만듭니다.
 

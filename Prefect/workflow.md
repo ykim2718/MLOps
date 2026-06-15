@@ -31,7 +31,7 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄우고 실행하기 
 | **PostgreSQL** | `postgres` | 모든 도구의 메타데이터 DB. `prefect`·`mlflow`·`optuna`·`catalog` 4개 논리 DB 를 운영합니다. | :5432 | [postgresql.md](../Docker/PostgreSQL/postgresql.md) |
 | **Optuna** | (라이브러리) | 하이퍼파라미터 튜닝 (trial 탐색). study storage 로 `postgres` 의 `optuna` DB 를 씁니다. | — | [§5](#5-optuna) |
 
-> 이 스택은 **Control Node (머신 A)** 에 `postgres`·`minio`·`mlflow`·`prefect_server` 를 모아 띄우고, **Worker Node (머신 B)** 에 `prefect_worker` 를 띄워 네트워크로 붙이는 remote worker 구조입니다 (상세는 [prefect.md](../Docker/Prefect/prefect.md)).
+> 이 스택은 **Control Node** 에 `postgres`·`minio`·`mlflow`·`prefect_server` 를 모아 띄우고, **Worker Node** 에 `prefect_worker` 를 띄워 네트워크로 붙이는 remote worker 구조입니다 (상세는 [prefect.md](../Docker/Prefect/prefect.md)).
 
 ## 3. Data Flow
 
@@ -79,18 +79,18 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄우고 실행하기 
 Optuna 는 하이퍼파라미터를 trial 단위로 탐색하는 튜닝 도구입니다. `objective` (목적 함수) 를 매 trial 마다 호출해 하이퍼파라미터를 제안받고 점수를 반환받으며, 그 점수로 다음 trial 을 더 똑똑하게 고릅니다. 이 스택에는 Optuna 전용 도커 서비스가 없고, **라이브러리로 코드에 포함** 되어 study 기록만 PostgreSQL 의 `optuna` DB 에 저장합니다.
 
 ```python
-import optuna
+import os, optuna
 
 study = optuna.create_study(
     study_name="mnist-resnet50",
-    storage="postgresql://<user>:<password>@<host>:5432/optuna",   # 공유 storage
+    storage=os.environ["POSTGRESQL_OPTUNA_DSN"],   # 공유 storage (PostgreSQL optuna DB)
     direction="maximize",
     load_if_exists=True,        # 이미 있으면 이어서 탐색
 )
 study.optimize(objective, n_trials=20)
 ```
 
-- **공유 DB (기본)** — `postgresql://.../optuna`. 여러 worker·여러 PC 가 하나의 study 를 분산 병렬로 탐색하거나 기록을 중앙에 보존할 때 유리합니다.
+- **공유 DB (기본)** — `POSTGRESQL_OPTUNA_DSN` (`postgresql://.../optuna`). 여러 worker·여러 PC 가 하나의 study 를 분산 병렬로 탐색하거나 기록을 중앙에 보존할 때 유리합니다.
 - **로컬 파일 (대안)** — `sqlite:///optuna.db`. 단일 PC 에서 가볍게 쓸 때 적합합니다.
 - Optuna 가 DB 에 넣는 것은 trial 메타데이터 (파라미터·점수) 뿐이고, 모델 가중치 같은 실제 산출물은 MinIO 에 저장합니다.
 
@@ -149,6 +149,8 @@ out_uri = f"s3://models/{member}/{experiment}/{run_id}/model.pt"
 | Optuna trial 기록 | PostgreSQL `optuna` DB |
 | 데이터셋 + 버전·메타데이터 | 실제 데이터 → MinIO `s3://datasets/...`, 메타 → PostgreSQL `catalog` DB |
 | flow/task run 상태·로그 | PostgreSQL `prefect` DB |
+
+> 위에서 코드가 **직접 접속**하는 곳은 MinIO 와 PostgreSQL 의 `catalog`·`optuna` DB 뿐입니다 — `mlflow`·`prefect` DB 는 MLflow server·Prefect server 가 대신 접속합니다. 자격증명 (`MINIO_*` / `POSTGRESQL_CATALOG_DSN` / `POSTGRESQL_OPTUNA_DSN`) 셋업은 [prefect.md](../Docker/Prefect/prefect.md) §5, DB 별 권한 분리는 [postgresql.md](../Docker/PostgreSQL/postgresql.md) §5 를 참고합니다.
 
 ---
 

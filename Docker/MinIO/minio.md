@@ -291,7 +291,32 @@ $env:MINIO_SECRET_KEY = "<발급된 secret key>"
 
 > 정리: **소비자형 팀원 → 내장 `readonly`** (1), **자기 산출물을 남겨야 하는 팀원 → 버킷 한정 정책을 가진 서비스 계정** (2). 어느 쪽이든 루트 (`MINIO_ROOT_USER`) 는 server admin 만 보유하고, 팀원은 발급받은 스코프 키를 환경변수로 씁니다 (4).
 
-## Appendix A. Manual Bucket Provisioning & Versioning (`mc` CLI)
+## Appendix A. Terminology
+
+- **mc** — MinIO Client. MinIO·S3 호환 스토리지를 다루는 CLI 도구이며, `minio/minio` 이미지에 함께 들어 있습니다.
+- **bucket** — 오브젝트를 담는 최상위 컨테이너 (S3 의 최상위 저장 공간).
+
+## Appendix B. MinIO Client CLI
+
+`mc` (MinIO Client) 로 버킷·오브젝트·사용자·정책을 다룹니다. 이 문서에서 쓰는 주요 명령만 정리합니다 (`mc` 설치·실행은 [§2](#2-mc-installation) 참고).
+
+| Category | Command | Description |
+|----------|---------|-------------|
+| Alias | `mc alias set <alias> <url> <ACCESS_KEY> <SECRET_KEY>` | server 를 alias 로 등록합니다 (이후 `local` 등으로 참조). |
+| Object | `mc ls [--recursive] [--versions] <alias>/<bucket>/<prefix>` | 객체 목록을 봅니다 (버전 포함 조회 가능). |
+| Object | `mc cp [--recursive] <src> <dst>` | 복사 — 다운로드 (`local/...` → `.`) / 업로드 (`.` → `local/...`). |
+| Object | `mc cat <alias>/<bucket>/<key>` | 객체를 표준출력으로 스트리밍합니다 (다운로드 없이 파이프). |
+| Bucket | `mc mb [--ignore-existing] <alias>/<bucket>` | 버킷을 만듭니다 (`--ignore-existing` 은 멱등). |
+| Versioning | `mc version enable\|info <alias>/<bucket>` | 버저닝을 켜거나 상태를 조회합니다. |
+| Health | `mc ready <alias>` | server 준비 상태를 확인합니다 (healthcheck 에서 사용). |
+| Admin | `mc admin user add <alias> <user> <secret>` | 사용자를 만듭니다. |
+| Admin | `mc admin policy attach <alias> <policy> --user <user>` | 사용자에 정책을 부여합니다 (`readonly` 등). |
+| Admin | `mc admin user svcacct add [--policy <file>] <alias> <user>` | 프로그램용 access key 를 발급합니다 (인라인 정책 가능). |
+| Admin | `mc admin user list\|info` · `svcacct list\|rm` · `policy detach` · `user disable` | 사용자·키·정책을 확인하고 해제합니다. |
+
+> 권한을 좁힌 키 발급·정책 운영의 상세는 [§5](#5-read-only--scoped-access-keys), 버킷·버저닝 수동 처리는 Appendix C 를 참고합니다.
+
+## Appendix C. Manual Bucket Provisioning & Versioning (`mc` CLI)
 
 보통은 `minio` 서비스가 기동 시 자동 처리하므로 불필요합니다. **스택을 쓰지 않거나 버킷·버저닝을 직접 제어하고 싶을 때만** 아래처럼 수동으로 실행합니다 (`mc` 설치는 [mc Installation](#2-mc-installation) 참고).
 
@@ -311,7 +336,7 @@ mc version enable local/models
 
 > ⚠️ MinIO **커뮤니티 console (:9001) 에는 버킷 생성·버저닝 관리 메뉴가 없습니다** (관리 기능이 상용 제품으로 분리됨). 따라서 위 `mc` CLI를 사용하세요. `mc`를 호스트에 설치하지 않았다면, 떠 있는 `minio` 컨테이너에 `mc` 가 들어 있으므로 `docker compose exec minio mc ...` 로 실행하면 됩니다 ([mc Installation](#2-mc-installation) ② 참고).
 
-## Appendix B. Versioning Verification
+## Appendix D. Versioning Verification
 
 버킷에 버저닝이 실제로 켜졌는지 확인하는 방법입니다.
 
