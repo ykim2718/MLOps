@@ -15,14 +15,15 @@ MLflow 는 저장소를 backend 와 artifact 두 층으로 나눕니다.
 
 ## 2. Docker Setup
 
-MLflow 는 도커 컨테이너로 실행됩니다. backend 인 PostgreSQL(`mlflow` DB)과 artifact 인 MinIO(`mlflow` 버킷)가 **먼저 떠 있어야** 정상 동작하므로, 같은 호스트에서 그 둘을 띄운 뒤 실행합니다. 이 컨테이너는 공유 네트워크 `mlops` 에서 `postgres` · `minio` 를 서비스명으로 접속하며, 함께 제공되는 `set_docker.ps1` 이 네트워크를 보장한 뒤 스택을 기동합니다.
+MLflow 는 도커 컨테이너로 실행됩니다. backend 인 PostgreSQL(`mlflow` DB)과 artifact 인 MinIO(`mlflow` 버킷)가 **먼저 떠 있어야** 정상 동작하므로, 같은 호스트에서 그 둘을 띄운 뒤 실행합니다. 이 컨테이너는 공유 네트워크 `mlops` 에서 `postgres` · `minio` 를 서비스명으로 접속하므로, 띄우기 전에 그 네트워크가 있어야 합니다.
 
 ```powershell
 # (최초 1회) 예시 파일을 복사해 backend/artifact 접속 값을 채운다. docker-compose.env 는 git 에 커밋하지 않는다.
 Copy-Item docker-compose.env_example docker-compose.env
 
-# 공유 네트워크 mlops 를 보장하고 컨테이너를 백그라운드로 띄운다.
-.\set_docker.ps1
+# 공유 네트워크 mlops 를 만들고(이미 있으면 에러는 무시) 컨테이너를 백그라운드로 띄운다.
+docker network create mlops
+docker compose up -d
 ```
 
 실행 후 MLflow UI 는 **http://localhost:5000** 에서 열립니다(다른 컴퓨터에서는 `http://<MLflow 호스트>:5000`).
@@ -148,12 +149,3 @@ MLFLOW_S3_ENDPOINT_URL=http://minio:9000
 
 - 명령 안에서 계정을 참조할 때는 `$$POSTGRES_USER` 처럼 `$$` 로 적습니다. `$$` 는 compose 가 `$` 로 바꿔 컨테이너 셸이 `env_file` 값으로 확장합니다.
 - 모든 `CHANGE_ME` 는 강한 값으로 교체하고, 실제 `docker-compose.env` 는 git 이 아니라 안전한 채널로 공유합니다.
-
-## Appendix A. Handy Commands
-
-```powershell
-docker compose up -d                 # 백그라운드 실행
-docker compose ps                    # 컨테이너 상태 확인
-docker compose logs -f mlflow        # 로그 실시간 보기
-docker compose down                  # 정지 + 컨테이너/네트워크 제거
-```

@@ -21,7 +21,7 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄우고 실행하기 
 
 ## 2. Stack
 
-스택의 서비스는 도커로 실행합니다. 각 컴포넌트는 자기 폴더(`Docker/<컴포넌트>/`)의 `docker-compose.yml` + `set_docker.ps1` 로 띄우며, 상세 설치·사용법은 아래 문서를 참고합니다.
+스택의 서비스는 도커로 실행합니다. 각 컴포넌트는 자기 폴더(`Docker/<컴포넌트>/`)의 `docker-compose.yml` 로 띄우며, 상세 설치·사용법은 아래 문서를 참고합니다.
 
 | Component | Service | Role | Dashboard | 상세 문서 |
 |-----------|---------|------|-----------|-----------|
@@ -54,7 +54,7 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄우고 실행하기 
 
 ## 4. Pipeline
 
-`data preparation(dp) → feature engineering(fe) → training(train) → test` 순으로 진행하며, 각 단계의 산출물이 다음 단계의 입력이 됩니다. 각 단계는 Prefect `@task` 로 감싸고 `@flow` 가 순서를 강제합니다(앞 단계 산출물이 있어야 다음 단계가 실행됩니다). 실제 동작 코드는 [`example/`](example/) 폴더와 [§7. Orchestrator](#7-orchestrator) 를 참고합니다.
+`data preparation(dp) → feature engineering(fe) → training(train) → test` 순으로 진행하며, 각 단계의 산출물이 다음 단계의 입력이 됩니다. 각 단계는 Prefect `@task` 로 감싸고 `@flow` 가 순서를 강제합니다(앞 단계 산출물이 있어야 다음 단계가 실행됩니다). 각 단계를 오케스트레이션하는 방식은 아래 [§7. Orchestrator](#7-orchestrator) 를 참고합니다.
 
 ```
 [train raw] → train_dp → [transformed] → train_fe → [feature + fe_train.json]
@@ -100,7 +100,7 @@ study.optimize(objective, n_trials=20)
 
 여러 데이터셋·모델을 만들고 비교·재현하려면 산출물을 **버전 관리** 하고 무엇이 어디 있는지 **검색** 할 수 있어야 합니다. 이 스택은 실제 데이터를 MinIO 에, 가벼운 메타데이터·버전 이력·계보를 PostgreSQL `catalog` DB 에 두는 방식으로 처리합니다.
 
-`catalog` 은 `catalog` DB 안의 테이블 하나(`datasets`)이며, MinIO 의 실제 데이터를 가리키는 **메타데이터 장부** 입니다. 이 장부를 읽고 쓰는 헬퍼 모듈이 [`catalog.py`](catalog.py) 이고, 전체 스키마(`datasets` DDL)와 API·CLI 는 그 파일에 정리되어 있습니다.
+`catalog` 은 `catalog` DB 안의 테이블 하나(`datasets`)이며, MinIO 의 실제 데이터를 가리키는 **메타데이터 장부** 입니다. 이 장부를 다루는 **카탈로그 접근 계층**(테이블 생성·버전 등록·검색)이 워크플로우에서 데이터의 위치·버전·계보를 기록합니다.
 
 ### Versioning
 
@@ -110,7 +110,7 @@ study.optimize(objective, n_trials=20)
 - **이름 규칙(`DatasetId`·`Version`)**: 소문자·숫자·`_`·`.` 만 사용합니다(공백·대문자·`-` 불가). 이 값이 그대로 MinIO 경로와 catalog 키가 되기 때문입니다.
 
 ```python
-import catalog                       # catalog.py 헬퍼
+import catalog                       # 카탈로그 접근 계층
 
 catalog.ensure_schema()              # datasets 테이블 멱등 생성(flow 시작 시 1회)
 catalog.register("sydney_202605", "v2", "s3://datasets/sydney_202605/v2/",
@@ -137,7 +137,7 @@ rows = catalog.find("sydney_202605", fab="fab2")               # 검색(dataset_
 전 팀원이 같은 MinIO 버킷에 결과물을 쓰므로 이름이 겹칠 수 있습니다. MLflow run(`run_id`)·Prefect run(`id`)·Optuna trial(`study_name`+`number`)은 **자동으로 격리** 되고, 직접 저장하는 파일만 경로에 고유 키를 넣어 분리합니다.
 
 ```python
-# member / experiment 는 잡 설정(prefect_configuration.json)·환경변수·flow 파라미터 중 하나로 받는다.
+# member / experiment 는 잡 설정·환경변수·flow 파라미터 중 하나로 받는다.
 out_uri = f"s3://models/{member}/{experiment}/{run_id}/model.pt"
 ```
 
@@ -154,7 +154,7 @@ out_uri = f"s3://models/{member}/{experiment}/{run_id}/model.pt"
 
 ## 7. Orchestrator
 
-오케스트레이터 [`example/prefect_run.py`](example/prefect_run.py) 는 [`example/prefect_configuration.json`](example/prefect_configuration.json)(member·experiment·n_trials 등)을 읽어 `example/` 의 단계 스크립트(`train_dp.py` … `test_eval.py`)를 `@task` 로 감싸 순서대로 실행하고, 각 단계 산출물을 MinIO 에 업로드한 뒤 [`catalog.py`](catalog.py) 로 등록합니다.
+오케스트레이터 flow 는 잡 설정(member·experiment·n_trials 등)을 읽어 각 단계(`train_dp` … `test_eval`)를 `@task` 로 감싸 순서대로 실행하고, 각 단계 산출물을 MinIO 에 업로드한 뒤 카탈로그에 등록합니다.
 
 ```python
 @flow(name="ai-full-pipeline")
@@ -173,7 +173,7 @@ def full_pipeline():
 
 서버 연결(`PREFECT_API_URL`)을 설정한 뒤(상세는 [prefect.md](../Docker/Prefect/prefect.md)), 두 방식으로 실행합니다.
 
-- **즉시 1회 실행** — 플로우를 직접 호출하면 그 자리에서 한 번 실행되고 종료됩니다(`python example/prefect_run.py` 에서 `full_pipeline()` 호출).
+- **즉시 1회 실행** — 플로우를 직접 호출하면 그 자리에서 한 번 실행되고 종료됩니다.
 - **deployment 등록 후 트리거** — `full_pipeline.serve(name="...")` 로 등록·대기시킨 뒤, `prefect deployment run "ai-full-pipeline/<deployment-name>"` 으로 on-demand/스케줄 실행합니다.
 
 > 빠른 단발 테스트는 즉시 실행을, 반복 실행·스케줄링·여러 팀원 잡 관리는 deployment 방식을 씁니다. 실행 결과는 Prefect 대시보드(http://localhost:4200)의 Flow Runs 에서 확인합니다.

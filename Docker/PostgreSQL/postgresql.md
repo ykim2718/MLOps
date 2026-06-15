@@ -19,14 +19,15 @@ PostgreSQL 은 이 스택에서 **메타데이터 데이터베이스**로 쓰입
 
 PostgreSQL 은 도커 컨테이너로 실행됩니다. `docker compose up -d` 를 실행하면 도커가 `postgres:16` 이미지를 내려받아 컨테이너로 띄우므로, **PostgreSQL 을 호스트에 따로 설치할 필요가 없습니다.** 컨테이너가 **최초로 기동될 때** 인라인된 init SQL 이 4개 DB 를 자동으로 만듭니다.
 
-이 컨테이너는 같은 호스트의 다른 서비스(예: 추적 서버, 오케스트레이션 서버)가 `postgres` 라는 **서비스명으로 접속**하도록 공유 네트워크 `mlops` 에 붙습니다. 따라서 컨테이너를 띄우기 전에 그 네트워크가 있어야 하며, 함께 제공되는 `set_docker.ps1` 이 네트워크를 먼저 보장한 뒤 스택을 기동합니다.
+이 컨테이너는 같은 호스트의 다른 서비스(예: 추적 서버, 오케스트레이션 서버)가 `postgres` 라는 **서비스명으로 접속**하도록 공유 네트워크 `mlops` 에 붙습니다. 따라서 컨테이너를 띄우기 전에 그 네트워크가 있어야 합니다.
 
 ```powershell
 # (최초 1회) 예시 파일을 복사해 계정/비밀번호를 채운다. docker-compose.env 는 git 에 커밋하지 않는다.
 Copy-Item docker-compose.env_example docker-compose.env
 
-# 공유 네트워크를 보장하고 컨테이너를 백그라운드로 띄운다.
-.\set_docker.ps1
+# 공유 네트워크를 만들고(이미 있으면 에러는 무시) 컨테이너를 백그라운드로 띄운다.
+docker network create mlops
+docker compose up -d
 ```
 
 아래가 `docker-compose.yml` 입니다.
@@ -147,19 +148,4 @@ docker compose exec postgres psql -U <user> -c "CREATE DATABASE catalog;"
 
 # 생성 확인
 docker compose exec postgres psql -U <user> -c "\l"
-```
-
-## Appendix B. Handy Commands
-
-```powershell
-docker compose up -d                 # 백그라운드 실행(창을 닫아도 유지)
-docker compose ps                    # 컨테이너 상태 확인
-docker compose logs -f postgres      # 로그 실시간 보기
-docker compose exec postgres psql -U <user> -d <db>   # 컨테이너 안 psql 접속
-
-docker compose stop                  # 컨테이너 정지(제거하지 않음)
-docker compose start                 # 정지된 컨테이너 다시 시작
-
-docker compose down                  # 정지 + 컨테이너/네트워크 제거(볼륨은 유지)
-docker compose down -v               # 볼륨까지 삭제(DB 데이터 초기화 — 4개 DB 재생성됨)
 ```
