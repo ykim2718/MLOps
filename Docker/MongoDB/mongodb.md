@@ -1,17 +1,17 @@
 # MongoDB — Document Database
 
-MongoDB 는 이 스택에서 **도큐먼트 데이터베이스**로 쓰입니다. [DB-Engines 랭킹](https://db-engines.com/en/ranking) 기준 **2026년 현재 관계형 (relational) DB 를 제외하면 가장 인기 있는 DB 엔진** 으로, 비관계형 (NoSQL) 계열에서 1위입니다. 데이터를 행·열의 테이블이 아니라 **도큐먼트 (JSON 형태의 BSON)** 로 저장하며, 한 인스턴스 안에서 `yControl` · `yImprove` 같은 여러 **논리 DB** 를 함께 운영합니다. 각 DB 는 **collection** (관계형 DB 의 테이블에 해당) 을 담고, collection 은 도큐먼트를 담습니다. PostgreSQL 과 달리 빈 DB·collection 을 미리 만들지 않고, **첫 쓰기 (insert) 시점에 자동 생성** 됩니다.
+MongoDB 는 이 스택에서 **document 데이터베이스**로 쓰입니다. [DB-Engines 랭킹](https://db-engines.com/en/ranking) 기준 **2026년 현재 관계형 (relational) DB 를 제외하면 가장 인기 있는 DB 엔진** 으로, 비관계형 (NoSQL) 계열에서 1위입니다. 데이터를 행·열의 테이블이 아니라 **document (JSON 형태의 BSON)** 로 저장하며, 한 인스턴스 안에서 `yControl` · `yImprove` 같은 여러 **논리 DB** 를 함께 운영합니다. 각 DB 는 **collection** (관계형 DB 의 테이블에 해당) 을 담고, collection 은 document 를 담습니다. PostgreSQL 과 달리 빈 DB·collection 을 미리 만들지 않고, **첫 쓰기 (insert) 시점에 자동 생성** 됩니다.
 
 ## 1. Role
 
-MongoDB 는 스키마가 고정되지 않은 애플리케이션 도큐먼트를 저장하는 데 쓰입니다. 이 스택이 쓰는 논리 DB 와 collection 예시는 다음과 같습니다 (collection 은 코드가 처음 쓸 때 생깁니다).
+MongoDB 는 schema 가 고정되지 않은 애플리케이션 document 를 저장하는 데 쓰입니다. 이 스택이 쓰는 논리 DB 와 collection 예시는 다음과 같습니다 (collection 은 코드가 처음 쓸 때 생깁니다).
 
 | Database | Collections |
 |----------|-------------|
 | `yControl` | `heatbeat` · `schedule_board` · `schedule_log` · `project_log` · `watching_usa` |
 | `yImprove` | `heatbeat` · `macro_trend` · `micro_trend` · `real_time_news__ebest` |
 
-> PostgreSQL 의 init SQL 처럼 DB 를 미리 만드는 단계가 **없습니다** — MongoDB 는 도큐먼트를 처음 insert 하는 순간 그 DB 와 collection 을 자동으로 만듭니다. 인프라는 인증이 켜진 빈 인스턴스까지만 준비합니다.
+> PostgreSQL 의 init SQL 처럼 DB 를 미리 만드는 단계가 **없습니다** — MongoDB 는 document 를 처음 insert 하는 순간 그 DB 와 collection 을 자동으로 만듭니다. 인프라는 인증이 켜진 빈 인스턴스까지만 준비합니다.
 
 ## 2. Docker Setup
 
@@ -71,7 +71,7 @@ networks:
 
 ## 3. Access
 
-컨테이너가 27017 을 노출하므로, 호스트나 다른 컴퓨터에서 표준 MongoDB 클라이언트로 접속할 수 있습니다. 접속 정보는 코드에 박지 말고 환경변수나 파라미터로 주입합니다 ([§4](#4-credentials) 참고). 루트·일반 사용자는 `admin` DB 에 만들어지므로 연결 문자열에 **`authSource=admin`** 을 붙입니다.
+컨테이너가 27017 을 노출하므로, 호스트나 다른 컴퓨터에서 표준 MongoDB 클라이언트로 접속할 수 있습니다. 접속 정보는 코드에 기록하지 말고 환경변수나 파라미터로 주입합니다 ([§4](#4-credentials) 참고). 루트·일반 사용자는 `admin` DB 에 만들어지므로 연결 문자열에 **`authSource=admin`** 을 붙입니다.
 
 ### Python (`pymongo`)
 
@@ -150,7 +150,7 @@ db.dropUser("analyst")                                                 // 사용
 
 - **mongosh** — MongoDB Shell. MongoDB 에 접속해 명령을 실행하는 공식 CLI 이며, `mongo:7` 이미지에 함께 들어 있습니다.
 - **database** — collection 을 담는 최상위 논리 단위 (관계형 DB 의 database 에 해당). 첫 쓰기 때 자동 생성됩니다.
-- **collection** — 도큐먼트를 담는 그릇 (관계형 DB 의 테이블에 해당). 스키마가 고정되지 않습니다.
+- **collection** — document 를 담는 그릇 (관계형 DB 의 테이블에 해당). schema 가 고정되지 않습니다.
 - **document** — MongoDB 의 기본 레코드. 필드-값 쌍으로 이뤄진 JSON 형태이며 내부적으로 **BSON** (Binary JSON) 으로 저장됩니다.
 - **authSource** — 사용자 자격증명이 저장된 DB. 사용자를 `admin` 에 만들면 연결 시 `authSource=admin` 을 지정합니다.
 
@@ -164,7 +164,7 @@ db.dropUser("analyst")                                                 // 사용
 | Connect | `docker compose exec mongo mongosh -u <user> -p <pwd>` | 컨테이너 안의 mongosh 로 접속합니다. |
 | Database | `show dbs` · `use <db>` · `db.dropDatabase()` | DB 목록·선택·삭제. |
 | Collection | `show collections` · `db.createCollection("<c>")` | collection 목록·생성 (보통 첫 insert 로 자동 생성). |
-| Write | `db.<c>.insertOne({...})` · `db.<c>.insertMany([...])` | 도큐먼트 삽입. |
+| Write | `db.<c>.insertOne({...})` · `db.<c>.insertMany([...])` | document 삽입. |
 | Read | `db.<c>.find({<filter>})` · `db.<c>.findOne({...})` · `db.<c>.countDocuments({...})` | 조회. |
 | Update | `db.<c>.updateOne({<filter>}, { $set: {...} })` | 수정. |
 | Delete | `db.<c>.deleteOne({<filter>})` · `db.<c>.deleteMany({...})` | 삭제. |

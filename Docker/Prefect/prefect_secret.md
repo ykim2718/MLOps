@@ -75,7 +75,7 @@ if __name__ == "__main__":
 
 ## 5. Per-User Secrets
 
-user별로 다른 값을 주려면 **블록 이름에 user를 박아** 저장하고, 코드가 실행 중인 user에 맞는 이름을 고른다.
+user별로 다른 값을 주려면 **블록 이름에 user를 넣어** 저장하고, 코드가 실행 중인 user에 맞는 이름을 고른다.
 
 ```python
 # 등록 (user별 1회)

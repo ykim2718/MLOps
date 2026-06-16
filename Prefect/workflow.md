@@ -104,7 +104,7 @@ study.optimize(objective, n_trials=20)
 
 ### Versioning
 
-데이터셋을 갱신할 때 이전 버전을 덮어쓰지 않고 보존합니다. 버전을 경로에 박아 (`.../v1/`, `.../v2/`) 새 버전은 새 경로로 올리고, `catalog` 테이블에는 버전마다 새 레코드를 추가합니다.
+데이터셋을 갱신할 때 이전 버전을 덮어쓰지 않고 보존합니다. 버전을 경로에 넣어 (`.../v1/`, `.../v2/`) 새 버전은 새 경로로 올리고, `catalog` 테이블에는 버전마다 새 레코드를 추가합니다.
 
 - **MinIO 경로 규칙**: `s3://datasets/<DatasetId>/<Version>/...`
 - **이름 규칙 (`DatasetId`·`Version`)**: 소문자·숫자·`_`·`.` 만 사용합니다 (공백·대문자·`-` 불가). 이 값이 그대로 MinIO 경로와 catalog 키가 되기 때문입니다.
@@ -121,7 +121,7 @@ rows = catalog.find("sydney_202605", fab="fab2")               # 검색(dataset_
 
 ### Lineage
 
-`catalog` 레코드의 `prefect_run_id` (데이터를 만든 실행) 와, MLflow run 태그에 박는 입력 데이터 버전을 **서로 참조** 해 두면 데이터 ↔ 코드 ↔ 결과를 양방향으로 추적할 수 있습니다.
+`catalog` 레코드의 `prefect_run_id` (데이터를 만든 실행) 와, MLflow run 태그에 기록하는 입력 데이터 버전을 **서로 참조** 해 두면 데이터 ↔ 코드 ↔ 결과를 양방향으로 추적할 수 있습니다.
 
 ```
 데이터(버전) ──사용──▶ 코드(Prefect run) ──생성──▶ 결과(MLflow run / 모델)

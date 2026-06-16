@@ -297,7 +297,7 @@ AWS_SECRET_ACCESS_KEY=CHANGE_ME
 
 > **선택 사항입니다.** Worker Node 하나로 충분하면 이 절은 건너뛰어도 됩니다. user 가 자기 컴퓨터의 로컬 자원 (특히 GPU) 에서 학습을 돌려야 하거나, 처리량을 분산하고 싶을 때만 필요합니다.
 
-Prefect 의 **server** (job 대기열·대시보드) 와 **worker** (실제 실행 주체) 는 분리되어 있습니다. 따라서 user 는 Control Node 를 건드리지 않고, **자기 컴퓨터에서 worker 만 띄워 같은 server 의 work pool 에 붙일 수 있습니다.** 그러면 그 user 에게 배정된 job 은 user 의 로컬 자원 (GPU 등) 에서 실행됩니다.
+Prefect 의 **server** (job 대기열·대시보드) 와 **worker** (실제 실행 주체) 는 분리되어 있습니다. 따라서 user 는 Control Node 를 변경하지 않고, **자기 컴퓨터에서 worker 만 띄워 같은 server 의 work pool 에 붙일 수 있습니다.** 그러면 그 user 에게 배정된 job 은 user 의 로컬 자원 (GPU 등) 에서 실행됩니다.
 
 > 즉 이 절은 곧 **다른 머신에서 `prefect worker` 를 띄워 같은 Prefect server 에 붙이는 것**입니다 — 도커 Worker Node 와 동일한 메커니즘이며, 설치 방식만 로컬 (`pip`) 입니다. 연결은 그 머신에서 `PREFECT_API_URL` 을 server 주소로 설정한 뒤 `prefect worker start --pool <pool>` 로 같은 work pool 을 바라보게 하면 됩니다 (아래 단계).
 
