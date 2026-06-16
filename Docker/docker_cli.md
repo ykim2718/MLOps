@@ -1,6 +1,15 @@
-# Docker Commands
+# Docker CLI (Command Line Interface)
 
 각 컴포넌트를 도커로 띄우고 운영할 때 공통으로 쓰는 명령을 모았습니다. 명령은 해당 `docker-compose.yml` 이 있는 폴더에서 실행하며, `<network>` · `<service>` · `<file>` 은 실제 이름으로 바꿔 씁니다.
+
+## 0. Version
+
+```powershell
+docker compose version             # Compose v2 설치 여부와 버전을 확인한다.
+docker version                     # Docker Engine/CLI 버전을 확인한다.
+```
+
+> 신버전은 `docker compose` (공백), 구버전은 `docker-compose` (하이픈) 입니다. `docker compose version` 이 정상 출력되면 v2 환경입니다.
 
 ## 1. Shared Network
 
