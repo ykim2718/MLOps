@@ -183,15 +183,15 @@ prefect config set PREFECT_API_URL="http://<Control Node IP>:4200/api"
 
 이 설정은 job 을 **trigger** 할 때 (`prefect deployment run ...`), **Prefect Secret 블록을 등록/조회** 할 때, 그 밖에 Prefect server 와 통신하는 client 작업 전반에 필요합니다.
 
-### Code Execution Methods
+### Execution Scenarios
 
-| Case | Trigger | Trigger Loc | Execution Mode | Execution Loc | Credentials |
-|------|---------|-------------|----------------|---------------|-------------|
-| **A** | admin | Control Node | serve | Control Node | 불필요 |
-| **B** | user | client 컴퓨터 | work pool | Worker Node | 불필요 |
-| **C** | user | Control Node | serve | Control Node | 필요 |
-| **D** | user | client 컴퓨터 | serve | client 컴퓨터 | 필요 |
-| **E** | user | client 컴퓨터 | work pool | client 컴퓨터 | 필요 |
+| Case | Trigger | Trigger Location | Execution Mode | Worker Location | Execution Location | Credentials | Reference |
+|------|---------|------------------|----------------|-----------------|--------------------|-------------|-----------|
+| **A** | admin | Server<br>(Control Node) | serve | — | Server | 불필요 | — |
+| **B** | user | Server<br>(Control Node) | serve | — | Server | 필요 | — |
+| **C** | user | Client | serve | — | Client | 필요 | — |
+| **D** | user | Client | work pool | 공유 Worker Node | Server | 불필요 | — |
+| **E** | user | Client | work pool | 자체 worker (client 컴퓨터) | Client | 필요 | [Appendix D](#appendix-d-additional-worker-attachment) |
 
 **Credentials** 열은 코드를 실행하는 주체 (serve mode 면 그 python 프로세스, work pool mode 면 `prefect_worker`) 가 MinIO·PostgreSQL 에 접속할 **자격증명을 user 가 직접 공급해야 하는지** 를 나타냅니다.
 
