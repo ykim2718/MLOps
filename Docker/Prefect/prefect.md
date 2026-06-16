@@ -419,3 +419,47 @@ prefect worker start --pool pool-1
 $env:CREATE_POOL="false"; $env:WORK_POOL="pool-1"; docker compose -f docker-compose.worker.yml up -d
 ```
 
+## Appendix E. Monitoring
+
+work pool·worker·flow run 상태를 확인하는 방법입니다.
+
+### work pool 목록 · 상세
+
+```powershell
+prefect work-pool ls                 # server 에 등록된 work pool 전체 (이름·타입·동시성)
+prefect work-pool inspect <pool>     # 특정 pool 상세 (설정·base job template)
+```
+
+### pool 에 붙은 worker
+
+worker 는 heartbeat 로 추적되며 전용 CLI 목록 명령이 없습니다. 아래 중 하나로 봅니다.
+
+- **UI** — `http://<Control Node IP>:4200` 의 Work Pools → 해당 pool → Workers (online 여부·last polled).
+- **API (REST)**:
+
+```powershell
+curl -X POST "http://<Control Node IP>:4200/api/work_pools/<pool>/workers/filter" -H "Content-Type: application/json" -d "{}"
+```
+
+- **Python client**:
+
+```python
+import asyncio
+from prefect.client.orchestration import get_client
+
+async def main():
+    async with get_client() as c:
+        workers = await c.read_workers_for_work_pool(work_pool_name="default")
+        for w in workers:
+            print(w.name, w.status, w.last_heartbeat_time)   # 이름·online/offline·마지막 heartbeat
+
+asyncio.run(main())
+```
+
+> worker 의 online/offline 은 heartbeat 기준이라, worker 를 끄면 잠시 뒤 offline 으로 바뀝니다 (즉시 사라지지 않음).
+
+### flow run
+
+- UI 대시보드 `http://<Control Node IP>:4200` 의 **Flow Runs** 에서 실행 상태·로그를 확인합니다.
+- CLI: `prefect flow-run ls` (최근 run 목록).
+
