@@ -1,19 +1,33 @@
-# Prefect 기동 스크립트 — 역할(server/worker)을 골라 해당 compose 파일을 띄운다.
+# Prefect 기동 스크립트 — 역할(server/worker)의 compose 를 띄운다.
 #
-#   .\set_docker.ps1                 # 기본값: server (제어 노드, 머신 A)
-#   .\set_docker.ps1 -Role worker    # worker (워커 노드, 머신 B)
+# worker compose 의 command 안 bash 는 docker compose up 시점에 ${CREATE_POOL}/${WORK_POOL}/${WORKER_LIMIT}
+# 를 "이 셸의 환경변수"에서 보간(compose interpolation)한다. 그래서 up 전에 그 값들을 세션 env 로 올린다.
+# (CONTROL_NODE_HOST·POSTGRES_*·MINIO_* 등은 컨테이너가 env_file=docker-compose.env 로 직접 읽으므로 여기서 설정하지 않는다.)
 #
-# server 는 제어 노드의 다른 서비스(postgres/minio/mlflow)와 서비스명으로 통신하므로 공유 네트워크 mlops 가 필요하다.
-# worker 는 다른 컴퓨터에서 CONTROL_PLANE_HOST(머신 A IP)로 접속하므로 mlops 네트워크가 필요 없다.
+#   .\set_docker.ps1                                                  # server (Control Node)
+#   .\set_docker.ps1 -Role worker                                     # 첫 worker — default pool
+#   .\set_docker.ps1 -Role worker -CreatePool false -WorkPool pool-1  # 추가 worker — 전용 pool
+#
 param(
     [ValidateSet('server', 'worker')]
-    [string]$Role = 'server'
+    [string]$Role = 'server',
+    [ValidateSet('true', 'false')]
+    [string]$CreatePool = 'true',     # true=pool 생성 후 worker 시작(첫 worker), false=생성 건너뜀(추가 worker)
+    [string]$WorkPool = 'default',    # worker 가 폴링할 work pool (전용이면 pool-1 등)
+    [int]$WorkerLimit = 8             # 이 worker 의 동시 실행 상한
 )
+
+$ErrorActionPreference = "Stop"
+
+# worker compose 의 ${...} 보간용 — 현재 셸 환경변수로 올린다(이번 docker compose up 에 적용).
+$env:CREATE_POOL  = $CreatePool
+$env:WORK_POOL    = $WorkPool
+$env:WORKER_LIMIT = "$WorkerLimit"
 
 $compose = "docker-compose.$Role.yml"
 
+# server 는 다른 서비스(postgres/minio/mlflow)와 서비스명으로 통신하므로 공유 네트워크 mlops 가 필요하다(없으면 1회 생성).
 if ($Role -eq 'server') {
-    # 공유 네트워크 mlops 가 없으면 1회 만든다(이미 있으면 그대로 둔다).
     docker network inspect mlops *> $null
     if ($LASTEXITCODE -ne 0) { docker network create mlops | Out-Null }
 }
