@@ -44,10 +44,12 @@ MLflow 는 도커 컨테이너로 실행됩니다. backend 인 PostgreSQL (`mlfl
 # (최초 1회) 예시 파일을 복사해 backend/artifact 접속 값을 채운다. docker-compose.env 는 git 에 커밋하지 않는다.
 Copy-Item docker-compose.env_example docker-compose.env
 
-# 공유 네트워크 mlops 를 만들고(이미 있으면 에러는 무시) 컨테이너를 백그라운드로 띄운다.
+# 공유 네트워크 mlops 를 만들고 (이미 있으면 에러는 무시) 컨테이너를 백그라운드로 띄운다.
 docker network create mlops
-docker compose up -d
+docker compose -p <Project Name> up -d
 ```
+
+> `docker compose -p <Project Name> up -d` 를 실행하면 컨테이너 이름이 `<Project Name>-<Service Name>-<Replica Number>` 형식으로 만들어집니다. Replica Number 는 보통 `1` 하나지만, `--scale <service>=3` 처럼 늘리면 `-2`·`-3` 이 추가로 생깁니다.
 
 실행 후 MLflow UI 는 **`http://<MLflow 호스트>:5000`** 에서 열립니다 (같은 컴퓨터에서는 `localhost`).
 
@@ -90,7 +92,7 @@ mlflow.set_tracking_uri("http://<MLflow 호스트>:5000")   # 같은 PC 면 loca
 with mlflow.start_run(run_name="train"):
     mlflow.log_params({"lr": 0.01, "n_estimators": 150})   # → mlflow DB
     mlflow.log_metric("train_acc", 0.97)                   # → mlflow DB
-    mlflow.log_artifacts("model/")                         # → MinIO(s3://mlflow/...)
+    mlflow.log_artifacts("model/")                         # → MinIO (s3://mlflow/...)
 ```
 
 - `with mlflow.start_run(...)` 의 `__enter__()` 는 새 run 을 만들어 **활성 run 으로 지정하고 `run_id` 를 발급** 합니다. 그래서 블록 안의 `log_params` · `log_metric` · `log_artifacts` 는 인자로 run 을 넘기지 않아도 모두 이 활성 run 에 자동으로 묶입니다.
@@ -155,7 +157,7 @@ mlflow.register_model(model_uri="runs:/<run_id>/model", name="mnist-classifier")
 ```python
 from mlflow.tracking import MlflowClient
 
-# best 버전을 운영 단계로 승격(배포)한다.
+# best 버전을 운영 단계로 승격 (배포) 한다.
 MlflowClient().transition_model_version_stage(
     name="mnist-classifier", version=3, stage="Production")
 ```
@@ -241,9 +243,9 @@ model = mlflow.pyfunc.load_model("models:/mnist-classifier/3")
 
 ```dotenv
 # docker-compose.env_example  (모든 값은 CHANGE_ME placeholder — 실제 값 노출 금지)
-POSTGRES_USER=CHANGE_ME             # backend(PostgreSQL mlflow DB) 계정 — PostgreSQL 쪽과 같은 값
+POSTGRES_USER=CHANGE_ME             # backend (PostgreSQL mlflow DB) 계정 — PostgreSQL 쪽과 같은 값
 POSTGRES_PASSWORD=CHANGE_ME
-AWS_ACCESS_KEY_ID=CHANGE_ME         # artifact(MinIO/S3) 키 — MinIO 루트 계정(또는 발급한 키)과 같은 값
+AWS_ACCESS_KEY_ID=CHANGE_ME         # artifact (MinIO/S3) 키 — MinIO 루트 계정 (또는 발급한 키) 과 같은 값
 AWS_SECRET_ACCESS_KEY=CHANGE_ME
 MLFLOW_S3_ENDPOINT_URL=http://minio:9000
 ```

@@ -112,11 +112,11 @@ study.optimize(objective, n_trials=20)
 ```python
 import catalog                       # catalog 접근 계층
 
-catalog.ensure_schema()              # datasets 테이블 멱등 생성(flow 시작 시 1회)
+catalog.ensure_schema()              # datasets 테이블 멱등 생성 (flow 시작 시 1회)
 catalog.register("sydney_202605", "v2", "s3://datasets/sydney_202605/v2/",
                  created_by="zoo", prefect_run_id="<run_id>",
-                 metadata={"fab": "fab2", "chamber": "CH3"})   # metadata(dict) → JSONB
-rows = catalog.find("sydney_202605", fab="fab2")               # 검색(dataset_id + metadata 키)
+                 metadata={"fab": "fab2", "chamber": "CH3"})   # metadata (dict) → JSONB
+rows = catalog.find("sydney_202605", fab="fab2")               # 검색 (dataset_id + metadata 키)
 ```
 
 ### Lineage
@@ -162,7 +162,7 @@ out_uri = f"s3://models/{member}/{experiment}/{run_id}/model.pt"
 @flow(name="ai-full-pipeline")
 def full_pipeline():
     config = load_config()
-    catalog.ensure_schema()                     # 테이블 보장(멱등)
+    catalog.ensure_schema()                     # 테이블 보장 (멱등)
     ctx = _make_ctx(config)                      # member/experiment/version/run_id (train·test 공유)
     model_dir = training_pipeline(config, ctx)
     test_pipeline(model_dir, ctx)
@@ -179,3 +179,27 @@ server 연결 (`PREFECT_API_URL`) 을 설정한 뒤 (상세는 [prefect.md](../D
 - **deployment 등록 후 trigger** — `full_pipeline.serve(name="...")` 로 등록·대기시킨 뒤, `prefect deployment run "ai-full-pipeline/<deployment-name>"` 으로 on-demand/스케줄 실행합니다.
 
 > 빠른 단발 테스트는 즉시 실행을, 반복 실행·스케줄링·여러 팀원 job 관리는 deployment 방식을 씁니다. 실행 결과는 Prefect 대시보드 (http://localhost:4200) 의 Flow Runs 에서 확인합니다.
+
+---
+
+## 8. Inference
+
+학습이 끝나 MLflow 레지스트리에 `Production` 으로 승격된 모델을 불러와 추론하는 단계입니다. 여기서도 **Prefect 는 실행·재시도·로깅을, MLflow 는 모델의 실제 다운로드·로드를** 맡아 역할을 나눕니다.
+
+```python
+from prefect import task, flow
+import mlflow
+
+@task(retries=3)                       # ← Prefect 의 역할: 실행·재시도·로깅
+def load_prod_model():
+    return mlflow.pyfunc.load_model(   # ← MLflow 의 역할: 실제 다운로드·로드
+        "models:/mnist-classifier/Production")
+
+@flow
+def inference_flow():
+    model = load_prod_model()
+    ...
+```
+
+- **Prefect (`@task(retries=3)` / `@flow`)** — 언제·어떤 순서로 실행할지, 실패 시 재시도·로깅을 맡습니다.
+- **MLflow (`mlflow.pyfunc.load_model`)** — `models:/mnist-classifier/Production` 으로 레지스트리에서 실제 모델을 내려받아 로드합니다.
