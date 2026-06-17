@@ -49,6 +49,11 @@ services:
     networks:
       - mlops
     restart: unless-stopped
+    logging:
+      driver: json-file             # 기본 드라이버. stdout 로그를 JSON 파일로 저장한다.
+      options:
+        max-size: "10m"             # 파일 하나가 10MB 를 넘으면 회전한다.
+        max-file: "10"              # 최대 10개까지 보관하고 오래된 것부터 삭제한다.
 
 volumes:
   mongo-data:
@@ -67,9 +72,36 @@ networks:
 - `healthcheck` 는 `mongosh` 로 `db.adminCommand({ ping: 1 })` 을 보내 기동 완료를 확인합니다. 명령 안의 `$$MONGO_INITDB_ROOT_USERNAME` 처럼 `$$` 는 compose 가 `$` 로 바꿔 컨테이너 셸이 `env_file` 값으로 확장합니다.
 - `networks: mlops` 는 같은 호스트의 다른 서비스가 `mongo` 서비스명으로 접속하도록 공유 외부 네트워크에 연결합니다.
 - `restart: unless-stopped` 는 컨테이너가 비정상 종료되어도 자동으로 다시 띄웁니다 (사용자가 직접 멈춘 경우는 제외합니다).
+- `logging` 은 stdout 로그를 저장하는 `json-file` 드라이버에 회전 (rotation) 을 걸어, 파일 하나가 `max-size` (10MB) 를 넘으면 새 파일로 바꾸고 최대 `max-file` (10개) 까지만 보관합니다. 생략하면 로그가 무한정 커집니다. 로그 파일의 실제 위치는 `docker inspect --format '{{.LogPath}}' <Project Name>-mongo-1` 로 확인하고, 내용은 `docker logs <Project Name>-mongo-1` 으로 봅니다.
 - PostgreSQL 의 init SQL 같은 **DB 생성 단계가 없습니다** — DB·collection 은 첫 insert 때 자동으로 생성됩니다.
 
 > ⚠️ 루트 계정은 볼륨이 **빈 최초 기동 때만** 만들어집니다. 이미 데이터가 있는 볼륨에서는 `MONGO_INITDB_*` 를 바꿔도 반영되지 않으므로, 계정을 다시 설정하려면 볼륨을 비우거나 (`docker compose down -v`) 아래 [§5](#5-granular-database-access-control) 처럼 `mongosh` 로 수동 생성합니다.
+
+### Data Location
+
+`mongo-data` 는 named volume 이라 저장 위치를 Docker 가 정합니다. 실제 경로는 OS 마다 다릅니다.
+
+| OS | 실제 저장 위치 |
+|----|----------------|
+| Linux | `/var/lib/docker/volumes/<Project Name>_mongo-data/_data` |
+| Windows 11 (Docker Desktop) | WSL2 VM 내부에 저장되어 `C:\` 경로로는 직접 보이지 않음 |
+
+위치는 다음 명령으로 확인합니다 (출력의 `Mountpoint` 가 실제 경로입니다).
+
+```bash
+docker volume inspect <Project Name>_mongo-data
+```
+
+데이터를 **직접 지정한 로컬 폴더**에 두려면 named volume 대신 bind mount 를 씁니다. 왼쪽을 `.` 이나 절대 경로로 적으면 됩니다.
+
+```yaml
+services:
+  mongo:
+    volumes:
+      - ./mongo-data:/data/db    # compose 파일 옆 mongo-data 폴더에 저장 (직접 접근 가능)
+
+# bind mount 만 쓰면 아래 named volume 선언은 필요 없다.
+```
 
 ## 3. Access
 

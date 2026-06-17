@@ -21,6 +21,11 @@ services:
     networks:
       - mlops
     restart: unless-stopped
+    logging:
+      driver: json-file             # 기본 드라이버. stdout 로그를 JSON 파일로 저장한다.
+      options:
+        max-size: "10m"             # 파일 하나가 10MB 를 넘으면 회전한다.
+        max-file: "10"              # 최대 10개까지 보관하고 오래된 것부터 삭제한다.
 
 volumes:
   mongo-data:
