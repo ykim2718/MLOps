@@ -12,7 +12,10 @@ services:
       - ./app:/app
     networks:
       - mlops
-    restart: unless-stopped
+    # 단발성 실행: 앱이 끝나면 컨테이너를 Exited 상태로 두고 재시작하지 않는다.
+    # 종료 코드와 로그는 'docker compose logs' / 'docker ps -a' 로 그대로 확인할 수 있다.
+    # YAML 이 no 를 boolean 으로 해석하므로 반드시 따옴표로 감싼다.
+    restart: "no"
 
 # 제어 노드 서비스들이 공유하는 외부 네트워크. set_docker.ps1 이 미리 생성한다.
 networks:
