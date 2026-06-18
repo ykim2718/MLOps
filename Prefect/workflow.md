@@ -25,13 +25,13 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄우고 실행하기 
 
 | Component | Service | Role | Dashboard | Docs |
 |-----------|---------|------|-----------|-----------|
-| **Prefect** | `prefect_server` · `prefect_pool` | 오케스트레이션 (파이프라인 실행/스케줄링). server 는 job 수집·UI, 디스패처 (`prefect_pool`) 는 job 마다 실행 컨테이너를 띄워 실행을 맡습니다. | http://localhost:4200 | [prefect.md](../Docker/Prefect/prefect.md) |
+| **Prefect** | `prefect_server` · `prefect_worker` | 오케스트레이션 (파이프라인 실행/스케줄링). server 는 job 수집·UI, 디스패처 (`prefect_worker`) 는 job 마다 Pipeline Flow 컨테이너를 띄워 실행을 맡습니다. | http://localhost:4200 | [prefect.md](../Docker/Prefect/prefect.md) |
 | **MinIO** | `minio` | 대용량 데이터/모델/아티팩트 저장 (S3 호환). 버킷은 `datasets`·`models`·`mlflow` 입니다. | http://localhost:9001 | [minio.md](../Docker/MinIO/minio.md) |
 | **MLflow** | `mlflow` | 실험 (params·metrics) 추적, 모델 레지스트리. backend=`postgres`, artifact=`minio`. | http://localhost:5000 | [mlflow.md](../Docker/MLflow/mlflow.md) |
 | **PostgreSQL** | `postgres` | 모든 도구의 메타데이터 DB. `prefect`·`mlflow`·`optuna`·`catalog` 4개 논리 DB 를 운영합니다. | :5432 | [postgresql.md](../Docker/PostgreSQL/postgresql.md) |
 | **Optuna** | (라이브러리) | 하이퍼파라미터 튜닝 (trial 탐색). study storage 로 `postgres` 의 `optuna` DB 를 씁니다. | — | [§5](#5-optuna) |
 
-> 이 스택은 **Control Node** 에 `postgres`·`minio`·`mlflow`·`prefect_server` 를 모아 띄우고, **Worker Node** 에 디스패처 (`prefect_pool`) 를 띄워 job 마다 실행 컨테이너를 만드는 **Docker work pool** 구조입니다. 코드는 deployment 의 git 소스로 run 컨테이너에 전달됩니다 (상세는 [prefect.md](../Docker/Prefect/prefect.md)).
+> 이 스택은 한 호스트에 `postgres`·`minio`·`mlflow`·`prefect_server`·`prefect_worker` (디스패처) 를 모아 띄우고, 디스패처가 job 마다 **Pipeline Flow 컨테이너** 를 일시적으로 띄우는 **Docker work pool** 구조입니다. 각 컨테이너는 받은 `git_commit` 으로 checkout 해 실행하고 끝나면 스스로 파괴됩니다 (상세는 [prefect.md](../Docker/Prefect/prefect.md)).
 
 ## 3. Data Flow
 
@@ -175,10 +175,10 @@ def full_pipeline():
 
 server 연결 (`PREFECT_API_URL`) 을 설정한 뒤 (상세는 [prefect.md](../Docker/Prefect/prefect.md) §5·§6), 다음 방식으로 실행합니다.
 
-- **Docker work pool (주력)** — deployment 를 git 소스로 등록하면 (`flow.from_source(<git-repo-url>, "flow.py:full_pipeline").deploy(work_pool_name="docker-pool")`), `prefect deployment run "ai-full-pipeline/<deployment-name>"` 시 디스패처가 job 마다 실행 컨테이너를 띄우고 그 컨테이너가 git 으로 코드를 받아 실행합니다. 여러 팀원·여러 코드베이스·동시 실행에 적합합니다.
-- **Serve mode (단순)** — `full_pipeline.serve(name="...")` 로 등록·대기시킨 뒤 같은 방식으로 trigger 합니다. `.serve()` 를 띄운 프로세스가 직접 실행하므로 단일 머신·단순 구성에 적합합니다.
+- **Docker work pool (주력)** — 팀 공통 이미지 (Pipeline Flow) 로 deployment 를 등록한 뒤 `prefect deployment run "pipeline/<deployment>" -p git_commit=<commit> -p minio_version=<ver>` 로 trigger 하면, 디스패처가 job 마다 컨테이너를 띄우고 그 컨테이너가 `git checkout <commit>` 후 실행합니다. 팀원마다 자기 커밋을 넘겨 동시에 독립 실행할 수 있습니다.
+- **Serve mode (단순)** — `full_pipeline.serve(name="...")` 로 등록·대기시킨 뒤 trigger 합니다. `.serve()` 를 띄운 프로세스가 직접 실행하므로 단일 머신·단순 구성에 적합합니다.
 
-> 코드 전달·버전 고정 (git 커밋 고정 = 코드 버전, 이미지 태그 = 런타임 버전) 의 상세는 [prefect.md](../Docker/Prefect/prefect.md) §7 을 참고합니다. 실행 결과는 Prefect 대시보드 (http://localhost:4200) 의 Flow Runs 에서 확인합니다.
+> 버전 고정 (git_commit = 코드 버전, 이미지 태그 = 런타임 버전, minio_version = 데이터 버전) 의 상세는 [prefect.md](../Docker/Prefect/prefect.md) §7 을 참고합니다. 실행 결과는 Prefect 대시보드 (http://localhost:4200) 의 Flow Runs 에서 확인합니다.
 
 ---
 

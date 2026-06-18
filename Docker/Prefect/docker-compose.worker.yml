@@ -1,15 +1,14 @@
-# Prefect Worker (디스패처, "prefect_pool") — Worker Node 에서 실행한다.
-# docker-type work pool 을 폴링하다가 job 마다 AI/ML 실행 이미지(prefect_worker)로
+# Prefect Worker (디스패처) — docker-type work pool 을 폴링하다가 job 마다 Pipeline Flow 이미지로
 # 컨테이너를 띄워 코드를 실행시키고, 끝나면 정리한다. 이 컨테이너 자신은 코드를 실행하지 않는다.
 #
 # - 형제(sibling) 컨테이너를 띄우기 위해 호스트 도커 소켓을 마운트한다.
 #   (Windows/Docker Desktop 도 리눅스 컨테이너에 /var/run/docker.sock 로 노출된다.)
 # - docker worker 는 prefect-docker 패키지가 필요하므로 기동 시 설치한다(이미지로 구우려면 별도 Dockerfile).
-# - run 컨테이너에 적용할 공통 설정(이미지·env·network)은 docker-pool-template.json(base job template)에 둔다.
+# - Pipeline Flow 컨테이너에 적용할 공통 설정(이미지·env·network·volume)은 docker-pool-template.json 에 둔다.
 #
 # 기동:  .\set_docker.ps1 -Role worker
 services:
-  prefect_pool:
+  prefect_worker:
     image: prefecthq/prefect:3-latest
     env_file:
       - docker-compose.env          # CONTROL_NODE_HOST (같은 머신+mlops 면 prefect_server)
