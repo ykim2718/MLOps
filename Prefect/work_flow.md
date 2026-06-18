@@ -150,7 +150,7 @@ out_uri = f"s3://models/{member}/{experiment}/{run_id}/model.pt"
 | 데이터셋 + 버전·메타데이터 | 실제 데이터 → MinIO `s3://datasets/...`, 메타 → PostgreSQL `catalog` DB |
 | flow/task run 상태·로그 | PostgreSQL `prefect` DB |
 
-> 위에서 코드가 **직접 접속**하는 곳은 MinIO 와 PostgreSQL 의 `catalog`·`optuna` DB 뿐입니다 — `mlflow`·`prefect` DB 는 MLflow server·Prefect server 가 대신 접속합니다. 자격증명 (`MINIO_*` / `POSTGRESQL_CATALOG_DSN` / `POSTGRESQL_OPTUNA_DSN`) 셋업은 [prefect.md](../Docker/Prefect/prefect.md) §5 Credentials, DB 별 권한 분리는 [postgresql.md](../Docker/PostgreSQL/postgresql.md) §5 를 참고합니다.
+> 위에서 코드가 **직접 접속**하는 곳은 MinIO 와 PostgreSQL 의 `catalog`·`optuna` DB 뿐입니다 — `mlflow`·`prefect` DB 는 MLflow server·Prefect server 가 대신 접속합니다. 자격증명 (`MINIO_*` / `POSTGRESQL_CATALOG_DSN` / `POSTGRESQL_OPTUNA_DSN`) 셋업은 [prefect.md](../Docker/Prefect/prefect.md) §6 Credentials, DB 별 권한 분리는 [postgresql.md](../Docker/PostgreSQL/postgresql.md) §5 를 참고합니다.
 
 ---
 
@@ -171,18 +171,108 @@ def full_pipeline():
 - **버전**: `ctx["version"] = "run-<runid8>"` — 한 번 돌릴 때마다 새 데이터 버전이 생기고 `prefect_run_id` 로 계보가 연결됩니다.
 - **graceful**: catalog/MinIO 가 떠 있지 않아도 (스택 미기동) 등록·업로드는 경고만 출력하고 로컬 파이프라인은 끝까지 실행됩니다.
 
-### Execution
+---
 
-server 연결 (`PREFECT_API_URL`) 을 설정한 뒤 (상세는 [prefect.md](../Docker/Prefect/prefect.md) §7), 다음 방식으로 실행합니다.
+## 8. Python Execution
 
-- **Docker work pool (주력)** — 팀 공통 이미지 (Pipeline Flow) 로 deployment 를 등록한 뒤 `prefect deployment run "pipeline/<deployment>" -p git_commit=<commit> -p minio_version=<ver>` 로 trigger 하면, dispatcher 가 job 마다 컨테이너를 띄우고 그 컨테이너가 `git checkout <commit>` 후 실행합니다. 팀원마다 자기 커밋을 넘겨 동시에 독립 실행할 수 있습니다.
-- **Serve mode (단순)** — `full_pipeline.serve(name="...")` 로 등록·대기시킨 뒤 trigger 합니다. `.serve()` 를 띄운 프로세스가 직접 실행하므로 단일 머신·단순 구성에 적합합니다.
+### Server Connection
 
-> 버전 고정 (git_commit = 코드 버전, 이미지 태그 = 런타임 버전, minio_version = 데이터 버전) 의 상세는 [prefect.md](../Docker/Prefect/prefect.md) §8 을 참고합니다. 실행 결과는 Prefect 대시보드 (http://localhost:4200) 의 Flow Runs 에서 확인합니다.
+Python client (dispatcher 또는 job 을 trigger 하는 노드) 가 **어느 Prefect server 에 연결할지** 주소를 지정합니다. **최초 1회** 설정하면 이후 모든 client 명령이 이 server 를 향합니다.
+
+```powershell
+prefect config set PREFECT_API_URL="http://<Host IP>:4200/api"
+# Use localhost for <Host IP> on the same computer.
+```
+
+이 설정은 job 을 **trigger** 할 때 (`prefect deployment run ...`), **deployment 를 등록** 할 때, **Prefect Secret 블록을 등록/조회** 할 때 등 server 와 통신하는 client 작업 전반에 필요합니다.
+
+### Code-to-Container Flow
+
+trigger 는 코드를 보내지 않습니다. server 는 **deployment 의 참조 + 실행 파라미터** (`git_commit`·`minio_version`) 만 전달하고, 컨테이너가 그 커밋으로 직접 전환해 실행합니다.
+
+```
+[client] trigger(git_commit, minio_version) -> [server] enqueue run -> [prefect_worker] pull the job
+                                                                            |
+                                                                            +- (1) spawn a container from the Pipeline Flow image
+                                                                            +- (2) git fetch && git checkout <git_commit>   (Step A)
+                                                                            +- (3) prepare minio_version data, run code      (Step B/C)
+                                                                            +- (4) save results, then auto-remove            (Step D)
+```
+
+### ML Payload Sample
+
+git 으로 전달되어 컨테이너 안에서 `python train.py` 로 실행되는 **실제 ML 코드** 예시입니다. 오케스트레이터 ([prefect.md](../Docker/Prefect/prefect.md) §5.2) 가 이 코드를 하위 프로세스로 부릅니다 — 바뀌는 부분은 이 payload 이고, `git_commit` 으로 어떤 버전을 돌릴지 고릅니다.
+
+```python
+# train.py — the git-delivered ML payload the orchestrator runs (illustrative)
+import mlflow
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score
+
+def main():
+    mlflow.set_tracking_uri("http://mlflow:5000")            # MLflow tracking server
+    X_tr, y_tr, X_val, y_val = load_dataset("data/v3_best")  # the MinIO-cached version (Step B)
+    with mlflow.start_run():                                 # MLflow auto-tags the git commit
+        clf = RandomForestClassifier(n_estimators=300, random_state=42)
+        clf.fit(X_tr, y_tr)
+        acc = accuracy_score(y_val, clf.predict(X_val))
+        mlflow.log_metric("val_accuracy", acc)               # metric -> PostgreSQL (mlflow DB)
+        mlflow.sklearn.log_model(clf, "model")               # artifact -> MinIO
+
+if __name__ == "__main__":
+    main()
+```
+
+> 필요한 자격증명 (`MINIO_*`·`catalog`·`optuna`) 은 [prefect.md](../Docker/Prefect/prefect.md) §6 처럼 `Secret.load(...)` 로 받습니다. MLflow 는 git repo 안에서 돌면 git 커밋을 자동 태그하므로 모델 ↔ 코드가 연결됩니다 (§9).
+
+### Deployment & Trigger
+
+**Pipeline Flow 이미지 ([prefect.md](../Docker/Prefect/prefect.md) §5.1, `pipeline-flow:latest`)** 에 코드가 구워져 있으므로 별도 git 소스 지정 없이 **그 이미지의 entrypoint** 로 등록합니다 (server·worker 이미지가 아니라 Pipeline Flow 이미지입니다). 팀원·코드베이스 구분은 deployment 를 따로 두지 않고 **`git_commit` 파라미터** 로 처리합니다.
+
+```python
+from pipeline import pipeline
+
+# Register — to docker-pool with the Pipeline Flow image (entrypoint pipeline.py:pipeline must exist in the image).
+pipeline.deploy(
+    name="team",
+    work_pool_name="docker-pool",
+    image="pipeline-flow:latest",
+    build=False, push=False,        # code is already in the image, so skip build/push
+)
+```
+
+```powershell
+# Trigger — pass the commit and data version as parameters.
+prefect deployment run "pipeline/team" -p git_commit=a1b2c3d -p minio_version=v3_best
+```
+```python
+from prefect.deployments import run_deployment
+run_deployment("pipeline/team", parameters={"git_commit": "a1b2c3d", "minio_version": "v3_best"})
+```
+
+> 팀원마다 자기 커밋만 넘기면 같은 deployment·같은 이미지로 각자 다른 코드 버전을 동시에 돌릴 수 있습니다 (컨테이너가 각자 checkout).
 
 ---
 
-## 8. Inference
+## 9. Code Delivery & Versioning
+
+Prefect 자체는 코드를 버전관리하지 않습니다 (오케스트레이터일 뿐). 이 구성에서는 **세 축** 으로 버전이 고정됩니다.
+
+| Axis | Pinned by | Meaning |
+|------|-----------|---------|
+| **Code version** | `git_commit` parameter (`git checkout <commit>`) | 어떤 소스 커밋으로 실행할지 — 커밋 고정 시 완전 재현 |
+| **Runtime version** | Pipeline Flow image tag | 라이브러리 + 베이스 소스 버전 |
+| **Data version** | `minio_version` parameter | 어떤 데이터 버전을 쓸지 (불변 경로) |
+
+- **코드 버전** — trigger 시 `git_commit` 을 커밋 SHA 로 넘기면, 컨테이너가 그 커밋으로 `checkout` 해 실행하므로 항상 같은 코드가 돕니다. 브랜치명을 넘기면 "그 시점 최신" 이 됩니다.
+- **런타임 버전** — 이미지 태그 (`pipeline-flow:latest`) 가 라이브러리를 고정합니다. 라이브러리를 바꾸면 새 태그로 빌드합니다.
+- **모델 ↔ 코드 연결** — MLflow 는 git repo 안에서 run 을 돌리면 git 커밋 SHA 를 자동 태그로 남기므로, "이 모델이 어떤 코드로 학습됐나" 는 MLflow 의 git 커밋 태그로 추적됩니다 (데이터 lineage 는 카탈로그가 담당).
+
+> **Private repo** — 이미지 빌드의 `git clone` 과 런타임 `git fetch` 가 private repo 면 토큰이 필요합니다. 빌드 시 토큰을 build secret 으로 주입하거나, 런타임 토큰을 Prefect Secret 으로 받아 인증된 remote 로 fetch 합니다. public repo 면 그대로 됩니다.
+
+---
+
+## 10. Inference
 
 학습이 끝나 MLflow 레지스트리에 `Production` 으로 승격된 모델을 불러와 추론하는 단계입니다. 여기서도 **Prefect 는 실행·재시도·로깅을, MLflow 는 모델의 실제 다운로드·로드를** 맡아 역할을 나눕니다.
 
