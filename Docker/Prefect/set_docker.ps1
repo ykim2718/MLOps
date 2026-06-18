@@ -1,36 +1,37 @@
-# Prefect 기동 스크립트 — 역할(server/worker)의 compose 를 띄운다.
+# Prefect startup script — brings up the compose stack for the given role (server/worker).
 #
-# worker compose 의 command 안 bash 는 docker compose up 시점에 ${CREATE_POOL}/${WORK_POOL}/${WORKER_LIMIT}
-# 를 "이 셸의 환경변수"에서 보간(compose interpolation)한다. 그래서 up 전에 그 값들을 세션 env 로 올린다.
-# (CONTROL_NODE_HOST·POSTGRES_*·MINIO_* 등은 컨테이너가 env_file=docker-compose.env 로 직접 읽으므로 여기서 설정하지 않는다.)
+# The bash in the worker compose command interpolates ${CREATE_POOL}/${WORK_POOL}/${WORKER_LIMIT}
+# from "this shell's environment" at docker compose up time (compose interpolation). So they are
+# exported to the session env before up.
+# (CONTROL_NODE_HOST, POSTGRES_*, MINIO_* etc. are read directly by the container from env_file=docker-compose.env.)
 #
 #   .\set_docker.ps1                                                      # server (Control Node)
-#   .\set_docker.ps1 -Role worker                                         # 첫 디스패처 — docker-pool 생성 후 시작
-#   .\set_docker.ps1 -Role worker -CreatePool false -WorkPool docker-gpu  # 추가 디스패처 — 전용 pool 폴링
+#   .\set_docker.ps1 -Role worker                                         # first dispatcher — create docker-pool then start
+#   .\set_docker.ps1 -Role worker -CreatePool false -WorkPool docker-gpu  # extra dispatcher — poll a dedicated pool
 #
 param(
     [ValidateSet('server', 'worker')]
     [string]$Role = 'server',
     [ValidateSet('true', 'false')]
-    [string]$CreatePool = 'true',       # true=pool 생성 후 디스패처 시작(첫 디스패처), false=생성 건너뜀(추가 디스패처)
-    [string]$WorkPool = 'docker-pool',  # 디스패처가 폴링할 docker work pool (전용이면 docker-gpu 등)
-    [int]$WorkerLimit = 8               # 이 디스패처가 동시에 띄우는 run 컨테이너 상한
+    [string]$CreatePool = 'true',       # true=create pool then start dispatcher (first); false=skip create (extra dispatcher)
+    [string]$WorkPool = 'docker-pool',  # docker work pool the dispatcher polls (e.g. docker-gpu for a dedicated one)
+    [int]$WorkerLimit = 8               # max run containers this dispatcher spawns concurrently
 )
 
 $ErrorActionPreference = "Stop"
 
-# worker compose 의 ${...} 보간용 — 현재 셸 환경변수로 올린다(이번 docker compose up 에 적용).
+# For the worker compose ${...} interpolation — export to the current shell env (applies to this docker compose up).
 $env:CREATE_POOL  = $CreatePool
 $env:WORK_POOL    = $WorkPool
 $env:WORKER_LIMIT = "$WorkerLimit"
 
 $compose = "docker-compose.$Role.yml"
 
-# 같은 머신에서는 server·디스패처·run 컨테이너가 공유 네트워크 mlops 로 서비스명 통신하므로 두 역할 모두 필요하다.
-# (다른 머신의 Worker Node 라면 worker compose 의 networks 블록을 빼고 CONTROL_NODE_HOST 를 머신 A 의 IP 로 둔다.)
+# On the same host, server/dispatcher/run containers talk by service name over the shared mlops network, so both roles need it.
+# (For a Worker Node on another machine, remove the networks block in worker compose and set CONTROL_NODE_HOST to the host IP.)
 docker network inspect mlops *> $null
 if ($LASTEXITCODE -ne 0) { docker network create mlops | Out-Null }
 
-# 해당 역할의 compose 스택을 내렸다가(볼륨은 유지) 다시 백그라운드로 띄운다.
+# Bring the role's compose stack down (keeping volumes) and back up in the background.
 docker compose -f $compose down
 docker compose -f $compose up -d
