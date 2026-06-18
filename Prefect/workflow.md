@@ -150,7 +150,7 @@ out_uri = f"s3://models/{member}/{experiment}/{run_id}/model.pt"
 | 데이터셋 + 버전·메타데이터 | 실제 데이터 → MinIO `s3://datasets/...`, 메타 → PostgreSQL `catalog` DB |
 | flow/task run 상태·로그 | PostgreSQL `prefect` DB |
 
-> 위에서 코드가 **직접 접속**하는 곳은 MinIO 와 PostgreSQL 의 `catalog`·`optuna` DB 뿐입니다 — `mlflow`·`prefect` DB 는 MLflow server·Prefect server 가 대신 접속합니다. 자격증명 (`MINIO_*` / `POSTGRESQL_CATALOG_DSN` / `POSTGRESQL_OPTUNA_DSN`) 셋업은 [prefect.md](../Docker/Prefect/prefect.md) §7 Credentials, DB 별 권한 분리는 [postgresql.md](../Docker/PostgreSQL/postgresql.md) §5 를 참고합니다.
+> 위에서 코드가 **직접 접속**하는 곳은 MinIO 와 PostgreSQL 의 `catalog`·`optuna` DB 뿐입니다 — `mlflow`·`prefect` DB 는 MLflow server·Prefect server 가 대신 접속합니다. 자격증명 (`MINIO_*` / `POSTGRESQL_CATALOG_DSN` / `POSTGRESQL_OPTUNA_DSN`) 셋업은 [prefect.md](../Docker/Prefect/prefect.md) §6 Credentials, DB 별 권한 분리는 [postgresql.md](../Docker/PostgreSQL/postgresql.md) §5 를 참고합니다.
 
 ---
 
@@ -173,7 +173,7 @@ def full_pipeline():
 
 ### Execution
 
-server 연결 (`PREFECT_API_URL`) 을 설정한 뒤 (상세는 [prefect.md](../Docker/Prefect/prefect.md) §6·§7), 다음 방식으로 실행합니다.
+server 연결 (`PREFECT_API_URL`) 을 설정한 뒤 (상세는 [prefect.md](../Docker/Prefect/prefect.md) §7), 다음 방식으로 실행합니다.
 
 - **Docker work pool (주력)** — 팀 공통 이미지 (Pipeline Flow) 로 deployment 를 등록한 뒤 `prefect deployment run "pipeline/<deployment>" -p git_commit=<commit> -p minio_version=<ver>` 로 trigger 하면, dispatcher 가 job 마다 컨테이너를 띄우고 그 컨테이너가 `git checkout <commit>` 후 실행합니다. 팀원마다 자기 커밋을 넘겨 동시에 독립 실행할 수 있습니다.
 - **Serve mode (단순)** — `full_pipeline.serve(name="...")` 로 등록·대기시킨 뒤 trigger 합니다. `.serve()` 를 띄운 프로세스가 직접 실행하므로 단일 머신·단순 구성에 적합합니다.
