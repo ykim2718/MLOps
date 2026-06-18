@@ -84,9 +84,23 @@ networks:
 
 > ⚠️ init SQL 은 볼륨이 **비어 있는 최초 기동 때만** 실행됩니다. 이미 데이터가 있는 볼륨에서는 다시 실행되지 않으므로, DB 를 새로 만들려면 볼륨을 비우거나 (`docker compose down -v`) 아래 [Appendix B](#appendix-b-manual-database-provisioning) 처럼 수동으로 만듭니다.
 
+### Credentials
+
+접속 계정은 `docker-compose.env` 한 곳에 모으고, 컨테이너는 `env_file` 로 읽으며 호스트 파이썬은 같은 값을 환경변수로 올려 `os.environ` 에서 읽습니다. 실제 값이 담긴 `docker-compose.env` 는 `.gitignore` 로 git 추적에서 제외하고, 비밀값을 비운 `docker-compose.env_example` 만 커밋합니다.
+
+```dotenv
+# docker-compose.env_example  (모든 값은 CHANGE_ME placeholder — 실제 값 노출 금지)
+POSTGRES_USER=CHANGE_ME
+POSTGRES_PASSWORD=CHANGE_ME
+```
+
+- 컨테이너 셸 명령 안에서 위 값을 참조할 때는 `$$POSTGRES_USER` 처럼 `$$` 로 적습니다. `$$` 는 compose 가 `$` 로 바꿔 컨테이너 셸이 `env_file` 값으로 확장하며, `$` 단독은 compose 가 먼저 가로채므로 쓰지 않습니다.
+- 호스트 파이썬용 접속 문자열 (DSN) 은 `postgresql://<user>:<password>@<host>:5432/<db>` 형식으로 만들어 환경변수 (예: `POSTGRESQL_CATALOG_DSN`) 로 둡니다.
+- 모든 `CHANGE_ME` 는 강한 계정/비밀번호로 교체하고, 실제 `docker-compose.env` 는 git 이 아니라 안전한 채널로 공유합니다.
+
 ## 3. Access
 
-컨테이너가 5432 를 노출하므로, 호스트나 다른 컴퓨터에서 표준 PostgreSQL 클라이언트로 접속할 수 있습니다. 접속 정보는 코드에 기록하지 말고 환경변수나 파라미터로 주입합니다 ([§4](#4-credentials) 참고).
+컨테이너가 5432 를 노출하므로, 호스트나 다른 컴퓨터에서 표준 PostgreSQL 클라이언트로 접속할 수 있습니다. 접속 정보는 코드에 기록하지 말고 환경변수나 파라미터로 주입합니다 ([§2 의 Credentials](#credentials) 참고).
 
 ### Python (`psycopg2` / SQLAlchemy)
 
@@ -123,21 +137,7 @@ docker compose exec postgres psql -U <user> -d catalog -c "\l"   # 논리 DB 목
 
 > catalog **테이블 (예: `datasets`)** 은 인프라에서 만들지 않고 **코드에서 자동으로 만듭니다** (이미 있으면 그대로 두고, 없을 때만 생성합니다). 인프라는 빈 `catalog` DB 까지만 준비합니다.
 
-## 4. Credentials
-
-접속 계정은 `docker-compose.env` 한 곳에 모으고, 컨테이너는 `env_file` 로 읽으며 호스트 파이썬은 같은 값을 환경변수로 올려 `os.environ` 에서 읽습니다. 실제 값이 담긴 `docker-compose.env` 는 `.gitignore` 로 git 추적에서 제외하고, 비밀값을 비운 `docker-compose.env_example` 만 커밋합니다.
-
-```dotenv
-# docker-compose.env_example  (모든 값은 CHANGE_ME placeholder — 실제 값 노출 금지)
-POSTGRES_USER=CHANGE_ME
-POSTGRES_PASSWORD=CHANGE_ME
-```
-
-- 컨테이너 셸 명령 안에서 위 값을 참조할 때는 `$$POSTGRES_USER` 처럼 `$$` 로 적습니다. `$$` 는 compose 가 `$` 로 바꿔 컨테이너 셸이 `env_file` 값으로 확장하며, `$` 단독은 compose 가 먼저 가로채므로 쓰지 않습니다.
-- 호스트 파이썬용 접속 문자열 (DSN) 은 `postgresql://<user>:<password>@<host>:5432/<db>` 형식으로 만들어 환경변수 (예: `POSTGRESQL_CATALOG_DSN`) 로 둡니다.
-- 모든 `CHANGE_ME` 는 강한 계정/비밀번호로 교체하고, 실제 `docker-compose.env` 는 git 이 아니라 안전한 채널로 공유합니다.
-
-## 5. Granular Database Access Control
+## 4. Granular Database Access Control
 
 슈퍼유저 (`POSTGRES_USER`) 는 4개 논리 DB 전부에 전권을 가지므로 **팀원·서비스에게 직접 주지 않습니다.** 대신 PostgreSQL 의 **role** (= 사용자) 을 만들어 **DB 별로 읽기 전용 / 읽기·쓰기** 권한을 좁혀 부여합니다. 권한은 계층적이라 ① DB 접속 (`CONNECT`) → ② 스키마 사용 (`USAGE`) → ③ 테이블 동작 (`SELECT`/`INSERT`/…) 을 함께 줘야 하며, 스키마·테이블 권한은 **대상 DB 에 접속한 상태**에서 실행해야 합니다 (DB 마다 따로).
 
@@ -214,7 +214,7 @@ DROP ROLE analyst;         -- role 삭제
 
 ## Appendix A. SQL Commands
 
-본문 ([§5](#5-granular-database-access-control) 등) 에서 쓰는 SQL 명령을 정리합니다. 슈퍼유저로 접속해 실행하며, 스키마·테이블 권한은 **대상 DB 에 접속한 상태**에서 실행합니다.
+본문 ([§4](#4-granular-database-access-control) 등) 에서 쓰는 SQL 명령을 정리합니다. 슈퍼유저로 접속해 실행하며, 스키마·테이블 권한은 **대상 DB 에 접속한 상태**에서 실행합니다.
 
 | Category | Command | Description |
 |----------|---------|-------------|
@@ -229,7 +229,7 @@ DROP ROLE analyst;         -- role 삭제
 | Drop | `DROP OWNED BY <role>;` · `DROP ROLE <role>;` | role 의 권한·소유 객체를 정리한 뒤 사용자를 삭제합니다. |
 | Database | `CREATE DATABASE <db>;` | 논리 DB 를 만듭니다 (init SQL·수동 프로비저닝). |
 
-> `\du` · `\l` · `\dp` 는 SQL 이 아니라 psql 클라이언트 메타명령입니다 ([§5](#5-granular-database-access-control) 참고).
+> `\du` · `\l` · `\dp` 는 SQL 이 아니라 psql 클라이언트 메타명령입니다 ([§4](#4-granular-database-access-control) 참고).
 
 ## Appendix B. Manual Database Provisioning
 

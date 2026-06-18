@@ -101,6 +101,21 @@ networks:
 - `volumes: ./app:/app` 은 호스트의 `app/` 폴더를 컨테이너 `/app` 에 **bind mount** 합니다. 호스트에서 코드를 고치면 재빌드 없이 컨테이너에 즉시 반영되며, 컨테이너가 `/app` 에 쓴 결과 파일도 호스트에 그대로 나타납니다 ([§3](#3-access) 의 핵심입니다).
 - `restart: "no"` 는 앱이 끝나도 다시 띄우지 않고 `Exited` 상태로 둡니다. 종료 코드와 로그는 `docker compose logs` · `docker ps -a` 로 확인합니다.
 
+### Credentials
+
+다른 서비스 (MongoDB·PostgreSQL 등) 에 접속하기 위한 연결 정보는 `docker-compose.env` 한 곳에 모으고, 컨테이너는 `env_file` 로 읽어 `os.environ` 에서 꺼내 씁니다. 실제 값이 담긴 `docker-compose.env` 는 `.gitignore` 로 git 추적에서 제외하고, 비밀값을 비운 `docker-compose.env_example` 만 커밋합니다.
+
+```dotenv
+# docker-compose.env_example  (Python)
+# Fill every CHANGE_ME with a real value. This file holds secrets, so exclude it from git via .gitignore.
+
+CHANGE_ME=CHANGE_ME
+```
+
+- 접속할 서비스가 정해지면 그 서비스가 요구하는 키 (예: `MONGODB_URI`) 를 이 파일에 추가하고, 코드에서는 `os.environ["MONGODB_URI"]` 처럼 환경변수로 읽습니다.
+- 비밀값은 코드·`docker-compose.yml` 에 평문으로 적지 않습니다. 실제 `docker-compose.env` 는 git 이 아니라 안전한 채널로 공유합니다.
+- 같은 호스트의 서비스끼리는 공유 네트워크 `mlops` 안에서 **서비스명** (예: `mongo`) 으로 접속하므로, 호스트명 자리에 `localhost` 대신 서비스명을 씁니다.
+
 ## 3. Access
 
 이 컨테이너의 핵심 사용법은 **호스트의 파이썬 코드와 데이터를 컨테이너의 파이썬으로 실행하고, 결과 파일을 호스트로 돌려받는 것**입니다. 실행 주체는 항상 컨테이너의 파이썬 (3.11.15 + 설치된 의존성) 이며, 호스트에는 코드·데이터·결과 **파일**만 존재합니다. 이를 가능하게 하는 것이 [§2](#2-docker-setup) 의 bind mount (`./app:/app`) 입니다.
@@ -187,21 +202,6 @@ docker rm -f py-dev
 | 컨테이너 재시작 (`restart`) | 유지됨 |
 | 컨테이너 삭제 후 재생성 (`down` 후 `up`, `--rm`) | 사라짐 |
 | 이미지 재빌드 (`build`) | 사라짐 |
-
-## 4. Credentials
-
-다른 서비스 (MongoDB·PostgreSQL 등) 에 접속하기 위한 연결 정보는 `docker-compose.env` 한 곳에 모으고, 컨테이너는 `env_file` 로 읽어 `os.environ` 에서 꺼내 씁니다. 실제 값이 담긴 `docker-compose.env` 는 `.gitignore` 로 git 추적에서 제외하고, 비밀값을 비운 `docker-compose.env_example` 만 커밋합니다.
-
-```dotenv
-# docker-compose.env_example  (Python)
-# Fill every CHANGE_ME with a real value. This file holds secrets, so exclude it from git via .gitignore.
-
-CHANGE_ME=CHANGE_ME
-```
-
-- 접속할 서비스가 정해지면 그 서비스가 요구하는 키 (예: `MONGODB_URI`) 를 이 파일에 추가하고, 코드에서는 `os.environ["MONGODB_URI"]` 처럼 환경변수로 읽습니다.
-- 비밀값은 코드·`docker-compose.yml` 에 평문으로 적지 않습니다. 실제 `docker-compose.env` 는 git 이 아니라 안전한 채널로 공유합니다.
-- 같은 호스트의 서비스끼리는 공유 네트워크 `mlops` 안에서 **서비스명** (예: `mongo`) 으로 접속하므로, 호스트명 자리에 `localhost` 대신 서비스명을 씁니다.
 
 ## Appendix A. Terminology
 

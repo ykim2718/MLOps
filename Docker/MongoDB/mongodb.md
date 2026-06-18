@@ -75,7 +75,7 @@ networks:
 - `logging` 은 stdout 로그를 저장하는 `json-file` 드라이버에 회전 (rotation) 을 걸어, 파일 하나가 `max-size` (10MB) 를 넘으면 새 파일로 바꾸고 최대 `max-file` (10개) 까지만 보관합니다. 생략하면 로그가 무한정 커집니다. 로그 파일의 실제 위치는 `docker inspect --format '{{.LogPath}}' <Project Name>-mongo-1` 로 확인하고, 내용은 `docker logs <Project Name>-mongo-1` 으로 봅니다.
 - PostgreSQL 의 init SQL 같은 **DB 생성 단계가 없습니다** — DB·collection 은 첫 insert 때 자동으로 생성됩니다.
 
-> ⚠️ 루트 계정은 볼륨이 **빈 최초 기동 때만** 만들어집니다. 이미 데이터가 있는 볼륨에서는 `MONGO_INITDB_*` 를 바꿔도 반영되지 않으므로, 계정을 다시 설정하려면 볼륨을 비우거나 (`docker compose down -v`) 아래 [§5](#5-granular-database-access-control) 처럼 `mongosh` 로 수동 생성합니다.
+> ⚠️ 루트 계정은 볼륨이 **빈 최초 기동 때만** 만들어집니다. 이미 데이터가 있는 볼륨에서는 `MONGO_INITDB_*` 를 바꿔도 반영되지 않으므로, 계정을 다시 설정하려면 볼륨을 비우거나 (`docker compose down -v`) 아래 [§4](#4-granular-database-access-control) 처럼 `mongosh` 로 수동 생성합니다.
 
 ### Data Location
 
@@ -103,9 +103,24 @@ services:
 # bind mount 만 쓰면 아래 named volume 선언은 필요 없다.
 ```
 
+### Credentials
+
+접속 계정은 `docker-compose.env` 한 곳에 모으고, 컨테이너는 `env_file` 로 읽으며 호스트 파이썬은 같은 값을 환경변수로 올려 `os.environ` 에서 읽습니다. 실제 값이 담긴 `docker-compose.env` 는 `.gitignore` 로 git 추적에서 제외하고, 비밀값을 비운 `docker-compose.env_example` 만 커밋합니다.
+
+```dotenv
+# docker-compose.env_example  (모든 값은 CHANGE_ME placeholder — 실제 값 노출 금지)
+MONGO_INITDB_ROOT_USERNAME=CHANGE_ME
+MONGO_INITDB_ROOT_PASSWORD=CHANGE_ME
+```
+
+- 컨테이너 셸 명령 (예: healthcheck) 안에서 위 값을 참조할 때는 `$$MONGO_INITDB_ROOT_USERNAME` 처럼 `$$` 로 적습니다. `$$` 는 compose 가 `$` 로 바꿔 컨테이너 셸이 `env_file` 값으로 확장하며, `$` 단독은 compose 가 먼저 가로채므로 쓰지 않습니다.
+- 호스트 파이썬용 연결 문자열 (URI) 은 `mongodb://<user>:<password>@<host>:27017/?authSource=admin` 형식으로 만들어 환경변수 (예: `MONGODB_URI`) 로 둡니다.
+- 루트·일반 사용자는 `admin` DB 에 만들어지므로, 그 계정으로 인증할 때는 `authSource=admin` 이 필요합니다.
+- 모든 `CHANGE_ME` 는 강한 계정/비밀번호로 교체하고, 실제 `docker-compose.env` 는 git 이 아니라 안전한 채널로 공유합니다.
+
 ## 3. Access
 
-컨테이너가 27017 을 노출하므로, 호스트나 다른 컴퓨터에서 표준 MongoDB 클라이언트로 접속할 수 있습니다. 접속 정보는 코드에 기록하지 말고 환경변수나 파라미터로 주입합니다 ([§4](#4-credentials) 참고). 루트·일반 사용자는 `admin` DB 에 만들어지므로 연결 문자열에 **`authSource=admin`** 을 붙입니다.
+컨테이너가 27017 을 노출하므로, 호스트나 다른 컴퓨터에서 표준 MongoDB 클라이언트로 접속할 수 있습니다. 접속 정보는 코드에 기록하지 말고 환경변수나 파라미터로 주입합니다 ([§2 Credentials](#credentials) 참고). 루트·일반 사용자는 `admin` DB 에 만들어지므로 연결 문자열에 **`authSource=admin`** 을 붙입니다.
 
 ### Python (`pymongo`)
 
@@ -133,22 +148,7 @@ docker compose exec mongo mongosh -u <user> -p <password> --eval "show dbs"
 
 > collection 은 인프라에서 만들지 않고 **코드에서 첫 쓰기 때 자동으로 만들어집니다**. 인프라는 인증이 켜진 빈 인스턴스까지만 준비합니다.
 
-## 4. Credentials
-
-접속 계정은 `docker-compose.env` 한 곳에 모으고, 컨테이너는 `env_file` 로 읽으며 호스트 파이썬은 같은 값을 환경변수로 올려 `os.environ` 에서 읽습니다. 실제 값이 담긴 `docker-compose.env` 는 `.gitignore` 로 git 추적에서 제외하고, 비밀값을 비운 `docker-compose.env_example` 만 커밋합니다.
-
-```dotenv
-# docker-compose.env_example  (모든 값은 CHANGE_ME placeholder — 실제 값 노출 금지)
-MONGO_INITDB_ROOT_USERNAME=CHANGE_ME
-MONGO_INITDB_ROOT_PASSWORD=CHANGE_ME
-```
-
-- 컨테이너 셸 명령 (예: healthcheck) 안에서 위 값을 참조할 때는 `$$MONGO_INITDB_ROOT_USERNAME` 처럼 `$$` 로 적습니다. `$$` 는 compose 가 `$` 로 바꿔 컨테이너 셸이 `env_file` 값으로 확장하며, `$` 단독은 compose 가 먼저 가로채므로 쓰지 않습니다.
-- 호스트 파이썬용 연결 문자열 (URI) 은 `mongodb://<user>:<password>@<host>:27017/?authSource=admin` 형식으로 만들어 환경변수 (예: `MONGODB_URI`) 로 둡니다.
-- 루트·일반 사용자는 `admin` DB 에 만들어지므로, 그 계정으로 인증할 때는 `authSource=admin` 이 필요합니다.
-- 모든 `CHANGE_ME` 는 강한 계정/비밀번호로 교체하고, 실제 `docker-compose.env` 는 git 이 아니라 안전한 채널로 공유합니다.
-
-## 5. Granular Database Access Control
+## 4. Granular Database Access Control
 
 루트 계정 (`MONGO_INITDB_ROOT_USERNAME`) 은 모든 DB 에 전권을 가지므로 **팀원·서비스에게 직접 주지 않습니다.** 대신 MongoDB 의 **user** 를 만들어 **DB 별로 읽기 전용 / 읽기·쓰기** 권한을 좁혀 부여합니다. MongoDB 는 **role** 로 권한을 제어하며, 내장 role `read` (읽기 전용)·`readWrite` (읽기·쓰기) 를 DB 단위로 지정합니다.
 

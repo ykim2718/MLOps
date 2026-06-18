@@ -81,6 +81,22 @@ networks:
 - `env_file` 은 backend 계정 (`POSTGRES_USER`/`POSTGRES_PASSWORD`) 과 artifact 접속 키 (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`), 그리고 MinIO endpoint (`MLFLOW_S3_ENDPOINT_URL`) 를 주입합니다.
 - `networks: mlops` 로 같은 호스트의 `postgres` · `minio` 와 서비스명으로 통신합니다. 그 둘은 별도 compose 라 `depends_on` 을 걸 수 없으므로, `restart: unless-stopped` 로 준비될 때까지 자동 재시도합니다.
 
+### Credentials
+
+접속 값은 `docker-compose.env` 한 파일에 모으고 컨테이너가 `env_file` 로 읽습니다. 실제 값이 담긴 `docker-compose.env` 는 `.gitignore` 로 git 추적에서 제외하고, 비밀값을 비운 `docker-compose.env_example` 만 커밋합니다.
+
+```dotenv
+# docker-compose.env_example  (모든 값은 CHANGE_ME placeholder — 실제 값 노출 금지)
+POSTGRES_USER=CHANGE_ME             # backend (PostgreSQL mlflow DB) 계정 — PostgreSQL 쪽과 같은 값
+POSTGRES_PASSWORD=CHANGE_ME
+AWS_ACCESS_KEY_ID=CHANGE_ME         # artifact (MinIO/S3) 키 — MinIO 루트 계정 (또는 발급한 키) 과 같은 값
+AWS_SECRET_ACCESS_KEY=CHANGE_ME
+MLFLOW_S3_ENDPOINT_URL=http://minio:9000
+```
+
+- 명령 안에서 계정을 참조할 때는 `$$POSTGRES_USER` 처럼 `$$` 로 적습니다. `$$` 는 compose 가 `$` 로 바꿔 컨테이너 셸이 `env_file` 값으로 확장합니다.
+- 모든 `CHANGE_ME` 는 강한 값으로 교체하고, 실제 `docker-compose.env` 는 git 이 아니라 안전한 채널로 공유합니다.
+
 ## 3. Tracking
 
 코드에서 tracking URI 를 MLflow server 로 지정한 뒤, run 안에서 파라미터·지표·산출물을 로깅합니다.
@@ -229,19 +245,3 @@ curl -X POST http://localhost:5001/invocations `
   -H "Content-Type: application/json" `
   -d '{"inputs": [[0.1, 0.2]]}'
 ```
-
-## 6. Credentials
-
-접속 값은 `docker-compose.env` 한 파일에 모으고 컨테이너가 `env_file` 로 읽습니다. 실제 값이 담긴 `docker-compose.env` 는 `.gitignore` 로 git 추적에서 제외하고, 비밀값을 비운 `docker-compose.env_example` 만 커밋합니다.
-
-```dotenv
-# docker-compose.env_example  (모든 값은 CHANGE_ME placeholder — 실제 값 노출 금지)
-POSTGRES_USER=CHANGE_ME             # backend (PostgreSQL mlflow DB) 계정 — PostgreSQL 쪽과 같은 값
-POSTGRES_PASSWORD=CHANGE_ME
-AWS_ACCESS_KEY_ID=CHANGE_ME         # artifact (MinIO/S3) 키 — MinIO 루트 계정 (또는 발급한 키) 과 같은 값
-AWS_SECRET_ACCESS_KEY=CHANGE_ME
-MLFLOW_S3_ENDPOINT_URL=http://minio:9000
-```
-
-- 명령 안에서 계정을 참조할 때는 `$$POSTGRES_USER` 처럼 `$$` 로 적습니다. `$$` 는 compose 가 `$` 로 바꿔 컨테이너 셸이 `env_file` 값으로 확장합니다.
-- 모든 `CHANGE_ME` 는 강한 값으로 교체하고, 실제 `docker-compose.env` 는 git 이 아니라 안전한 채널로 공유합니다.
