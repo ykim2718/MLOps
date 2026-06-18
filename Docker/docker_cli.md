@@ -111,15 +111,15 @@ docker compose -p <Project Name> -f <file>.yml up -d --scale <service>=3
 컨테이너 하나가 호스트 메모리를 과도하게 먹으면 서버 전체가 멈출 수 있습니다. 실행할 때 상한을 걸어 한 컨테이너가 자원을 독차지하지 못하게 막습니다.
 
 ```powershell
-docker run -d --name ml-pipeline -m 4g python:3.10-slim                   # 메모리를 4GB 로 묶어 백그라운드 실행 (-m = --memory).
-docker run -d --name ml-pipeline -m 4g --memory-swap 4g python:3.10-slim  # swap 까지 4GB 로 묶어 초과 사용을 차단한다.
-docker run -d --name ml-pipeline --cpus 2 python:3.10-slim                # CPU 를 2코어로 제한한다.
+docker run -d --name <container> -m <size> <image>                   # 메모리를 <size> 로 묶어 백그라운드 실행 (-m = --memory, 예: 4g).
+docker run -d --name <container> -m <size> --memory-swap <size> <image>  # swap 까지 <size> 로 묶어 초과 사용을 차단한다.
+docker run -d --name <container> --cpus <n> <image>                   # CPU 를 <n> 코어로 제한한다.
 ```
 
 떠 있는 컨테이너의 상한을 바꾸거나 실제 사용량을 살핍니다.
 
 ```powershell
-docker update -m 4g <container>    # 실행 중인 컨테이너의 메모리 상한을 바꾼다.
+docker update -m <size> <container>  # 실행 중인 컨테이너의 메모리 상한을 바꾼다.
 docker stats                       # 컨테이너별 메모리/CPU 사용량을 실시간으로 본다.
 docker stats --no-stream           # 한 번만 찍고 끝낸다 (스크립트용).
 ```
@@ -129,8 +129,8 @@ compose 에서는 서비스에 같은 상한을 걸어 둡니다.
 ```yaml
 # docker-compose.yml — 서비스에 메모리 상한 걸기
 services:
-  ml-pipeline:
-    mem_limit: 4g                  # 이 서비스의 컨테이너를 4GB 로 제한한다.
+  <service>:
+    mem_limit: <size>              # 이 서비스의 컨테이너를 <size> 로 제한한다 (예: 4g).
 ```
 
 > 상한을 넘기면 도커가 그 컨테이너를 강제로 종료합니다 (OOM kill — `docker ps -a` 에서 `Exited` 로 보임). 메모리를 많이 쓰는 학습/추론 작업일수록 상한을 넉넉히 두되, 호스트 전체 메모리보다는 작게 잡아 다른 컨테이너의 몫을 남겨 둡니다.
