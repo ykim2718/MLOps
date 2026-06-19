@@ -316,7 +316,7 @@ def pipeline(git_commit: str, minio_version: str, entrypoint: str = "train.py"):
     subprocess.run(["git", "worktree", "add", "--detach", work, git_commit], cwd=REPO, check=True)
     env = {**os.environ, "MINIO_VERSION": minio_version}                    # team code reads the cached version under /cache
     subprocess.run(["python", entrypoint], cwd=work, env=env, check=True)   # run the team's code in the isolated tree
-    subprocess.run(["git", "worktree", "remove", "--force", work], cwd=REPO, check=True)
+    subprocess.run(["git", "worktree", "remove", "--force", work], cwd=REPO, check=True)  # LT: prevent worktree buildup; ST is auto-removed with the container
 ```
 
 - **자유로운 코드** — `entrypoint` 로 팀원이 자기 스크립트를 지정하므로 코드를 정해진 틀에 맞출 필요가 없습니다. 데이터 읽기·저장은 팀원 코드가 직접 하고, 데이터 버전은 `MINIO_VERSION` 환경변수로 받습니다.
