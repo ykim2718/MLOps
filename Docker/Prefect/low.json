@@ -1,0 +1,48 @@
+{
+  "variables": {
+    "type": "object",
+    "properties": {
+      "name": { "title": "Name", "type": "string" },
+      "image": {
+        "title": "Image",
+        "type": "string",
+        "default": "pipeline-flow:latest"
+      },
+      "image_pull_policy": {
+        "title": "Image Pull Policy",
+        "type": "string",
+        "enum": ["IfNotPresent", "Always", "Never"],
+        "default": "IfNotPresent"
+      },
+      "env": {
+        "title": "Environment Variables",
+        "type": "object",
+        "additionalProperties": { "type": "string" },
+        "default": {
+          "PREFECT_API_URL": "http://prefect_server:4200/api"
+        }
+      },
+      "networks": {
+        "title": "Networks",
+        "type": "array",
+        "items": { "type": "string" },
+        "default": ["mlops"]
+      },
+      "network_mode": { "title": "Network Mode", "type": "string" },
+      "auto_remove": { "title": "Auto Remove", "type": "boolean", "default": true },
+      "mem_limit": { "title": "Memory Limit", "type": "string", "default": "4g" },
+      "stream_output": { "title": "Stream Output", "type": "boolean", "default": true }
+    }
+  },
+  "job_configuration": {
+    "name": "{{ name }}",
+    "image": "{{ image }}",
+    "image_pull_policy": "{{ image_pull_policy }}",
+    "env": "{{ env }}",
+    "networks": "{{ networks }}",
+    "network_mode": "{{ network_mode }}",
+    "auto_remove": "{{ auto_remove }}",
+    "mem_limit": "{{ mem_limit }}",
+    "stream_output": "{{ stream_output }}"
+  }
+}

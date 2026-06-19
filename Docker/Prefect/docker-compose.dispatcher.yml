@@ -3,20 +3,18 @@
 #
 # - Mounts the host docker socket to spawn sibling containers.
 #   (Windows/Docker Desktop also exposes /var/run/docker.sock to Linux containers.)
-# - A docker dispatcher needs the prefect-docker package, so it is installed at startup.
+# - prefect + prefect-docker are baked into the image (Dockerfile.dispatcher), so there is no per-boot install.
 # - The work pool + base job template are registered on the server (see docker-compose.server.yml),
 #   so the dispatcher only polls the pool — no pool creation here.
 #
-# Start:  .\set_docker.ps1 -Role dispatcher -WorkPool high_performance
+# Build (once):  docker build -f Dockerfile.dispatcher -t prefect-dispatcher:latest .
+# Start:         .\set_docker.ps1 -Role dispatcher -WorkPool high_performance
 services:
   prefect_dispatcher:
-    image: prefecthq/prefect:3-latest
+    image: prefect-dispatcher:latest   # built once from Dockerfile.dispatcher (prefect + prefect-docker)
     env_file:
-      - docker-compose.env          # CONTROL_NODE_HOST (prefect_server on the same host)
-    command: >
-      bash -c "pip install --no-cache-dir prefect-docker &&
-               export PREFECT_API_URL=http://$${CONTROL_NODE_HOST:-prefect_server}:4200/api &&
-               prefect worker start --pool ${WORK_POOL:-high_performance} --limit ${WORKER_LIMIT:-8}"
+      - docker-compose.env          # PREFECT_API_URL (the Prefect server API)
+    command: prefect worker start --pool ${WORK_POOL:-high_performance} --limit ${WORKER_LIMIT:-8}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock   # host docker socket, to spawn sibling containers
     networks:
@@ -25,7 +23,7 @@ services:
     restart: unless-stopped
 
 # On the same host this shares the Control Node services' network. set_docker.ps1 creates it beforehand.
-# (For a dispatcher on another machine, remove the networks block and set CONTROL_NODE_HOST to the host IP.)
+# (For a dispatcher on another machine, remove the networks block and set PREFECT_API_URL to http://<host IP>:4200/api.)
 networks:
   mlops:
     external: true

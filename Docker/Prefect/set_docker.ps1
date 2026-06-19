@@ -4,7 +4,7 @@
 #                  Pools live on the server, so dispatchers just poll them afterwards.
 # dispatcher role: starts prefect_dispatcher, which polls the given WorkPool. WORK_POOL/WORKER_LIMIT are
 #                  read from this shell at "docker compose up" (compose interpolation), so they are exported below.
-# (CONTROL_NODE_HOST, POSTGRES_*, MINIO_* etc. are read directly by the container from env_file=docker-compose.env.)
+# (PREFECT_API_URL, POSTGRES_*, MINIO_* etc. are read directly by the container from env_file=docker-compose.env.)
 #
 #   .\set_docker.ps1                                                # server (Control Node): start + register pools
 #   .\set_docker.ps1 -Role dispatcher -WorkPool high_performance    # a high-tier machine
@@ -27,7 +27,7 @@ $env:WORKER_LIMIT = "$WorkerLimit"
 $compose = "docker-compose.$Role.yml"
 
 # On the same host, server/dispatcher/pipeline_flow containers talk by service name over the shared mlops network.
-# (For a dispatcher on another machine, remove the networks block in the dispatcher compose and set CONTROL_NODE_HOST to the host IP.)
+# (For a dispatcher on another machine, remove the networks block in the dispatcher compose and set PREFECT_API_URL to http://<host IP>:4200/api.)
 docker network inspect mlops *> $null
 if ($LASTEXITCODE -ne 0) { docker network create mlops | Out-Null }
 
@@ -37,6 +37,6 @@ docker compose -p $ProjectName -f $compose up -d
 
 # server role: register the work pools (high/low) on the server. set_pool.ps1 retries until the API is ready.
 if ($Role -eq 'server') {
-    & "$PSScriptRoot\set_pool.ps1" -PoolName high_performance  -TemplateFile high.json -ProjectName $ProjectName
-    & "$PSScriptRoot\set_pool.ps1" -PoolName lower_performance -TemplateFile low.json  -ProjectName $ProjectName
+    & "$PSScriptRoot\set_pool.ps1" -PoolName high_performance  -TemplateFile high.json -ConcurrencyLimit 16 -ProjectName $ProjectName
+    & "$PSScriptRoot\set_pool.ps1" -PoolName lower_performance -TemplateFile low.json  -ConcurrencyLimit 4  -ProjectName $ProjectName
 }

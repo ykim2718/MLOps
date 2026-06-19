@@ -10,14 +10,13 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄우고 실행하기 
 
 이 워크플로우는 여러 팀원이 한 server 를 공유하며 AI 학습을 돌릴 때, **데이터·실험·결과를 잃지 않고 추적·재현·공유** 하기 위한 다음을 목표로 합니다.
 
-1. **Lineage (계보 추적)** — 데이터·코드·결과를 양방향으로 역추적합니다 (데이터+코드 → 결과, 결과 → 데이터+코드).
-2. **Monitoring (모니터링)** — Prefect / MLflow / MinIO 대시보드로 진행·결과 현황을 한눈에 봅니다.
-3. **Reproducibility (재현성)** — 데이터 버전·모델 구조·하이퍼파라미터·시드를 고정해 동일 결과를 보장합니다.
-4. **Reusability (재사용성)** — 한 번 만든 워크플로우·피처를 다른 프로젝트에서도 다시 씁니다.
-5. **Persistence (영속성)** — 학습된 모델·상태를 스토리지에 안전하게 저장·유지합니다.
-6. **Resource Management (자원 관리)** — GPU/CPU 공유 자원을 work pool 과 `--limit` 으로 분배해 충돌 없이 돌립니다.
-7. **Scheduled Automation (예약형 자동화)** — cron/interval 스케줄로 무인 실행을 돌립니다.
-8. **Data Versioning (데이터 버전 관리)** — 데이터 catalog 로 검색·선택적 다운로드를 제공합니다 (메타데이터는 PostgreSQL `catalog` DB, 실제 데이터는 MinIO).
+1) **Lineage (계보)** — 데이터·코드·결과를 양방향으로 추적합니다.
+2) **Reproducibility (재현)** — 데이터 버전·하이퍼파라미터·시드를 고정해 동일 결과를 보장합니다.
+3) **Persistence & Versioning (보존·버전)** — 모델·데이터를 catalog 로 버전 보존하고 검색·선택 다운로드합니다 (메타 → PostgreSQL `catalog`, 실데이터 → MinIO).
+4) **Monitoring (모니터링)** — Prefect / MLflow / MinIO 대시보드로 현황을 한눈에 봅니다.
+5) **Reusability (재사용)** — 워크플로우·피처를 다른 프로젝트에서 다시 씁니다.
+6) **Resource Management (자원 관리)** — work pool·`--limit` 으로 공유 GPU/CPU 를 분배합니다.
+7) **Scheduled Automation (자동화)** — cron/interval 스케줄로 무인 실행합니다.
 
 ## 2. Stack
 
