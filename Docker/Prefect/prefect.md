@@ -72,8 +72,8 @@ Prefect 실행 모드는 serve mode 와 work pool mode (LT·ST) 이고, 차이�
 | Mode | Register | Code executor | Isolation | Dependencies | Best for |
 |------|----------|---------------|-----------|--------------|----------|
 | Serve Mode | `flow.serve()` | serve 를 띄운 python | 단일 프로세스 | 그 python 환경 | 단일 머신·단순 |
-| Work Pool Mode - LT Container | `flow.deploy()`<br>`prefect work-pool create --type process` | dispatcher 프로세스 | run 들이 공유 | dispatcher 환경 | 단일/소규모 |
-| Work Pool Mode - ST Container | `flow.deploy()`<br>`prefect work-pool create --type docker` | job 마다 뜨는 컨테이너 | run 마다 컨테이너 격리 | Pipeline Flow 이미지 | 다수 팀원·동시 실행 |
+| Work Pool Mode<br>- LT Container | `flow.deploy()`<br>`prefect work-pool create --type process` | dispatcher 프로세스 | run 들이 공유 | dispatcher 환경 | 단일/소규모 |
+| Work Pool Mode<br>- ST Container | `flow.deploy()`<br>`prefect work-pool create --type docker` | job 마다 뜨는 컨테이너 | run 마다 컨테이너 격리 | Pipeline Flow 이미지 | 다수 팀원·동시 실행 |
 
 LT (Long Term), ST (Short Term)
 
