@@ -34,7 +34,7 @@
         "title": "Volumes",
         "type": "array",
         "items": { "type": "string" },
-        "default": ["pipeline-data-cache:/opt/pipeline/data"]
+        "default": ["pipeline-data-cache:/cache"]
       },
       "mem_limit": { "title": "Memory Limit", "type": "string" },
       "stream_output": { "title": "Stream Output", "type": "boolean", "default": true }

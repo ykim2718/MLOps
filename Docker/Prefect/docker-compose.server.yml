@@ -12,6 +12,9 @@ services:
       - docker-compose.env          # PREFECT_SERVER_DATABASE_CONNECTION_URL 을 주입한다.
     ports:
       - "4200:4200"                 # 대시보드/API. 워커 노드(머신 B)와 클라이언트가 이 포트로 접속한다.
+    volumes:
+      - ./high.json:/opt/high.json:ro   # base job template for the high_performance pool
+      - ./low.json:/opt/low.json:ro     # base job template for the lower_performance pool
     networks:
       - mlops
     restart: unless-stopped
