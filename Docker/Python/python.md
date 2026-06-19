@@ -83,7 +83,7 @@ services:
   python:
     build: .                        # Build the image from the Dockerfile in the current folder.
     env_file:
-      - docker-compose.env          # Inject connection info.
+      - docker-compose.env         # Inject connection info.
     volumes:
       # Connect the host's app/ to the container's /app so code changes apply without a rebuild.
       - ./app:/app
