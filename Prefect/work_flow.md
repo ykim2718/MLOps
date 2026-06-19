@@ -212,7 +212,7 @@ from sklearn.metrics import accuracy_score
 
 def main():
     mlflow.set_tracking_uri("http://mlflow:5000")            # MLflow tracking server
-    X_tr, y_tr, X_val, y_val = load_dataset(f"/cache/{os.environ['MINIO_VERSION']}")  # the MinIO-cached version (Step B)
+    X_tr, y_tr, X_val, y_val = load_dataset(os.environ["MINIO_VERSION"])  # read this version directly from MinIO (Step B)
     with mlflow.start_run():                                 # MLflow auto-tags the git commit
         clf = RandomForestClassifier(n_estimators=300, random_state=42)
         clf.fit(X_tr, y_tr)
