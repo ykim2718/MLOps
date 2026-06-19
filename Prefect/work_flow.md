@@ -234,7 +234,10 @@ if __name__ == "__main__":
 from prefect import flow
 
 # Register once (admin); entrypoint given explicitly as "<file>:<flow function>".
-src = flow.from_source(source=".", entrypoint="pipeline.py:pipeline")  # "." = platform repo holding pipeline.py
+src = flow.from_source(
+    source=".",                          # the platform repo dir holding pipeline.py
+    entrypoint="pipeline.py:pipeline",   # <file>:<@flow function>
+)
 common = dict(image="pipeline-flow:latest", build=False, push=False)   # reuse the prebuilt image (code already baked)
 src.deploy(name="high", work_pool_name="high_performance",  **common)
 src.deploy(name="low",  work_pool_name="lower_performance", **common)
