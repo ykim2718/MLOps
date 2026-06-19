@@ -228,15 +228,16 @@ if __name__ == "__main__":
 
 ### Deployment & Trigger
 
-**Pipeline Flow 이미지 ([prefect.md](../Docker/Prefect/prefect.md) §5.1, `pipeline-flow:latest`)** 에 **orchestrator (`pipeline.py`) 가 들어 있으므로** 별도 git 소스 지정 없이 **그 이미지의 entrypoint** 로 등록합니다 (server·dispatcher 이미지가 아니라 `pipeline_flow` 이미지입니다). 팀원·코드베이스 구분은 **`git_repo`·`git_commit` 파라미터** 로, **성능 등급** 은 **등급별 deployment** (`pipeline/high`·`pipeline/low` — 각각 등급 pool 에 바인딩) 로 처리합니다 ([prefect.md](../Docker/Prefect/prefect.md) §1·§4.3).
+**Pipeline Flow 이미지 ([prefect.md](../Docker/Prefect/prefect.md) §5.1, `pipeline-flow:latest`)** 에 **orchestrator (`pipeline.py`) 가 들어 있으므로**, deployment entrypoint 를 **`pipeline.py:pipeline` 로 명시** 해 그 이미지로 등록합니다 (server·dispatcher 이미지가 아니라 `pipeline_flow` 이미지입니다). 이 등록은 **플랫폼·관리자가 1회** 하며 팀원 payload (`train.py`) 에는 넣지 않습니다. 팀원·코드베이스 구분은 **`git_repo`·`git_commit` 파라미터** 로, **성능 등급** 은 **등급별 deployment** (`pipeline/high`·`pipeline/low` — 각각 등급 pool 에 바인딩) 로 처리합니다 ([prefect.md](../Docker/Prefect/prefect.md) §1·§4.2).
 
 ```python
-from pipeline import pipeline
+from prefect import flow
 
-# Register one deployment per performance tier; each binds to that tier's pool.
-common = dict(image="pipeline-flow:latest", build=False, push=False)  # code is already in the image
-pipeline.deploy(name="high", work_pool_name="high_performance",  **common)
-pipeline.deploy(name="low",  work_pool_name="lower_performance", **common)
+# Register once (admin); entrypoint given explicitly as "<file>:<flow function>".
+src = flow.from_source(source=".", entrypoint="pipeline.py:pipeline")  # "." = platform repo holding pipeline.py
+common = dict(image="pipeline-flow:latest", build=False, push=False)   # reuse the prebuilt image (code already baked)
+src.deploy(name="high", work_pool_name="high_performance",  **common)
+src.deploy(name="low",  work_pool_name="lower_performance", **common)
 ```
 
 ```powershell

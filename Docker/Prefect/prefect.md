@@ -365,12 +365,14 @@ COPY pipeline.py .                    # orchestrator (deployment entrypoint); te
 docker build -t pipeline-flow:latest .
 ```
 
-- **entrypoint 등록** — `.deploy()` 로 deployment 를 등록할 때 Prefect 가 그 flow 의 위치를 **deployment entrypoint** `pipeline.py:pipeline` (`<경로>:<flow 함수>`) 로 잡아 **server 의 deployment 레코드 (`prefect` DB)** 에 저장합니다 (`prefect deployment inspect` / UI 에서 확인). 경로는 컨테이너 작업 디렉터리 (`/opt`) 기준이라 거기 COPY 된 `pipeline.py` 를 가리킵니다. 팀원·등급 구분은 deployment 이름·pool 로 둡니다.
+- **entrypoint 등록** — `from_source(entrypoint="pipeline.py:pipeline")` 로 **deployment entrypoint** (`<파일>:<flow 함수>`) 를 명시해 등록하면, 그 문자열이 **server 의 deployment 레코드 (`prefect` DB)** 에 저장됩니다 (`prefect deployment inspect` / UI 에서 확인). 경로는 컨테이너 작업 디렉터리 (`/opt`) 기준이라 거기 COPY 된 `pipeline.py` 를 가리킵니다. **이 등록은 플랫폼·관리자가 1회** 하는 일이고 (팀원·등급 구분은 deployment 이름·pool), 팀원 payload (`train.py`) 에는 넣지 않습니다.
 
 ```python
-# Register once (e.g., on the Control Node). The entrypoint is recorded as "pipeline.py:pipeline".
-pipeline.deploy(name="high", work_pool_name="high_performance",
-                image="pipeline-flow:latest", build=False, push=False)
+# Register once (admin); the entrypoint is given explicitly as "<file>:<flow function>".
+from prefect import flow
+flow.from_source(source=".", entrypoint="pipeline.py:pipeline").deploy(   # "." = platform repo holding pipeline.py
+    name="high", work_pool_name="high_performance",
+    image="pipeline-flow:latest", build=False, push=False)
 ```
 
 - **누가 실행하나** — trigger 되면 dispatcher 가 `pipeline_flow` 컨테이너를 띄우고, 그 안의 **Prefect 런타임이 위 entrypoint (`pipeline.py:pipeline`) 를** run 파라미터 (`git_repo`·`git_commit`·`minio_version`·`payload`) 와 함께 호출합니다. 사람이 직접 실행하지 않습니다.
