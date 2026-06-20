@@ -31,7 +31,7 @@ docker network create mlops
 docker compose up -d --build
 ```
 
-> `run_server.ps1` (Windows) · `run_server.sh` (Linux) 은 위 네트워크 생성과 `docker compose down` / `up` 을 한 번에 처리하는 편의 스크립트입니다. 다만 코드만 바꾸고 의존성은 그대로일 때는 재빌드가 필요 없으므로, 의존성을 바꿨을 때만 `--build` 를 붙입니다.
+> `run_python.ps1` (Windows) · `run_python.sh` (Linux) 은 위 네트워크 생성과 `docker compose down` / `up` 을 한 번에 처리하는 편의 스크립트입니다. 다만 코드만 바꾸고 의존성은 그대로일 때는 재빌드가 필요 없으므로, 의존성을 바꿨을 때만 `--build` 를 붙입니다.
 
 ### `requirements.txt`
 
