@@ -245,7 +245,7 @@ RUN pip install --no-cache-dir "prefect>=3,<4" prefect-docker
 
 ### 3.2 Container
 
-dispatcher 는 호스트 도커 소켓을 마운트해 형제 컨테이너를 띄웁니다.
+dispatcher 는 호스트 도커 소켓을 마운트해 `pipeline_flow` 컨테이너를 띄웁니다.
 
 ```yaml
 # docker-compose.dispatcher.yml
