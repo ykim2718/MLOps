@@ -65,6 +65,8 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
 
 ## 2. Prefect Server Container
 
+### Server Setup
+
 server 는 backend 인 `postgres` 가 먼저 떠 있어야 하므로 **PostgreSQL → (MinIO/MLflow) → Prefect server** 순으로 띄웁니다.
 
 ```yaml
