@@ -2,7 +2,7 @@
 
 > 공식 사이트: [https://www.prefect.io/](https://www.prefect.io/)
 
-Prefect stack 을 한 호스트에서 **세 구성요소 (Prefect Server · Prefect Dispatcher · Pipeline Flow)** 로 나눠 도커로 실행합니다. **AI/ML flow 의 실행은 하나의 python docker 이미지** (`pipeline-flow:latest`) **로만 하고, 그 flow 이미지는 dispatcher 이미지와 분리** 합니다. job 마다 그 이미지로 **일시적 컨테이너 (ephemeral)** 를 띄웠다 파괴하며, **여러 팀원이 동시에 다수 job 을 trigger** 하는 환경을 전제로 Prefect 의 **Docker work pool** 로 구현합니다. Prefect work pool 의 type 은 `process` (worker 자기 컨테이너 안에서 실행) · `docker` (job 마다 컨테이너) · `kubernetes` (job 마다 pod) 가 있는데, 이 스택은 **`docker`** 를 씁니다 — flow 를 dispatcher 와 **분리된 별도 컨테이너** 에서 실행하기 위함입니다.
+Prefect stack 을 한 호스트에서 **세 구성요소 (Prefect Server · Prefect Dispatcher · Pipeline Flow)** 로 나눠 도커로 실행합니다. **AI/ML flow 의 실행은 하나의 python docker 이미지** (`pipeline-flow:latest`) **로만 하고, 그 flow 이미지는 dispatcher 이미지와 분리** 합니다. job 마다 그 이미지로 **일시적 컨테이너 (ephemeral)** 를 띄웠다 파괴하며, **여러 팀원이 동시에 다수 job 을 trigger** 하는 환경을 전제로 Prefect 의 **Docker work pool** 로 구현합니다. Prefect work pool 의 type 은 `process` · `docker` · `kubernetes` 가 있는데 ([Appendix C](#appendix-c-execution-architecture)), 이 스택은 **`docker`** 를 씁니다 — flow 를 dispatcher 와 **분리된 별도 컨테이너** 에서 실행하기 위함입니다.
 
 Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단일 진입점** 입니다. 단 **코드는 실행하지 않습니다** — 실행은 항상 Pipeline Flow 컨테이너 안에서 일어납니다.
 
@@ -193,7 +193,7 @@ Copy-Item docker-compose.env_example docker-compose.env
 docker build -f Dockerfile.dispatcher -t prefect-dispatcher:latest .
 ```
 
-기동은 공용 스크립트 **`set_docker.ps1`** (server·dispatcher 공용; 코드는 [Appendix C](#appendix-c-set_dockerps1)) 으로 합니다 — dispatcher 는 `.\set_docker.ps1 -Role dispatcher -WorkPool <등급>` 으로 머신마다 1회 실행합니다.
+기동은 공용 스크립트 **`set_docker.ps1`** (server·dispatcher 공용; 코드는 [Appendix D](#appendix-d-set_dockerps1)) 으로 합니다 — dispatcher 는 `.\set_docker.ps1 -Role dispatcher -WorkPool <등급>` 으로 머신마다 1회 실행합니다.
 
 ```yaml
 # docker-compose.dispatcher.yml
@@ -402,7 +402,21 @@ ak = Secret.load("minio-access-key").get()   # fetched from the server and used 
 - `prefect deploy` (또는 `flow.deploy(...)`) — deployment 를 등록합니다.
 - `prefect deployment run "<flow>/<deployment>" -p <key>=<value>` — 등록된 deployment 를 파라미터와 함께 trigger 합니다.
 
-## Appendix C. set_docker.ps1
+## Appendix C. Execution Architecture
+
+Prefect 실행 모드는 **serve mode** 와 **work pool mode** 이고, 차이는 **누가 코드를 실행하느냐** 입니다. work pool 은 type (`process`·`docker`·`kubernetes`) 에 따라 실행 주체가 달라지며, 이 스택은 **`docker`** 를 씁니다.
+
+| Mode | Register | Code executor | Isolation | Best for |
+|------|----------|---------------|-----------|----------|
+| Serve Mode | `flow.serve()` | serve python | 단일 프로세스 | 단일 머신·단순 |
+| Work Pool (`process`) | `flow.deploy()`<br>`prefect work-pool create --type process` | worker 컨테이너의 subprocess | dispatcher 와 같은 컨테이너 | 격리 불필요·경량 |
+| Work Pool (`docker`) | `flow.deploy()`<br>`prefect work-pool create --type docker` | flow 컨테이너 | run 마다 컨테이너 격리 | 다수 팀원·동시 실행 (이 문서가 채택) |
+| Work Pool (`kubernetes`) | `flow.deploy()`<br>`prefect work-pool create --type kubernetes` | flow pod | run 마다 pod 격리 | 클러스터·대규모 |
+
+- **공통 — 등록** — **server 는 코드를 실행하지 않습니다** (이름표만 보관).
+- **핵심 차이 — 실행 주체** — work pool type 이 실행 주체를 정합니다. `process` 는 worker 가 자기 컨테이너 안 subprocess 로, `docker` 는 job 마다 뜨는 flow 컨테이너가, `kubernetes` 는 job 마다 뜨는 pod 가 실행합니다. 그 실행 주체의 이미지에 라이브러리가 있어야 합니다.
+
+## Appendix D. set_docker.ps1
 
 각 머신에서 역할 (server | dispatcher) 별로 compose 스택을 띄우는 기동 스크립트입니다 ([§2](#2-prefect-server-container)·[§3.1](#31-dispatcher-docker)).
 
@@ -450,20 +464,6 @@ if ($Role -eq 'server') {
     & "$PSScriptRoot\set_pool.ps1" -PoolName lower_performance -TemplateFile low.json  -ConcurrencyLimit 4  -ProjectName $ProjectName
 }
 ```
-
-## Appendix D. Execution Architecture
-
-Prefect 실행 모드는 **serve mode** 와 **work pool mode** 이고, 차이는 **누가 코드를 실행하느냐** 입니다. work pool 은 type (`process`·`docker`·`kubernetes`) 에 따라 실행 주체가 달라지며, 이 스택은 **`docker`** 를 씁니다.
-
-| Mode | Register | Code executor | Isolation | Best for |
-|------|----------|---------------|-----------|----------|
-| Serve Mode | `flow.serve()` | serve python | 단일 프로세스 | 단일 머신·단순 |
-| Work Pool (`process`) | `flow.deploy()`<br>`prefect work-pool create --type process` | worker 컨테이너의 subprocess | dispatcher 와 같은 컨테이너 | 격리 불필요·경량 |
-| Work Pool (`docker`) | `flow.deploy()`<br>`prefect work-pool create --type docker` | flow 컨테이너 | run 마다 컨테이너 격리 | 다수 팀원·동시 실행 (이 스택) |
-| Work Pool (`kubernetes`) | `flow.deploy()`<br>`prefect work-pool create --type kubernetes` | flow pod | run 마다 pod 격리 | 클러스터·대규모 |
-
-- **공통 — 등록** — **server 는 코드를 실행하지 않습니다** (이름표만 보관).
-- **핵심 차이 — 실행 주체** — work pool type 이 실행 주체를 정합니다. `process` 는 worker 가 자기 컨테이너 안 subprocess 로, `docker` 는 job 마다 뜨는 flow 컨테이너가, `kubernetes` 는 job 마다 뜨는 pod 가 실행합니다. 그 실행 주체의 이미지에 라이브러리가 있어야 합니다.
 
 ## Appendix E. set_pool.ps1
 

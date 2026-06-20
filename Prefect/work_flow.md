@@ -53,7 +53,7 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄우고 실행하기 
 
 ## 4. Pipeline
 
-`data preparation(dp) → feature engineering(fe) → training(train) → test` 순으로 진행하며, 각 단계의 산출물이 다음 단계의 입력이 됩니다. 각 단계는 Prefect `@task` 로 감싸고 `@flow` 가 순서를 강제합니다 (앞 단계 산출물이 있어야 다음 단계가 실행됩니다). 이 파이프라인은 팀 payload (`train.py`) 로 작성되어 Prefect 오케스트레이터가 실행합니다 (아래 [§7. Python Execution](#7-python-execution), [prefect.md](../Docker/Prefect/prefect.md) §5.2).
+`data preparation(dp) → feature engineering(fe) → training(train) → test` 순으로 진행하며, 각 단계의 산출물이 다음 단계의 입력이 됩니다. 각 단계는 Prefect `@task` 로 감싸고 `@flow` 가 순서를 강제합니다 (앞 단계 산출물이 있어야 다음 단계가 실행됩니다). 이 파이프라인은 팀 payload (`train.py`) 로 작성되어 Prefect 오케스트레이터가 실행합니다 (아래 [§7. Python Execution](#7-python-execution), [prefect.md](../Docker/Prefect/prefect.md) §4.2).
 
 ```
 [train raw] → train_dp → [transformed] → train_fe → [feature + fe_train.json]
