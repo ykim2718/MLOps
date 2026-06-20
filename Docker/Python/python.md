@@ -26,9 +26,6 @@
 | `docker-compose.yml` | 위 `Dockerfile` 로 이미지를 빌드하고, 볼륨·네트워크·재시작 정책을 붙여 컨테이너로 띄우는 방법을 정의합니다. |
 
 ```powershell
-# (first time only) Copy the example file and fill in the connection info. docker-compose.env is not committed to git.
-Copy-Item docker-compose.env_example docker-compose.env
-
 # Create the shared network mlops (leave it as is if it already exists), then build the image and start the container.
 docker network create mlops
 docker compose up -d --build

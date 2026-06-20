@@ -41,9 +41,6 @@ Artifact: 산출물        (모델 파일은          —                   Arti
 MLflow 는 도커 컨테이너로 실행됩니다. backend 인 PostgreSQL (`mlflow` DB) 과 artifact 인 MinIO (`mlflow` 버킷) 가 **먼저 떠 있어야** 정상 동작하므로, 같은 호스트에서 그 둘을 띄운 뒤 실행합니다. 이 컨테이너는 공유 네트워크 `mlops` 에서 `postgres` · `minio` 를 서비스명으로 접속하므로, 띄우기 전에 그 네트워크가 있어야 합니다.
 
 ```powershell
-# (최초 1회) 예시 파일을 복사해 backend/artifact 접속 값을 채운다. docker-compose.env 는 git 에 커밋하지 않는다.
-Copy-Item docker-compose.env_example docker-compose.env
-
 # 공유 네트워크 mlops 를 만들고 (이미 있으면 에러는 무시) 컨테이너를 백그라운드로 띄운다.
 docker network create mlops
 docker compose -p <Project Name> up -d

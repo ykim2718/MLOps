@@ -13,9 +13,6 @@ MinIO 는 도커 컨테이너로 실행됩니다. 아래는 MinIO 의 `docker-co
 이 컨테이너는 같은 호스트의 다른 서비스 (예: 실험 추적 server) 가 `minio` 라는 **서비스명으로 접속** 하도록 공유 네트워크 `mlops` 에 붙습니다. 따라서 컨테이너를 띄우기 전에 그 네트워크가 있어야 합니다.
 
 ```powershell
-# (최초 1회) 예시 파일을 복사해 루트 계정을 채운다. docker-compose.env 는 git 에 커밋하지 않는다.
-Copy-Item docker-compose.env_example docker-compose.env
-
 # 공유 네트워크 mlops 를 만들고 (이미 있으면 에러는 무시) 컨테이너를 백그라운드로 띄운다.
 docker network create mlops
 docker compose -p <Project Name> up -d
