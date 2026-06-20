@@ -25,7 +25,7 @@ docker network rm mlops            # 네트워크 삭제 (붙은 컨테이너가
 docker network prune               # 어디에도 붙지 않은 네트워크를 일괄 정리한다 (주의).
 ```
 
-> 이미 있는 네트워크를 다시 `create` 하면 `already exists` 에러가 납니다. 무시해도 되며, `set_docker.ps1` 은 존재 여부를 먼저 확인하고 만듭니다.
+> 이미 있는 네트워크를 다시 `create` 하면 `already exists` 에러가 납니다. 무시해도 되며, `docker network ls` 로 존재 여부를 먼저 확인하면 깔끔합니다.
 
 ### 컨테이너 붙이기 / 떼기
 

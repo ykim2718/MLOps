@@ -1,5 +1,5 @@
 # set_pool.ps1 — register (or update) one Prefect work pool on the running server.
-# Idempotent: --overwrite keeps the base job template in sync. Run after the server is up (set_docker.ps1).
+# Idempotent: --overwrite keeps the base job template in sync. Run after the server is up (set_server.ps1).
 #
 #   .\set_pool.ps1 -PoolName high_performance  -TemplateFile high.json -ConcurrencyLimit 16
 #   .\set_pool.ps1 -PoolName lower_performance -TemplateFile low.json  -ConcurrencyLimit 4
@@ -8,7 +8,7 @@ param(
     [Parameter(Mandatory = $true)] [string]$PoolName,      # work pool name, e.g. high_performance | lower_performance
     [Parameter(Mandatory = $true)] [string]$TemplateFile,  # base job template mounted into the server at /templates, e.g. high.json
     [int]$ConcurrencyLimit = 0,                            # pool-wide max concurrent runs (0 = no limit)
-    [string]$ProjectName = 'mlops',                        # docker compose project name (-p); must match set_docker.ps1
+    [string]$ProjectName = 'mlops',                        # docker compose project name (-p); must match set_server.ps1
     [string]$Compose     = 'docker-compose.server.yml'     # the server compose that runs prefect_server
 )
 
