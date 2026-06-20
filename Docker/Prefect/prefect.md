@@ -235,10 +235,13 @@ dispatcher 는 **`docker` work pool** 을 polling 해 job 마다 `pipeline_flow`
 
 docker dispatcher 는 `prefect`·`prefect-docker` 가 필요한데, 부팅 때 설치하지 않고 **전용 이미지를 1회 빌드** 해 씁니다.
 
-```powershell
-# build_dispatcher.ps1 — (once) build the dispatcher image (prefect + prefect-docker baked in).
-docker build -f Dockerfile.dispatcher -t prefect-dispatcher:latest .
+```dockerfile
+# Dockerfile.dispatcher
+FROM python:3.11.15
+RUN pip install --no-cache-dir "prefect>=3,<4" prefect-docker
 ```
+
+빌드는 **`build_dispatcher.ps1`** (코드는 [Appendix F](#appendix-f-build_dispatcherps1)) 으로 합니다 — `.\build_dispatcher.ps1` 로 1회 실행합니다.
 
 ### 3.2 docker compose
 
@@ -268,9 +271,9 @@ networks:
 - **머신마다 실행** — 같은 compose 를 각 컴퓨터에서 자기 등급 `WORK_POOL` 로 띄웁니다. pool 이 server 에 이미 있으니 (§2) dispatcher 는 polling 만 하며, 등급별 첫 머신/추가 머신 구분이 없습니다.
 - `--limit` 은 이 dispatcher 가 **동시에 띄우는 컨테이너 수의 상한** 입니다 (동시성 세 층은 [§2 Work Pool Registration](#work-pool-registration) 의 여러 pool 표 참고).
 
-기동은 **`set_dispatcher.ps1`** (dispatcher 런처; 코드는 [Appendix F](#appendix-f-set_dispatcherps1)) 으로 합니다 — `.\set_dispatcher.ps1 -WorkPool <등급>` 으로 머신마다 1회 실행합니다.
+기동은 **`set_dispatcher.ps1`** (dispatcher 런처; 코드는 [Appendix G](#appendix-g-set_dispatcherps1)) 으로 합니다 — `.\set_dispatcher.ps1 -WorkPool <등급>` 으로 머신마다 1회 실행합니다.
 
-> **보안 주의** — 도커 소켓 마운트는 dispatcher 에 호스트 도커 전체 제어권 (사실상 root) 을 줍니다. 신뢰된 내부망·스터디 용도로 한정하고, 더 강한 격리는 Kubernetes work pool 을 고려합니다 ([Appendix H](#appendix-h-orchestrator-benchmarking)).
+> **보안 주의** — 도커 소켓 마운트는 dispatcher 에 호스트 도커 전체 제어권 (사실상 root) 을 줍니다. 신뢰된 내부망·스터디 용도로 한정하고, 더 강한 격리는 Kubernetes work pool 을 고려합니다 ([Appendix I](#appendix-i-orchestrator-benchmarking)).
 
 ### 3.3 Dispatcher Registration
 
@@ -366,7 +369,7 @@ def pipeline(git_repo: str, git_commit: str, minio_version: str, payload: str = 
 - **팀원별 repo** — `git_repo` 가 **flow 파라미터** 라 deployment 마다 다른 repo 를 기본값으로 등록할 수 있습니다. 팀원은 각자 repo·커밋을 쓰고, run 마다 사설 디렉터리에 `git clone` 되어 서로 간섭하지 않습니다. Prefect 가 `git_repo`·`git_commit` 을 run 파라미터로 자동 기록해 재현·lineage 가 남습니다.
 - **자유로운 코드** — `payload` 로 팀원이 자기 스크립트를 지정하므로 코드를 정해진 틀에 맞출 필요가 없습니다. 데이터 읽기·저장은 팀원 코드가 직접 하고, 데이터 버전은 `MINIO_VERSION` 환경변수로 받습니다.
 - **데이터 이력** — `minio_version` 이 **flow 파라미터** 라서 Prefect 가 run 마다 입력값을 `prefect` DB 에 자동 저장합니다 (UI 의 Flow Run → Parameters). 데이터셋 버전·lineage 는 팀원 코드 (또는 공유 헬퍼) 가 카탈로그에 등록합니다.
-- **이력 자동 저장** — `@flow` 진입 시 Prefect 가 run 의 상태·로그·파라미터를 자동 기록합니다 (대시보드 Flow Runs). 지표·모델은 팀원 코드가 MLflow 로 로깅하면 함께 남습니다 ([Appendix I](#appendix-i-prefect-task)).
+- **이력 자동 저장** — `@flow` 진입 시 Prefect 가 run 의 상태·로그·파라미터를 자동 기록합니다 (대시보드 Flow Runs). 지표·모델은 팀원 코드가 MLflow 로 로깅하면 함께 남습니다 ([Appendix J](#appendix-j-prefect-task)).
 
 ### 4.3 GPU
 
@@ -526,7 +529,16 @@ for ($i = 1; $i -le 10; $i++) {
 }
 ```
 
-## Appendix F. set_dispatcher.ps1
+## Appendix F. build_dispatcher.ps1
+
+dispatcher 이미지 (`prefect-dispatcher:latest`) 를 1회 빌드하는 스크립트입니다 ([§3.1](#31-docker-build)). `Dockerfile.dispatcher` (python + prefect + prefect-docker) 로 빌드하며, 이후 dispatcher 컨테이너는 부팅 때 설치 없이 `prefect worker start` 만 합니다.
+
+```powershell
+# build_dispatcher.ps1 — (once) build the dispatcher image (prefect + prefect-docker baked in).
+docker build -f Dockerfile.dispatcher -t prefect-dispatcher:latest .
+```
+
+## Appendix G. set_dispatcher.ps1
 
 각 dispatcher 머신에서 dispatcher compose 스택을 띄우는 기동 스크립트입니다 ([§3.2](#32-docker-compose)). server 기동과 work pool 등록은 별도입니다 (server 는 [Appendix D](#appendix-d-set_serverps1), pool 은 `set_pool.ps1` — [Appendix E](#appendix-e-set_poolps1)).
 
@@ -565,7 +577,7 @@ docker compose -p $ProjectName -f $compose down
 docker compose -p $ProjectName -f $compose up -d
 ```
 
-## Appendix G. set_flow.ps1
+## Appendix H. set_flow.ps1
 
 Pipeline Flow 이미지 (`pipeline-flow:latest`) 를 1회 빌드하는 스크립트입니다 ([§4.1](#41-image)). flow `Dockerfile`·`requirements.txt`·`pipeline.py` 가 있는 `Prefect/` 폴더에서 실행하며, 빌드 뒤엔 dispatcher 가 job 마다 이 이미지로 flow 컨테이너를 자동으로 띄웁니다.
 
@@ -581,7 +593,7 @@ $ErrorActionPreference = "Stop"
 docker build -t $Image .
 ```
 
-## Appendix H. Orchestrator Benchmarking
+## Appendix I. Orchestrator Benchmarking
 
 "**가벼운 에이전트 (dispatcher) 가 작업을 집어, 작업마다 격리된 일시적 실행 단위를 띄워 실행하고 정리**" 하는 패턴은 오케스트레이션의 업계 표준입니다. 이 스택의 `docker` work pool 은 그 표준의 **단일 호스트 변형** 이고, 규모가 커지면 실행 단위를 컨테이너 → **pod** 로 올린 Kubernetes 변형으로 확장됩니다.
 
@@ -616,7 +628,7 @@ docker build -t $Image .
 
 > granularity 는 **Workflow → Run/Job → Task → Step** 순으로 좁아지고, 실행을 감싸는 껍데기는 **컨테이너 (단일 호스트) / pod (클러스터)** 입니다. 세 단어를 하나로 통일하기보다 이 계층 안에서 구분해 쓰는 것이 업계 표준에 맞습니다.
 
-## Appendix I. Prefect @task
+## Appendix J. Prefect @task
 
 `@task` 를 쓰지 않아도 이력 관리와 재현 (reproducibility) 은 완전히 됩니다. Prefect 에서 실행 흐름을 묶는 핵심 단위는 `@task` 가 아니라 **`@flow`** 이기 때문입니다. `@flow` 데코레이터만 붙이면 그 안의 코드가 일반 함수든 클래스든 **실행 이력과 입력 파라미터가 Prefect Server 에 기록**됩니다.
 
