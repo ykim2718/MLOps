@@ -18,7 +18,7 @@ services:
       - mlops
     restart: unless-stopped
 
-# 제어 노드 서비스들이 공유하는 외부 네트워크. set_server.ps1 이 미리 생성한다.
+# 제어 노드 서비스들이 공유하는 외부 네트워크. run_server.ps1 이 미리 생성한다.
 networks:
   mlops:
     external: true

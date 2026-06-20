@@ -2,7 +2,7 @@
 # 한 인스턴스에서 prefect/mlflow/optuna/catalog 4개 논리 DB 를 운영한다.
 # 최초 기동 시 아래 configs.init_sql 이 4개 DB 를 만든다.
 # 제어 노드 안 다른 서비스(prefect_server, mlflow)가 'postgres' 라는 서비스명으로 접속하도록
-# 공유 네트워크 mlops(external)에 붙는다. (먼저 set_server.ps1 이 'docker network create mlops' 로 만든다.)
+# 공유 네트워크 mlops(external)에 붙는다. (먼저 run_server.ps1 이 'docker network create mlops' 로 만든다.)
 services:
   postgres:
     image: postgres:16
@@ -38,7 +38,7 @@ configs:
 volumes:
   pg-data:
 
-# 제어 노드 서비스들이 공유하는 외부 네트워크. set_server.ps1 이 미리 생성한다.
+# 제어 노드 서비스들이 공유하는 외부 네트워크. run_server.ps1 이 미리 생성한다.
 networks:
   mlops:
     external: true

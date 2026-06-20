@@ -1,6 +1,6 @@
-# set_server.ps1 — bring up the Prefect server compose stack on the Control Node.
+# run_server.ps1 — bring up the Prefect server compose stack on the Control Node.
 param(
-    [string]$ProjectName = 'mlops',                     # docker compose project name (-p); must match set_pool.ps1
+    [string]$ProjectName = 'mlops',                     # docker compose project name (-p); must match register_pool.ps1
     [string]$Yaml        = 'docker-compose.server.yml', # the server compose file
     [string]$Network     = 'mlops'                      # shared external network
 )

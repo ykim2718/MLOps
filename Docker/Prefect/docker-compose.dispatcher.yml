@@ -8,7 +8,7 @@
 #   so the dispatcher only polls the pool — no pool creation here.
 #
 # Build (once):  docker build -f Dockerfile.dispatcher -t prefect-dispatcher:latest .
-# Start:         .\set_dispatcher.ps1 -WorkPool high_performance
+# Start:         .\run_dispatcher.ps1 -WorkPool high_performance
 services:
   prefect_dispatcher:
     image: prefect-dispatcher:latest   # built once from Dockerfile.dispatcher (prefect + prefect-docker)
@@ -22,7 +22,7 @@ services:
     # If the control node (API) starts late and the connection fails, restart and reconnect automatically.
     restart: unless-stopped
 
-# On the same host this shares the Control Node services' network. set_server.ps1 creates it beforehand (set_dispatcher.ps1 also creates it if missing).
+# On the same host this shares the Control Node services' network. run_server.ps1 creates it beforehand (run_dispatcher.ps1 also creates it if missing).
 # (For a dispatcher on another machine, remove the networks block and set PREFECT_API_URL to http://<host IP>:4200/api.)
 networks:
   mlops:

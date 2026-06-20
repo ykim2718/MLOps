@@ -1,12 +1,12 @@
-# set_dispatcher.ps1 — start the Prefect dispatcher compose stack on a worker machine.
+# run_dispatcher.ps1 — start the Prefect dispatcher compose stack on a worker machine.
 #
 # Brings up prefect_dispatcher, which polls the given WorkPool. WORK_POOL/WORKER_LIMIT are read from
 # this shell at "docker compose up" (compose interpolation), so they are exported below.
 # (PREFECT_API_URL etc. are read directly by the container from env_file=docker-compose.env.)
-# Work pools live on the server and are registered there (set_pool.ps1), not here.
+# Work pools live on the server and are registered there (register_pool.ps1), not here.
 #
-#   .\set_dispatcher.ps1 -WorkPool high_performance    # a high-tier machine
-#   .\set_dispatcher.ps1 -WorkPool lower_performance   # a low-tier machine
+#   .\run_dispatcher.ps1 -WorkPool high_performance    # a high-tier machine
+#   .\run_dispatcher.ps1 -WorkPool lower_performance   # a low-tier machine
 #
 param(
     [string]$WorkPool = 'high_performance',  # the work pool this machine polls: high_performance | lower_performance
