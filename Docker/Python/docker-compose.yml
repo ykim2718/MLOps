@@ -1,7 +1,7 @@
 # Python — the Python app container on the control node (machine A).
 # Builds the image from the Dockerfile pinned to version 3.11.15 and auto-runs app/ (start.py) on startup.
 # Joins the shared network mlops (external) so other services on the control node reach it by the service name 'python'.
-# (run_server.ps1 creates it first with 'docker network create mlops'.)
+# (run_python.ps1 creates it first with 'docker network create mlops'.)
 services:
   python:
     build: .                        # Build the image from the Dockerfile in the current folder.
@@ -17,7 +17,7 @@ services:
     # YAML reads no as a boolean, so it must be wrapped in quotes.
     restart: "no"
 
-# External network shared by the control-node services. run_server.ps1 creates it beforehand.
+# External network shared by the control-node services. run_python.ps1 creates it beforehand.
 networks:
   mlops:
     external: true
