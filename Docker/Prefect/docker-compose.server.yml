@@ -13,8 +13,8 @@ services:
     ports:
       - "4200:4200"                 # 대시보드/API. 워커 노드(머신 B)와 클라이언트가 이 포트로 접속한다.
     volumes:
-      - ./high.json:/templates/high.json:ro   # base job template for the high_performance pool
-      - ./low.json:/templates/low.json:ro     # base job template for the lower_performance pool
+      - ./docker-pool-template-high.json:/templates/docker-pool-template-high.json:ro   # base job template for the high_performance pool
+      - ./docker-pool-template-low.json:/templates/docker-pool-template-low.json:ro     # base job template for the lower_performance pool
     networks:
       - mlops
     restart: unless-stopped
