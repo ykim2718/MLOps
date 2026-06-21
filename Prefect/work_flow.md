@@ -53,7 +53,7 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄우고 실행하기 
 
 ## 4. Pipeline
 
-`data preparation(dp) → feature engineering(fe) → training(train) → test` 순으로 진행하며, 각 단계의 산출물이 다음 단계의 입력이 됩니다. 각 단계는 Prefect `@task` 로 감싸고 `@flow` 가 순서를 강제합니다 (앞 단계 산출물이 있어야 다음 단계가 실행됩니다). 이 파이프라인은 팀 payload (`train.py`) 로 작성되어 Prefect orchestrator 가 실행합니다 (아래 [§7. Python Execution](#7-python-execution), [prefect.md](../Docker/Prefect/prefect.md) §4.3).
+`data preparation(dp) → feature engineering(fe) → training(train) → test` 순으로 진행하며, 각 단계의 산출물이 다음 단계의 입력이 됩니다. 각 단계는 Prefect `@task` 로 감싸고 `@flow` 가 순서를 강제합니다 (앞 단계 산출물이 있어야 다음 단계가 실행됩니다). 이 파이프라인은 팀 payload (`my_flow.py`) 로 작성되어 Prefect orchestrator 가 실행합니다 (아래 [§7. Python Execution](#7-python-execution), [prefect.md](../Docker/Prefect/prefect.md) §4.3).
 
 ```
 [train raw] → train_dp → [transformed] → train_fe → [feature + fe_train.json]
@@ -181,22 +181,19 @@ study.optimize(objective, n_trials=20)
 
 ### ML Payload Sample
 
-  git 으로 전달되어 컨테이너 안에서 `python train.py` 로 실행되는 **실제 ML 코드** 예시입니다. 단계 (dp·fe·train·test) 를 **Prefect `@task`** 로 감싸고 `@flow` 로 묶으면, 컨테이너 env 의 `PREFECT_API_URL` 덕분에 이 payload 가 **자기 flow run 과 task** 를 server 에 보고해 **대시보드에서 단계별로** 보입니다 (orchestrator run 과는 별개 flow run). `flow_run_name` 을 `member`·커밋으로 지으면 **누구의 run 인지** 도 구분됩니다. orchestrator ([prefect.md](../Docker/Prefect/prefect.md) §4.3) 가 이 코드를 하위 프로세스로 부릅니다 — 바뀌는 부분은 이 payload 이고, `git_commit` 으로 어떤 버전을 돌릴지 지정합니다.
+  git 으로 전달되어 컨테이너 안에서 `python my_flow.py` 로 실행되는 **실제 ML 코드** 예시입니다. 단계 (dp·fe·train·test) 를 **Prefect `@task`** 로 감싸고 `@flow` 로 묶으면, 컨테이너 env 의 `PREFECT_API_URL` 덕분에 이 payload 가 **자기 flow run 과 task** 를 server 에 보고해 **대시보드에서 단계별로** 보입니다 (orchestrator run 과는 별개 flow run). `flow_run_name` 을 `member`·커밋으로 지으면 **누구의 run 인지** 도 구분됩니다. orchestrator ([prefect.md](../Docker/Prefect/prefect.md) §4.3) 가 이 코드를 하위 프로세스로 부릅니다 — 바뀌는 부분은 이 payload 이고, `git_commit` 으로 어떤 버전을 돌릴지 지정합니다. orchestrator 가 데이터를 `data/` 로 미리 받아 두고 실행 정보 (`--git_repo`·`--git_commit`·`--member`) 와 그 경로 (`--data`) 를 CLI 인자로 넘기므로, payload 는 `argparse` 로 받아 씁니다.
 
   ```python
-  # train.py — git-delivered ML payload; Prefect @task makes each step show in the UI (illustrative)
-  import os
+  # my_flow.py — git-delivered ML payload; Prefect @task makes each step show in the UI (illustrative)
+  import argparse
   import mlflow
   from prefect import flow, task
   from sklearn.ensemble import RandomForestClassifier
   from sklearn.metrics import accuracy_score
 
-  def _run_name() -> str:                                  # label the run by member + commit (UI shows whose run)
-      return f"{os.environ.get('MEMBER', '?')}@{os.environ.get('GIT_COMMIT', '?')[:7]}"
-
   @task
-  def data_prep(version):                                  # dp — read this data version directly from MinIO (Step B)
-      return load_dataset(version)
+  def data_prep(data_dir):                                 # dp — read the files pipeline.py downloaded into --data (Step B)
+      return load_dataset(data_dir)
 
   @task
   def feature_eng(raw):                                    # fe
@@ -212,25 +209,29 @@ study.optimize(objective, n_trials=20)
   def test_model(clf, feat):                               # test
       return accuracy_score(feat.y_val, clf.predict(feat.X_val))
 
-  @flow(name="train", flow_run_name=_run_name)             # the team's own flow run; the 4 tasks nest under it
-  def train():
+  @flow(name="train", flow_run_name="{member}@{git_commit}")   # the team's own flow run; the 4 tasks nest under it
+  def train(data_dir, member="", git_commit=""):
       mlflow.set_tracking_uri("http://mlflow:5000")        # MLflow tracking server
       with mlflow.start_run():                             # MLflow auto-tags the git commit
-          feat = feature_eng(data_prep(os.environ["MINIO_VERSION"]))
+          feat = feature_eng(data_prep(data_dir))
           clf  = train_model(feat)
           acc  = test_model(clf, feat)
           mlflow.log_metric("val_accuracy", acc)           # metric -> PostgreSQL (mlflow DB)
           mlflow.sklearn.log_model(clf, "model")           # artifact -> MinIO
 
   if __name__ == "__main__":
-      train()
+      p = argparse.ArgumentParser()                        # pipeline.py passes these as CLI args (§4.3)
+      p.add_argument("--data"); p.add_argument("--member", default=""); p.add_argument("--git_commit", default="")
+      p.add_argument("--git_repo", default="")             # accepted for completeness; unused here
+      a = p.parse_args()
+      train(a.data, a.member, a.git_commit)
   ```
 
-  > 필요한 자격증명 (`MINIO_*`·`catalog`·`optuna`) 은 [prefect.md](../Docker/Prefect/prefect.md) §5 처럼 `Secret.load(...)` 로 받습니다. MLflow 는 git repo 안에서 돌면 git 커밋을 자동 태그하므로 모델 ↔ 코드가 연결됩니다 (§8).
+  > 데이터 다운로드용 `MINIO_*` 는 orchestrator (`pipeline.py`) 가 쓰고, payload 가 직접 쓰는 자격증명 (`catalog`·`optuna`·MLflow 아티팩트용) 은 [prefect.md](../Docker/Prefect/prefect.md) §5 처럼 `Secret.load(...)` 로 받습니다. MLflow 는 git repo 안에서 돌면 git 커밋을 자동 태그하므로 모델 ↔ 코드가 연결됩니다 (§8).
 
 ### Deployment & Trigger
 
-  **Pipeline Flow 이미지 ([prefect.md](../Docker/Prefect/prefect.md) §4.1, `pipeline-flow:latest`)** 에 **orchestrator (`pipeline.py`) 가 들어 있으므로**, deployment entrypoint 를 **`pipeline.py:pipeline` 로 명시** 해 그 이미지로 등록합니다 (server·dispatcher 이미지가 아니라 `pipeline_flow` 이미지입니다). 이 등록은 **플랫폼·관리자가 1회** 하며 팀원 payload (`train.py`) 에는 넣지 않습니다. 팀원·코드베이스 구분은 **`git_repo`·`git_commit` 파라미터** 로, **성능 등급** 은 **등급별 deployment** (`pipeline/pipelineflow-high`·`pipeline/pipelineflow-low` — 각각 등급 pool 에 바인딩) 로 처리합니다 ([prefect.md](../Docker/Prefect/prefect.md) §1·§4.2).
+  **Pipeline Flow 이미지 ([prefect.md](../Docker/Prefect/prefect.md) §4.1, `pipeline-flow:latest`)** 에 **orchestrator (`pipeline.py`) 가 들어 있으므로**, deployment entrypoint 를 **`pipeline.py:pipeline` 로 명시** 해 그 이미지로 등록합니다 (server·dispatcher 이미지가 아니라 `pipeline_flow` 이미지입니다). 이 등록은 **플랫폼·관리자가 1회** 하며 팀원 payload (`my_flow.py`) 에는 넣지 않습니다. 팀원·코드베이스 구분은 **`git_repo`·`git_commit` 파라미터** 로, **성능 등급** 은 **등급별 deployment** (`pipeline/pipelineflow-high`·`pipeline/pipelineflow-low` — 각각 등급 pool 에 바인딩) 로 처리합니다 ([prefect.md](../Docker/Prefect/prefect.md) §1·§4.2).
 
   ```powershell
   # Register once (admin); definitions in pipelineflow-{high,low}.yml (see prefect.md §4.2), one per tier.

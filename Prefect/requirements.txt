@@ -1,5 +1,5 @@
 # Python dependencies for the shared team Pipeline Flow image (base: python:3.11.15, see Dockerfile).
-# The team source is NOT baked; it is git-cloned at runtime, so only libraries are pinned here.
+# The team source is NOT baked; it is fetched into a git worktree at runtime, so only libraries are pinned here.
 
 # Prefect runtime (flow execution) — previously provided by the prefecthq base image.
 prefect>=3,<4
