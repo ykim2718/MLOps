@@ -20,6 +20,8 @@ docker compose -p <Project Name> up -d
 
 > `docker compose -p <Project Name> up -d` 를 실행하면 컨테이너 이름이 `<Project Name>-<Service Name>-<Replica Number>` 형식으로 만들어집니다. Replica Number 는 보통 `1` 하나지만, `--scale <service>=3` 처럼 늘리면 `-2`·`-3` 이 추가로 생깁니다.
 
+다음은 docker compose 를 위한 yaml 입니다.
+
 ```yaml
 services:
   minio:

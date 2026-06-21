@@ -75,6 +75,8 @@ CMD ["python", "start.py"]
 
 ### `docker-compose.yml`
 
+다음은 docker compose 를 위한 yaml 입니다.
+
 ```yaml
 services:
   python:

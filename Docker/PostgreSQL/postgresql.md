@@ -31,6 +31,8 @@ docker compose -p <Project Name> up -d
 
 아래가 `docker-compose.yml` 입니다.
 
+다음은 docker compose 를 위한 yaml 입니다.
+
 ```yaml
 services:
   postgres:

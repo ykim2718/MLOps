@@ -27,7 +27,7 @@ docker compose -p <Project Name> up -d
 
 > `docker compose -p <Project Name> up -d` 를 실행하면 컨테이너 이름이 `<Project Name>-<Service Name>-<Replica Number>` 형식으로 만들어집니다. Replica Number 는 보통 `1` 하나지만, `--scale <service>=3` 처럼 늘리면 `-2`·`-3` 이 추가로 생깁니다.
 
-아래가 `docker-compose.yml` 입니다.
+다음은 docker compose 를 위한 yaml 입니다.
 
 ```yaml
 services:
@@ -90,6 +90,8 @@ docker volume inspect <Project Name>_mongo-data
 ```
 
 데이터를 **직접 지정한 로컬 폴더**에 두려면 named volume 대신 bind mount 를 씁니다. 왼쪽을 `.` 이나 절대 경로로 적으면 됩니다.
+
+다음은 docker compose 를 위한 yaml 입니다.
 
 ```yaml
 services:

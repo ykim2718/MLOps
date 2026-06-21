@@ -50,6 +50,8 @@ docker compose -p <Project Name> up -d
 
 실행 후 MLflow UI 는 **`http://<MLflow 호스트>:5000`** 에서 열립니다 (같은 컴퓨터에서는 `localhost`).
 
+다음은 docker compose 를 위한 yaml 입니다.
+
 ```yaml
 services:
   mlflow:

@@ -123,9 +123,9 @@ rows = catalog.find("sydney_202605", fab="fab2")               # 검색 (dataset
 `catalog` 레코드의 `prefect_run_id` (데이터를 만든 실행) 와, MLflow run 태그에 기록하는 입력 데이터 버전을 **서로 참조** 해 두면 데이터 ↔ 코드 ↔ 결과를 양방향으로 추적할 수 있습니다.
 
 ```
-데이터(버전) ──사용──▶ 코드(Prefect run) ──생성──▶ 결과(MLflow run / 모델)
-     ▲                                                      │
-     └────────────────  역추적 (결과 → 데이터)  ◀──────────┘
+data (version) ──used by──▶ code (Prefect run) ──produces──▶ result (MLflow run / model)
+   ▲                                                              │
+   └────────────────────  trace back (result → data)  ◀──────────┘
 ```
 
 - **순방향** — 어떤 데이터 버전을 어떤 flow run 이 만들었고, 그 run 에서 나온 MLflow run·모델이 무엇인지 추적합니다.
