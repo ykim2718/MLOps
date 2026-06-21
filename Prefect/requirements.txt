@@ -1,0 +1,26 @@
+# Python dependencies for the shared team Pipeline Flow image (base: python:3.11.15, see Dockerfile).
+# The team source is NOT baked; it is git-cloned at runtime, so only libraries are pinned here.
+
+# Prefect runtime (flow execution) — previously provided by the prefecthq base image.
+prefect>=3,<4
+
+# Object storage (MinIO, S3-compatible) access
+boto3==1.34.131
+
+# Catalog DB (PostgreSQL) access
+psycopg2-binary==2.9.9
+
+# Experiment tracking / model registry
+mlflow==2.14.1
+
+# Hyperparameter tuning
+optuna==3.6.1
+
+# Data processing / parquet I/O
+pandas==2.2.2
+numpy==1.26.4
+pyarrow==16.1.0
+scikit-learn==1.5.0
+
+# Deep learning (large — remove if not needed)
+torch==2.3.1

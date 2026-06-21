@@ -1,0 +1,11 @@
+# Shrink the build context. Source is fetched via git clone in Dockerfile.pipeline_flow, so the context only needs requirements.txt.
+**/__pycache__
+*.pyc
+*.pyo
+.git
+.gitignore
+*.md
+docker-compose.env
+artifacts/
+data/
+model/
