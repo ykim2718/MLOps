@@ -1,14 +1,14 @@
 # AI/ML Workflow Automation — Prefect + MinIO + MLflow + Optuna + PostgreSQL
 
-Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄우고 실행하기 위한 환경입니다. 이 문서는 **전체 워크플로우의 인덱스 (개요)** 로, 각 도구의 상세는 해당 컴포넌트 문서로 연결합니다.
+Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환경입니다. 이 문서는 **전체 워크플로우의 인덱스 (개요)** 이고, 도구별 상세는 컴포넌트 문서로 잇습니다.
 
-이 프로젝트는 **Prefect 를 "실행 orchestrator" 로 두고**, 실험 추적·하이퍼파라미터 튜닝·데이터 보관/버전관리를 담당하는 다른 도구들과 **역할을 나눠 함께 쓰는 것** 을 목적으로 합니다. "언제·무엇을·어떤 순서로 실행할지" 는 Prefect 가 맡고, "그 실행에서 나온 실험 기록·튜닝 결과·데이터/모델" 은 각 도구가 맡습니다.
+**Prefect 를 "실행 orchestrator" 로 두고**, 실험 추적·하이퍼파라미터 튜닝·데이터 보관/버전관리는 다른 도구가 맡아 **역할을 나눠 함께 씁니다**. "언제·무엇을·어떤 순서로 실행할지" 는 Prefect, "그 실행에서 나온 실험 기록·튜닝 결과·데이터/모델" 은 각 도구가 맡습니다.
 
 ---
 
 ## 1. Goals
 
-이 워크플로우는 여러 팀원이 한 server 를 공유하며 AI 학습을 돌릴 때, **데이터·실험·결과를 잃지 않고 추적·재현·공유** 하기 위한 다음을 목표로 합니다.
+여러 팀원이 한 server 를 공유해 AI 학습을 돌릴 때 **데이터·실험·결과를 잃지 않고 추적·재현·공유** 하는 것이 목표입니다.
 
 1) **Lineage** — 데이터·코드·결과를 양방향으로 추적합니다.
 2) **Reproducibility** — 데이터 버전·하이퍼파라미터·시드를 고정해 동일 결과를 보장합니다.
@@ -20,7 +20,7 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄우고 실행하기 
 
 ## 2. Stack
 
-스택의 서비스는 도커로 실행합니다. 각 컴포넌트는 자기 폴더 (`Docker/<컴포넌트>/`) 의 `docker-compose.yml` 로 띄우며, 상세 설치·사용법은 아래 문서를 참고합니다.
+스택 서비스는 도커로 실행합니다. 각 컴포넌트는 자기 폴더 (`Docker/<컴포넌트>/`) 의 `docker-compose.yml` 로 띄우고, 설치·사용법 상세는 아래 문서를 참고합니다.
 
 | Component | Service | Role | Dashboard | Docs |
 |-----------|---------|------|-----------|-----------|
@@ -53,7 +53,7 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄우고 실행하기 
 
 ## 4. Pipeline
 
-`data preparation(dp) → feature engineering(fe) → training(train) → test` 순으로 진행하며, 각 단계의 산출물이 다음 단계의 입력이 됩니다. 각 단계는 Prefect `@task` 로 감싸고 `@flow` 가 순서를 강제합니다 (앞 단계 산출물이 있어야 다음 단계가 실행됩니다). 이 파이프라인은 팀 payload (`my_flow.py`) 로 작성되어 Prefect orchestrator 가 실행합니다 (아래 [§7. Python Execution](#7-python-execution), [prefect.md](../Docker/Prefect/prefect.md) §4.3).
+`data preparation(dp) → feature engineering(fe) → training(train) → test` 순으로, 각 단계 산출물이 다음 단계 입력이 됩니다. 각 단계는 Prefect `@task` 로 감싸고 `@flow` 가 순서를 강제합니다 (앞 단계 산출물이 있어야 다음이 실행). 팀 payload (`my_flow.py`) 로 작성해 Prefect orchestrator 가 실행합니다 (아래 [§7. Python Execution](#7-python-execution), [prefect.md](../Docker/Prefect/prefect.md) §4.3).
 
 ```
 [train raw] → train_dp → [transformed] → train_fe → [feature + fe_train.json]
@@ -67,11 +67,11 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄우고 실행하기 
 
 ### Every Stage Uses MinIO, MLflow, Optuna
 
-  모든 단계 (`dp`·`fe`·`train`·`test`·`eval`) 를 세 도구로 동일하게 감쌉니다.
+  모든 단계 (`dp`·`fe`·`train`·`test`·`eval`) 를 세 도구로 똑같이 감쌉니다.
 
-  - **MinIO** — 각 단계의 입력을 버킷에서 내려받고 (download), 출력을 버킷에 올리며 (upload), `catalog` 에 버전·계보를 기록합니다.
-  - **MLflow** — 각 단계의 파라미터·지표·산출물을 같은 run 아래 로깅합니다.
-  - **Optuna** — 각 단계의 튜닝 가능한 설정 (`optuna.json`) 을 탐색합니다 (test 는 학습에서 고른 best 설정을 재사용합니다).
+  - **MinIO** — 단계 입력을 버킷에서 내려받고 (download), 출력을 올리며 (upload), `catalog` 에 버전·계보를 남깁니다.
+  - **MLflow** — 단계 파라미터·지표·산출물을 같은 run 아래 로깅합니다.
+  - **Optuna** — 단계의 튜닝 설정 (`optuna.json`) 을 탐색합니다 (test 는 학습에서 고른 best 설정 재사용).
 
 ## 5. Optuna
 
@@ -97,7 +97,7 @@ study.optimize(objective, n_trials=20)
 
 ## 6. Data Catalog
 
-여러 데이터셋·모델을 만들고 비교·재현하려면 산출물을 **버전 관리** 하고 무엇이 어디 있는지 **검색** 할 수 있어야 합니다. 이 스택은 실제 데이터를 MinIO 에, 가벼운 메타데이터·버전 이력·계보를 PostgreSQL `catalog` DB 에 두는 방식으로 처리합니다.
+여러 데이터셋·모델을 만들고 비교·재현하려면 산출물을 **버전 관리** 하고 무엇이 어디 있는지 **검색** 할 수 있어야 합니다. 이 스택은 실제 데이터를 MinIO 에, 가벼운 메타데이터·버전 이력·계보를 PostgreSQL `catalog` DB 에 둡니다.
 
 `catalog` 은 `catalog` DB 안의 테이블 하나 (`datasets`) 이며, MinIO 의 실제 데이터를 가리키는 **메타데이터 장부** 입니다. 이 장부를 다루는 **catalog 접근 계층** (테이블 생성·버전 등록·검색) 이 워크플로우에서 데이터의 위치·버전·계보를 기록합니다.
 
@@ -181,7 +181,7 @@ study.optimize(objective, n_trials=20)
 
 ### ML Payload Sample
 
-  git 으로 전달되어 컨테이너 안에서 `python my_flow.py` 로 실행되는 **실제 ML 코드** 예시입니다. 단계 (dp·fe·train·test) 를 **Prefect `@task`** 로 감싸고 `@flow` 로 묶으면, 컨테이너 env 의 `PREFECT_API_URL` 덕분에 이 payload 가 **자기 flow run 과 task** 를 server 에 보고해 **대시보드에서 단계별로** 보입니다 (orchestrator run 과는 별개 flow run). `flow_run_name` 을 `member`·커밋으로 지으면 **누구의 run 인지** 도 구분됩니다. orchestrator ([prefect.md](../Docker/Prefect/prefect.md) §4.3) 가 이 코드를 하위 프로세스로 부릅니다 — 바뀌는 부분은 이 payload 이고, `git_commit` 으로 어떤 버전을 돌릴지 지정합니다. orchestrator 가 데이터를 `data/` 로 미리 받아 두고 실행 정보 (`--git_repo`·`--git_commit`·`--member`) 와 그 경로 (`--data`) 를 CLI 인자로 넘기므로, payload 는 `argparse` 로 받아 씁니다.
+  git 으로 전달되어 컨테이너 안에서 `python my_flow.py` 로 실행되는 **실제 ML 코드** 예시입니다. 단계 (dp·fe·train·test) 를 **Prefect `@task`** 로 감싸 `@flow` 로 묶으면, 컨테이너 env 의 `PREFECT_API_URL` 덕분에 이 payload 가 **자기 flow run 과 task** 를 server 에 보고해 **대시보드에서 단계별로** 보입니다 (orchestrator run 과는 별개 flow run). `flow_run_name` 을 `member`·커밋으로 지으면 **누구의 run 인지** 도 갈립니다. orchestrator ([prefect.md](../Docker/Prefect/prefect.md) §4.3) 가 이 코드를 하위 프로세스로 부릅니다 — 바뀌는 부분은 이 payload, `git_commit` 으로 돌릴 버전을 지정합니다. orchestrator 가 데이터를 `data/` 로 미리 받아 두고 실행 정보 (`--git_repo`·`--git_commit`·`--member`) 와 그 경로 (`--data`) 를 CLI 인자로 넘기므로, payload 는 `argparse` 로 받아 씁니다.
 
   ```python
   # my_flow.py — git-delivered ML payload; Prefect @task makes each step show in the UI (illustrative)
