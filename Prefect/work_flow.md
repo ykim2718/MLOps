@@ -53,7 +53,7 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄우고 실행하기 
 
 ## 4. Pipeline
 
-`data preparation(dp) → feature engineering(fe) → training(train) → test` 순으로 진행하며, 각 단계의 산출물이 다음 단계의 입력이 됩니다. 각 단계는 Prefect `@task` 로 감싸고 `@flow` 가 순서를 강제합니다 (앞 단계 산출물이 있어야 다음 단계가 실행됩니다). 이 파이프라인은 팀 payload (`train.py`) 로 작성되어 Prefect 오케스트레이터가 실행합니다 (아래 [§7. Python Execution](#7-python-execution), [prefect.md](../Docker/Prefect/prefect.md) §4.2).
+`data preparation(dp) → feature engineering(fe) → training(train) → test` 순으로 진행하며, 각 단계의 산출물이 다음 단계의 입력이 됩니다. 각 단계는 Prefect `@task` 로 감싸고 `@flow` 가 순서를 강제합니다 (앞 단계 산출물이 있어야 다음 단계가 실행됩니다). 이 파이프라인은 팀 payload (`train.py`) 로 작성되어 Prefect 오케스트레이터가 실행합니다 (아래 [§7. Python Execution](#7-python-execution), [prefect.md](../Docker/Prefect/prefect.md) §4.3).
 
 ```
 [train raw] → train_dp → [transformed] → train_fe → [feature + fe_train.json]
@@ -181,7 +181,7 @@ trigger 는 코드를 보내지 않습니다. server 는 **deployment 의 참조
 
 ### ML Payload Sample
 
-git 으로 전달되어 컨테이너 안에서 `python train.py` 로 실행되는 **실제 ML 코드** 예시입니다. 오케스트레이터 ([prefect.md](../Docker/Prefect/prefect.md) §5.2) 가 이 코드를 하위 프로세스로 부릅니다 — 바뀌는 부분은 이 payload 이고, `git_commit` 으로 어떤 버전을 돌릴지 고릅니다.
+git 으로 전달되어 컨테이너 안에서 `python train.py` 로 실행되는 **실제 ML 코드** 예시입니다. 오케스트레이터 ([prefect.md](../Docker/Prefect/prefect.md) §4.3) 가 이 코드를 하위 프로세스로 부릅니다 — 바뀌는 부분은 이 payload 이고, `git_commit` 으로 어떤 버전을 돌릴지 고릅니다.
 
 ```python
 # train.py — the git-delivered ML payload the orchestrator runs (illustrative)
