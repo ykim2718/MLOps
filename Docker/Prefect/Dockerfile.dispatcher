@@ -1,4 +1,4 @@
 # Dispatcher image — a Prefect docker worker (prefect + prefect-docker only, no team libraries).
 # Built once; the dispatcher container then runs `prefect worker start` with no per-boot install.
-FROM python:3.11.15
+FROM python:3.11.15-slim
 RUN pip install --no-cache-dir "prefect>=3,<4" prefect-docker

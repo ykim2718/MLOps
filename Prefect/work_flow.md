@@ -209,8 +209,8 @@ study.optimize(objective, n_trials=20)
   def test_model(clf, feat):                               # test
       return accuracy_score(feat.y_val, clf.predict(feat.X_val))
 
-  @flow(name="train", flow_run_name="{member}@{git_commit}")   # the team's own flow run; the 4 tasks nest under it
-  def train(data_dir, member="", git_commit=""):
+  @flow(name="my_flow", flow_run_name="{member}@{git_commit}")   # the team's own flow run; the 4 tasks nest under it
+  def my_flow(data_dir, member="", git_commit=""):
       mlflow.set_tracking_uri("http://mlflow:5000")        # MLflow tracking server
       with mlflow.start_run():                             # MLflow auto-tags the git commit
           feat = feature_eng(data_prep(data_dir))
@@ -224,7 +224,7 @@ study.optimize(objective, n_trials=20)
       p.add_argument("--data"); p.add_argument("--member", default=""); p.add_argument("--git_commit", default="")
       p.add_argument("--git_repo", default="")             # accepted for completeness; unused here
       a = p.parse_args()
-      train(a.data, a.member, a.git_commit)
+      my_flow(a.data, a.member, a.git_commit)
   ```
 
   > 데이터 다운로드용 `MINIO_*` 는 orchestrator (`pipeline.py`) 가 쓰고, payload 가 직접 쓰는 자격증명 (`catalog`·`optuna`·MLflow 아티팩트용) 은 [prefect.md](../Docker/Prefect/prefect.md) §5 처럼 `Secret.load(...)` 로 받습니다. MLflow 는 git repo 안에서 돌면 git 커밋을 자동 태그하므로 모델 ↔ 코드가 연결됩니다 (§8).
