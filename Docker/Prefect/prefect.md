@@ -73,7 +73,8 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
    ├─ docker-compose.server.yml      server container def (port 4200 · mounts the base job templates)
    ├─ run_server.ps1                 start: create network + compose up
    ├─ register_pool.ps1              register work pools (once, after the server is up)
-   └─ docker-pool-template-high.json / docker-pool-template-low.json           per-tier base job template ( = flow container settings )
+   ├─ docker-pool-template-high.json   high-tier base job template (mem_limit 16g · = flow container settings)
+   └─ docker-pool-template-low.json    low-tier base job template (mem_limit 4g)
    ```
 
    실행:
@@ -154,7 +155,7 @@ networks:
 - `command: prefect server start --host 0.0.0.0` 은 컨테이너 밖에서도 접속하도록 모든 인터페이스에 바인딩합니다.
 - `networks: mlops` 로 `postgres` 와 서비스명으로 통신합니다. `postgres` 는 별도 compose 라 `depends_on` 대신 `restart: unless-stopped` 로 준비될 때까지 재시도합니다.
 
-기동은 **`run_server.ps1`** (코드는 [Appendix D](#appendix-d-run_serverps1)) 으로 합니다.
+compose 기동은 **`run_server.ps1`** (코드는 [Appendix D](#appendix-d-run_serverps1)) 으로 합니다.
 
 ```powershell
 .\run_server.ps1 -ProjectName mlops -Yaml docker-compose.server.yml -Network mlops
