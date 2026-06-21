@@ -1,7 +1,0 @@
-{
-  "n_trials": 20,
-  "direction": "maximize",
-  "fe": {
-    "scaling": "standard"
-  }
-}

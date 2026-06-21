@@ -1,0 +1,10 @@
+# pipelineflow-high.yml — high-tier deployment definition
+deployments:
+  - name: pipelineflow-high
+    entrypoint: pipeline.py:pipeline       # <file>:<@flow function>
+    work_pool:
+      name: high_performance
+      job_variables:
+        image: pipeline-flow:latest
+    parameters:
+      payload: my_flow.py

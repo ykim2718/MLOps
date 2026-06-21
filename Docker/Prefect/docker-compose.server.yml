@@ -1,17 +1,12 @@
-# Prefect Server — 제어 노드(머신 A)에서 실행한다.
-# 잡(Job) 요청을 중앙에서 수집·스케줄링하는 오케스트레이션 서버 + 대시보드(UI)다. 코드는 실행하지 않는다.
-# backend=PostgreSQL(prefect DB). 공유 네트워크 mlops(external)에서 postgres 를 서비스명으로 접속한다.
-# postgres 는 별도 compose 라 depends_on 을 걸 수 없으므로, restart 로 준비될 때까지 재시도한다.
-#
-# 기동:  .\run_server.ps1
+# docker-compose.server.yml
 services:
   prefect_server:
     image: prefecthq/prefect:3-latest
     command: prefect server start --host 0.0.0.0
     env_file:
-      - docker-compose.env          # PREFECT_SERVER_DATABASE_CONNECTION_URL 을 주입한다.
+      - docker-compose.env          # injects PREFECT_SERVER_DATABASE_CONNECTION_URL
     ports:
-      - "4200:4200"                 # 대시보드/API. 워커 노드(머신 B)와 클라이언트가 이 포트로 접속한다.
+      - "4200:4200"                 # dashboard/API. Clients connect on this port.
     volumes:
       - ./docker-pool-template-high.json:/templates/docker-pool-template-high.json:ro   # base job template for the high_performance pool
       - ./docker-pool-template-low.json:/templates/docker-pool-template-low.json:ro     # base job template for the lower_performance pool
@@ -19,7 +14,6 @@ services:
       - mlops
     restart: unless-stopped
 
-# 제어 노드 서비스들이 공유하는 외부 네트워크. run_server.ps1 이 미리 생성한다.
 networks:
   mlops:
     external: true

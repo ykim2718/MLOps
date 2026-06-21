@@ -168,14 +168,14 @@ study.optimize(objective, n_trials=20)
 
 ### Code-to-Container Flow
 
-  trigger 는 코드를 보내지 않습니다. server 는 **deployment 의 참조 + 실행 파라미터** (`git_repo`·`git_commit`·`minio_version`) 만 전달하고, 컨테이너가 그 repo·커밋을 `git fetch` + `git worktree` 로 펼쳐 실행합니다.
+  trigger 는 코드를 보내지 않습니다. server 는 **deployment 의 참조 + 실행 파라미터** (`git_repo`·`git_commit`·`minio_key`) 만 전달하고, 컨테이너가 그 repo·커밋을 `git fetch` + `git worktree` 로 펼쳐 실행합니다.
 
   ```
-  [client] trigger(git_repo, git_commit, minio_version) -> [server] enqueue run -> [prefect_dispatcher] pull the job
+  [client] trigger(git_repo, git_commit, minio_key) -> [server] enqueue run -> [prefect_dispatcher] pull the job
                                                                               |
                                                                               +- (1) spawn a container from the Pipeline Flow image
                                                                               +- (2) git fetch <git_repo>; git worktree add <dir> <git_commit>   (Step A)
-                                                                              +- (3) prepare minio_version data, run code      (Step B/C)
+                                                                              +- (3) download minio_key data, run code         (Step B/C)
                                                                               +- (4) save results, then auto-remove            (Step D)
   ```
 
@@ -241,12 +241,12 @@ study.optimize(objective, n_trials=20)
 
   ```powershell
   # Trigger — pick the tier by deployment; heavy -> high, light -> low (params otherwise identical).
-  prefect deployment run "pipeline/pipelineflow-high" -p member=alice -p git_repo=https://github.com/<member>/<repo>.git -p git_commit=a1b2c3d -p minio_version=v3_best
-  prefect deployment run "pipeline/pipelineflow-low"  -p member=alice -p git_repo=https://github.com/<member>/<repo>.git -p git_commit=a1b2c3d -p minio_version=v3_best
+  prefect deployment run "pipeline/pipelineflow-high" -p member=alice -p git_repo=https://github.com/<member>/<repo>.git -p git_commit=a1b2c3d -p minio_key=SYDNEY/001.parquet
+  prefect deployment run "pipeline/pipelineflow-low"  -p member=alice -p git_repo=https://github.com/<member>/<repo>.git -p git_commit=a1b2c3d -p minio_key=SYDNEY/001.parquet
   ```
   ```python
   from prefect.deployments import run_deployment
-  params = {"member": "alice", "git_repo": "https://github.com/<member>/<repo>.git", "git_commit": "a1b2c3d", "minio_version": "v3_best"}
+  params = {"member": "alice", "git_repo": "https://github.com/<member>/<repo>.git", "git_commit": "a1b2c3d", "minio_key": "SYDNEY/001.parquet"}
   run_deployment("pipeline/pipelineflow-high", parameters=params)   # or "pipeline/pipelineflow-low" for the low tier
   ```
 
