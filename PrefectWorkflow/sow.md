@@ -6,7 +6,7 @@
 | Basis | Senior Engineer 1인 전담 |
 | Approach | 사양서 미제공 (Greenfield) — 요구 한 줄에서 설계부터 수행 |
 | Duration | 5~6개월 (견고화 포함 시 6~7개월) |
-| Date | 2026-06-21 |
+| Date | 2026-06-04 |
 
 ## 1. 개요 (Overview)
 
