@@ -19,7 +19,7 @@ MongoDB 는 도커 컨테이너로 실행됩니다. `docker compose -p <Project 
 
 이 컨테이너는 같은 호스트의 다른 서비스 (예: REST API) 가 `mongo` 라는 **서비스명으로 접속** 하도록 공유 네트워크 `mlops` 에 붙습니다. 따라서 컨테이너를 띄우기 전에 그 네트워크가 있어야 합니다.
 
-다음은 docker compose 를 위한 yaml과 execution command 입니다.
+#### Yaml
 
 ```yaml
 # docker-compose.yml
@@ -53,14 +53,6 @@ networks:
     external: true
 ```
 
-```powershell
-# create the shared network mlops (ignore the error if it already exists), then start the container in the background.
-docker network create mlops
-docker compose -p <Project Name> up -d
-```
-
-구성 요소의 의미는 다음과 같습니다.
-
 - `image: mongo:7` 은 공식 MongoDB 7 이미지를 사용한다는 뜻입니다.
 - `env_file` 은 루트 계정 (`MONGO_INITDB_ROOT_USERNAME` / `MONGO_INITDB_ROOT_PASSWORD`) 을 yml 에 평문으로 두지 않고 `docker-compose.env` 에서 읽어 주입합니다.
 - `ports: "27017:27017"` 는 호스트 파이썬·도구와 다른 컴퓨터가 접속할 수 있도록 27017 포트를 노출합니다.
@@ -70,11 +62,13 @@ docker compose -p <Project Name> up -d
 - `restart: unless-stopped` 는 컨테이너가 비정상 종료되어도 자동으로 다시 띄웁니다 (사용자가 직접 멈춘 경우는 제외합니다).
 - `logging` 은 stdout 로그를 저장하는 `json-file` 드라이버에 회전 (rotation) 을 걸어, 파일 하나가 `max-size` (10MB) 를 넘으면 새 파일로 바꾸고 최대 `max-file` (10개) 까지만 보관합니다. 생략하면 로그가 무한정 커집니다. 로그 파일의 실제 위치는 `docker inspect --format '{{.LogPath}}' <Project Name>-mongo-1` 로 확인하고, 내용은 `docker logs <Project Name>-mongo-1` 으로 봅니다.
 
-PostgreSQL 의 init SQL 같은 **DB 생성 단계가 없습니다** — DB·collection 은 첫 insert 때 자동으로 생성됩니다.
+#### Execution Command
 
-> ⚠️ 루트 계정은 볼륨이 **빈 최초 기동 때만** 만들어집니다. 이미 데이터가 있는 볼륨에서는 `MONGO_INITDB_*` 를 바꿔도 반영되지 않으므로, 계정을 다시 설정하려면 볼륨을 비우거나 (`docker compose down -v`) 아래 [§4](#4-granular-database-access-control) 처럼 `mongosh` 로 수동 생성합니다.
-
-실행 명령은 다음과 같습니다.
+```powershell
+# create the shared network mlops (ignore the error if it already exists), then start the container in the background.
+docker network create mlops
+docker compose -p <Project Name> up -d
+```
 
 - `docker network create mlops` — 컨테이너가 붙을 공유 외부 네트워크 `mlops` 를 만듭니다 (이미 있으면 에러는 무시되어 무해합니다).
 - `docker compose -p <Project Name> up -d` — 컨테이너를 띄웁니다.
@@ -82,6 +76,10 @@ PostgreSQL 의 init SQL 같은 **DB 생성 단계가 없습니다** — DB·coll
 - `-d` — 백그라운드 (detached) 로 실행합니다.
 
 `docker compose up` 으로 뜬 컨테이너 이름은 `<Project Name>-<Service Name>-<Replica Number>` 형식이며, Replica Number 는 보통 `1` 이지만 `--scale <service>=3` 처럼 늘리면 `-2`·`-3` 이 추가됩니다.
+
+PostgreSQL 의 init SQL 같은 **DB 생성 단계가 없습니다** — DB·collection 은 첫 insert 때 자동으로 생성됩니다.
+
+> ⚠️ 루트 계정은 볼륨이 **빈 최초 기동 때만** 만들어집니다. 이미 데이터가 있는 볼륨에서는 `MONGO_INITDB_*` 를 바꿔도 반영되지 않으므로, 계정을 다시 설정하려면 볼륨을 비우거나 (`docker compose down -v`) 아래 [§4](#4-granular-database-access-control) 처럼 `mongosh` 로 수동 생성합니다.
 
 ### Data Location
 
@@ -100,7 +98,7 @@ PostgreSQL 의 init SQL 같은 **DB 생성 단계가 없습니다** — DB·coll
 
   데이터를 **직접 지정한 로컬 폴더**에 두려면 named volume 대신 bind mount 를 씁니다. 왼쪽을 `.` 이나 절대 경로로 적으면 됩니다.
 
-  다음은 docker compose 를 위한 yaml 입니다.
+  #### Yaml
 
   ```yaml
   # docker-compose.yml
@@ -111,6 +109,8 @@ PostgreSQL 의 init SQL 같은 **DB 생성 단계가 없습니다** — DB·coll
 
   # if you use only bind mount, the named volume declaration below is unnecessary.
   ```
+
+  - `volumes: - ./mongo-data:/data/db` — bind mount 으로 호스트 폴더 (`./mongo-data`) 를 컨테이너 경로 (`/data/db`) 에 직접 매핑합니다 (named volume 대신).
 
 ### Credentials
 

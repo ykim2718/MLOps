@@ -40,7 +40,7 @@ MLflow 는 저장소를 backend 와 artifact 두 층으로 나눕니다.
 
 MLflow 는 도커 컨테이너로 실행됩니다. backend 인 PostgreSQL (`mlflow` DB) 과 artifact 인 MinIO (`mlflow` 버킷) 가 **먼저 떠 있어야** 정상 동작하므로, 같은 호스트에서 그 둘을 띄운 뒤 실행합니다. 이 컨테이너는 공유 네트워크 `mlops` 에서 `postgres` · `minio` 를 서비스명으로 접속하므로, 띄우기 전에 그 네트워크가 있어야 합니다.
 
-다음은 docker compose 를 위한 yaml과 execution command 입니다.
+#### Yaml
 
 ```yaml
 # docker-compose.yml
@@ -65,19 +65,17 @@ networks:
     external: true
 ```
 
+- `command` 는 컨테이너가 뜰 때 PostgreSQL/S3 드라이버를 설치한 뒤 MLflow server 를 띄웁니다. backend 는 `postgres` 서비스명으로 `mlflow` DB 에, artifact 는 `s3://mlflow` 에 연결합니다.
+- `env_file` 은 backend 계정 (`POSTGRES_USER`/`POSTGRES_PASSWORD`) 과 artifact 접속 키 (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`), 그리고 MinIO endpoint (`MLFLOW_S3_ENDPOINT_URL`) 를 주입합니다.
+- `networks: mlops` 로 같은 호스트의 `postgres` · `minio` 와 서비스명으로 통신합니다. 그 둘은 별도 compose 라 `depends_on` 을 걸 수 없으므로, `restart: unless-stopped` 로 준비될 때까지 자동 재시도합니다.
+
+#### Execution Command
+
 ```powershell
 # create the shared network mlops (ignore the error if it already exists), then start the container in the background.
 docker network create mlops
 docker compose -p <Project Name> up -d
 ```
-
-구성 요소의 의미는 다음과 같습니다.
-
-- `command` 는 컨테이너가 뜰 때 PostgreSQL/S3 드라이버를 설치한 뒤 MLflow server 를 띄웁니다. backend 는 `postgres` 서비스명으로 `mlflow` DB 에, artifact 는 `s3://mlflow` 에 연결합니다.
-- `env_file` 은 backend 계정 (`POSTGRES_USER`/`POSTGRES_PASSWORD`) 과 artifact 접속 키 (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`), 그리고 MinIO endpoint (`MLFLOW_S3_ENDPOINT_URL`) 를 주입합니다.
-- `networks: mlops` 로 같은 호스트의 `postgres` · `minio` 와 서비스명으로 통신합니다. 그 둘은 별도 compose 라 `depends_on` 을 걸 수 없으므로, `restart: unless-stopped` 로 준비될 때까지 자동 재시도합니다.
-
-실행 명령은 다음과 같습니다.
 
 - `docker network create mlops` — 컨테이너가 붙을 공유 외부 네트워크 `mlops` 를 만듭니다 (이미 있으면 에러는 무시되어 무해합니다).
 - `docker compose -p <Project Name> up -d` — 컨테이너를 띄웁니다.

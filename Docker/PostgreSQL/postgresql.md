@@ -21,7 +21,7 @@ PostgreSQL 은 도커 컨테이너로 실행됩니다. `docker compose -p <Proje
 
 이 컨테이너는 같은 호스트의 다른 서비스 (예: 추적 server, 오케스트레이션 server) 가 `postgres` 라는 **서비스명으로 접속**하도록 공유 네트워크 `mlops` 에 붙습니다. 따라서 컨테이너를 띄우기 전에 그 네트워크가 있어야 합니다.
 
-다음은 docker compose 를 위한 yaml과 execution command 입니다.
+#### Yaml
 
 ```yaml
 # docker-compose.yml
@@ -61,14 +61,6 @@ networks:
     external: true
 ```
 
-```powershell
-# create the shared network (ignore the error if it already exists), then start the container in the background.
-docker network create mlops
-docker compose -p <Project Name> up -d
-```
-
-구성 요소의 의미는 다음과 같습니다.
-
 - `image: postgres:16` 은 공식 PostgreSQL 16 이미지를 사용한다는 뜻입니다.
 - `env_file` 은 계정·비밀번호를 yml 에 평문으로 두지 않고 `docker-compose.env` 에서 읽어 주입합니다.
 - `ports: "5432:5432"` 는 호스트 파이썬 (예: catalog 접속 코드) 과 다른 컴퓨터의 worker 가 접속할 수 있도록 5432 포트를 노출합니다.
@@ -78,9 +70,13 @@ docker compose -p <Project Name> up -d
 - `networks: mlops` 는 같은 호스트의 다른 서비스가 `postgres` 서비스명으로 접속하도록 공유 외부 네트워크에 연결합니다.
 - `restart: unless-stopped` 는 컨테이너가 비정상 종료되어도 자동으로 다시 띄웁니다 (사용자가 직접 멈춘 경우는 제외합니다).
 
-> ⚠️ init SQL 은 볼륨이 **비어 있는 최초 기동 때만** 실행됩니다. 이미 데이터가 있는 볼륨에서는 다시 실행되지 않으므로, DB 를 새로 만들려면 볼륨을 비우거나 (`docker compose down -v`) 아래 [Appendix B](#appendix-b-manual-database-provisioning) 처럼 수동으로 만듭니다.
+#### Execution Command
 
-실행 명령은 다음과 같습니다.
+```powershell
+# create the shared network (ignore the error if it already exists), then start the container in the background.
+docker network create mlops
+docker compose -p <Project Name> up -d
+```
 
 - `docker network create mlops` — 컨테이너가 붙을 공유 외부 네트워크 `mlops` 를 만듭니다 (이미 있으면 에러는 무시되어 무해합니다).
 - `docker compose -p <Project Name> up -d` — 컨테이너를 띄웁니다.
@@ -88,6 +84,8 @@ docker compose -p <Project Name> up -d
 - `-d` — 백그라운드 (detached) 로 실행합니다.
 
 `docker compose up` 으로 뜬 컨테이너 이름은 `<Project Name>-<Service Name>-<Replica Number>` 형식이며, Replica Number 는 보통 `1` 이지만 `--scale <service>=3` 처럼 늘리면 `-2`·`-3` 이 추가됩니다.
+
+> ⚠️ init SQL 은 볼륨이 **비어 있는 최초 기동 때만** 실행됩니다. 이미 데이터가 있는 볼륨에서는 다시 실행되지 않으므로, DB 를 새로 만들려면 볼륨을 비우거나 (`docker compose down -v`) 아래 [Appendix B](#appendix-b-manual-database-provisioning) 처럼 수동으로 만듭니다.
 
 ### Credentials
 

@@ -12,7 +12,7 @@ MinIO 는 도커 컨테이너로 실행됩니다. 아래는 MinIO 의 `docker-co
 
 이 컨테이너는 같은 호스트의 다른 서비스 (예: 실험 추적 server) 가 `minio` 라는 **서비스명으로 접속** 하도록 공유 네트워크 `mlops` 에 붙습니다. 따라서 컨테이너를 띄우기 전에 그 네트워크가 있어야 합니다.
 
-다음은 docker compose 를 위한 yaml과 execution command 입니다.
+#### Yaml
 
 ```yaml
 # docker-compose.yml
@@ -52,14 +52,6 @@ networks:
     external: true
 ```
 
-```powershell
-# create the shared network mlops (ignore the error if it already exists), then start the container in the background.
-docker network create mlops
-docker compose -p <Project Name> up -d
-```
-
-구성 요소의 의미는 다음과 같습니다.
-
 - `image: minio/minio` 는 공식 MinIO server 이미지를 사용한다는 뜻이며, 이 이미지에는 `mc` 클라이언트도 함께 들어 있어 같은 컨테이너 안에서 버킷을 만들 수 있습니다.
 - `entrypoint` 는 server 를 **백그라운드로 띄운 뒤** (`minio server ... &`), `until` 로 server 가 준비될 때까지 재시도하여 alias 를 잡고, `mc` 로 `datasets`/`models`/`mlflow` 버킷을 만들고 `datasets`/`models` 에 버저닝을 켭니다. 마지막 `wait` 가 백그라운드 server 프로세스를 기다려 **컨테이너를 계속 떠 있게** 합니다 (이게 없으면 mc 명령 후 컨테이너가 종료됩니다).
   - `--ignore-existing` 으로 버킷이 이미 있으면 통과하고, 버저닝도 멱등하므로 **재기동해도 안전** 합니다.
@@ -70,14 +62,20 @@ docker compose -p <Project Name> up -d
 - `healthcheck` 는 `mc ready local` 로 기동 완료를 확인하여, 다른 서비스가 이 상태를 기다릴 수 있게 합니다.
 - `networks: mlops` 는 같은 호스트의 다른 서비스가 `minio` 서비스명으로 접속하도록 공유 외부 네트워크에 연결합니다.
 
-`entrypoint` 의 `mc` 명령은 컨테이너 **안** 에서 도므로 endpoint 가 서비스명이 아니라 `http://localhost:9000` 입니다. 커뮤니티 웹 console 에는 버킷/버저닝 관리 메뉴가 없어 이렇게 `mc` 로 자동 처리하므로, 보통 `mc` 를 따로 설치하지 않아도 버킷·버저닝이 준비됩니다.
+#### Execution Command
 
-실행 명령은 다음과 같습니다.
+```powershell
+# create the shared network mlops (ignore the error if it already exists), then start the container in the background.
+docker network create mlops
+docker compose -p <Project Name> up -d
+```
 
 - `docker network create mlops` — 컨테이너가 붙을 공유 외부 네트워크 `mlops` 를 만듭니다 (이미 있으면 에러는 무시되어 무해합니다).
 - `docker compose -p <Project Name> up -d` — 컨테이너를 띄웁니다.
 - `-p <Project Name>` — 프로젝트명을 지정합니다.
 - `-d` — 백그라운드 (detached) 로 실행합니다.
+
+`entrypoint` 의 `mc` 명령은 컨테이너 **안** 에서 도므로 endpoint 가 서비스명이 아니라 `http://localhost:9000` 입니다. 커뮤니티 웹 console 에는 버킷/버저닝 관리 메뉴가 없어 이렇게 `mc` 로 자동 처리하므로, 보통 `mc` 를 따로 설치하지 않아도 버킷·버저닝이 준비됩니다.
 
 `docker compose up` 으로 뜬 컨테이너 이름은 `<Project Name>-<Service Name>-<Replica Number>` 형식이며, Replica Number 는 보통 `1` 이지만 `--scale <service>=3` 처럼 늘리면 `-2`·`-3` 이 추가됩니다.
 
