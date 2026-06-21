@@ -80,7 +80,9 @@ docker compose -p <Project Name> up -d
 실행 명령은 다음과 같습니다.
 
 - `docker network create mlops` — 컨테이너가 붙을 공유 외부 네트워크 `mlops` 를 만듭니다 (이미 있으면 에러는 무시되어 무해합니다).
-- `docker compose -p <Project Name> up -d` — `-p` 로 프로젝트명을, `-d` 로 백그라운드 (detached) 실행을 지정합니다.
+- `docker compose -p <Project Name> up -d` — 컨테이너를 띄웁니다.
+- `-p <Project Name>` — 프로젝트명을 지정합니다.
+- `-d` — 백그라운드 (detached) 로 실행합니다.
 
 `docker compose up` 으로 뜬 컨테이너 이름은 `<Project Name>-<Service Name>-<Replica Number>` 형식이며, Replica Number 는 보통 `1` 이지만 `--scale <service>=3` 처럼 늘리면 `-2`·`-3` 이 추가됩니다. 실행 후 MLflow UI 는 **`http://<MLflow 호스트>:5000`** 에서 열립니다 (같은 컴퓨터에서는 `localhost`).
 

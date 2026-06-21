@@ -112,7 +112,9 @@
   실행 명령은 다음과 같습니다.
 
   - `docker network create mlops` — 컨테이너가 붙을 공유 외부 네트워크 `mlops` 를 만듭니다 (이미 있으면 그대로 둡니다).
-  - `docker compose up -d --build` — 이미지를 새로 빌드 (`--build`) 하면서 백그라운드 (`-d`) 로 띄웁니다. 코드만 바꾸고 의존성은 그대로일 때는 재빌드가 필요 없으므로 `--build` 를 생략합니다.
+  - `docker compose up -d --build` — 이미지를 빌드하며 컨테이너를 띄웁니다.
+  - `-d` — 백그라운드 (detached) 로 실행합니다.
+  - `--build` — 이미지를 새로 빌드합니다 (의존성을 바꿨을 때만 필요).
 
   > `run_python.ps1` (Windows) · `run_python.sh` (Linux) 은 위 네트워크 생성과 `docker compose down` / `up` 을 한 번에 처리하는 편의 스크립트입니다.
 
