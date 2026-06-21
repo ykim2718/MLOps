@@ -181,27 +181,49 @@ study.optimize(objective, n_trials=20)
 
 ### ML Payload Sample
 
-  git 으로 전달되어 컨테이너 안에서 `python train.py` 로 실행되는 **실제 ML 코드** 예시입니다. orchestrator ([prefect.md](../Docker/Prefect/prefect.md) §4.3) 가 이 코드를 하위 프로세스로 부릅니다 — 바뀌는 부분은 이 payload 이고, `git_commit` 으로 어떤 버전을 돌릴지 고릅니다.
+  git 으로 전달되어 컨테이너 안에서 `python train.py` 로 실행되는 **실제 ML 코드** 예시입니다. 단계 (dp·fe·train·test) 를 **Prefect `@task`** 로 감싸고 `@flow` 로 묶으면, 컨테이너 env 의 `PREFECT_API_URL` 덕분에 이 payload 가 **자기 flow run 과 task** 를 server 에 보고해 **대시보드에서 단계별로** 보입니다 (orchestrator run 과는 별개 flow run). `flow_run_name` 을 `member`·커밋으로 지으면 **누구의 run 인지** 도 구분됩니다. orchestrator ([prefect.md](../Docker/Prefect/prefect.md) §4.3) 가 이 코드를 하위 프로세스로 부릅니다 — 바뀌는 부분은 이 payload 이고, `git_commit` 으로 어떤 버전을 돌릴지 지정합니다.
 
   ```python
-  # train.py — the git-delivered ML payload the orchestrator runs (illustrative)
+  # train.py — git-delivered ML payload; Prefect @task makes each step show in the UI (illustrative)
   import os
   import mlflow
+  from prefect import flow, task
   from sklearn.ensemble import RandomForestClassifier
   from sklearn.metrics import accuracy_score
 
-  def main():
-      mlflow.set_tracking_uri("http://mlflow:5000")            # MLflow tracking server
-      X_tr, y_tr, X_val, y_val = load_dataset(os.environ["MINIO_VERSION"])  # read this version directly from MinIO (Step B)
-      with mlflow.start_run():                                 # MLflow auto-tags the git commit
-          clf = RandomForestClassifier(n_estimators=300, random_state=42)
-          clf.fit(X_tr, y_tr)
-          acc = accuracy_score(y_val, clf.predict(X_val))
-          mlflow.log_metric("val_accuracy", acc)               # metric -> PostgreSQL (mlflow DB)
-          mlflow.sklearn.log_model(clf, "model")               # artifact -> MinIO
+  def _run_name() -> str:                                  # label the run by member + commit (UI shows whose run)
+      return f"{os.environ.get('MEMBER', '?')}@{os.environ.get('GIT_COMMIT', '?')[:7]}"
+
+  @task
+  def data_prep(version):                                  # dp — read this data version directly from MinIO (Step B)
+      return load_dataset(version)
+
+  @task
+  def feature_eng(raw):                                    # fe
+      return build_features(raw)
+
+  @task
+  def train_model(feat):                                   # train
+      clf = RandomForestClassifier(n_estimators=300, random_state=42)
+      clf.fit(feat.X_tr, feat.y_tr)
+      return clf
+
+  @task
+  def test_model(clf, feat):                               # test
+      return accuracy_score(feat.y_val, clf.predict(feat.X_val))
+
+  @flow(name="train", flow_run_name=_run_name)             # the team's own flow run; the 4 tasks nest under it
+  def train():
+      mlflow.set_tracking_uri("http://mlflow:5000")        # MLflow tracking server
+      with mlflow.start_run():                             # MLflow auto-tags the git commit
+          feat = feature_eng(data_prep(os.environ["MINIO_VERSION"]))
+          clf  = train_model(feat)
+          acc  = test_model(clf, feat)
+          mlflow.log_metric("val_accuracy", acc)           # metric -> PostgreSQL (mlflow DB)
+          mlflow.sklearn.log_model(clf, "model")           # artifact -> MinIO
 
   if __name__ == "__main__":
-      main()
+      train()
   ```
 
   > 필요한 자격증명 (`MINIO_*`·`catalog`·`optuna`) 은 [prefect.md](../Docker/Prefect/prefect.md) §5 처럼 `Secret.load(...)` 로 받습니다. MLflow 는 git repo 안에서 돌면 git 커밋을 자동 태그하므로 모델 ↔ 코드가 연결됩니다 (§8).
@@ -218,12 +240,12 @@ study.optimize(objective, n_trials=20)
 
   ```powershell
   # Trigger — pick the tier by deployment; heavy -> high, light -> low (params otherwise identical).
-  prefect deployment run "pipeline/pipelineflow-high" -p git_repo=https://github.com/<member>/<repo>.git -p git_commit=a1b2c3d -p minio_version=v3_best
-  prefect deployment run "pipeline/pipelineflow-low"  -p git_repo=https://github.com/<member>/<repo>.git -p git_commit=a1b2c3d -p minio_version=v3_best
+  prefect deployment run "pipeline/pipelineflow-high" -p member=alice -p git_repo=https://github.com/<member>/<repo>.git -p git_commit=a1b2c3d -p minio_version=v3_best
+  prefect deployment run "pipeline/pipelineflow-low"  -p member=alice -p git_repo=https://github.com/<member>/<repo>.git -p git_commit=a1b2c3d -p minio_version=v3_best
   ```
   ```python
   from prefect.deployments import run_deployment
-  params = {"git_repo": "https://github.com/<member>/<repo>.git", "git_commit": "a1b2c3d", "minio_version": "v3_best"}
+  params = {"member": "alice", "git_repo": "https://github.com/<member>/<repo>.git", "git_commit": "a1b2c3d", "minio_version": "v3_best"}
   run_deployment("pipeline/pipelineflow-high", parameters=params)   # or "pipeline/pipelineflow-low" for the low tier
   ```
 
