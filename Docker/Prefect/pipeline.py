@@ -27,7 +27,7 @@ def pipeline(git_repo: str, git_commit: str, minio_key: str, minio_bucket: str =
                           aws_access_key_id=Secret.load("minio-access-key").get(),
                           aws_secret_access_key=Secret.load("minio-secret-key").get())
         extra = {"VersionId": minio_version} if minio_version else {}                                  # empty → latest version
-        local = os.path.join(data, os.path.basename(minio_key))                                        # e.g. data/001.parquet
+        local = os.path.join(data, os.path.basename(minio_key))                                        # e.g. data/Bennelong Point
         s3.download_file(minio_bucket, minio_key, local, ExtraArgs=extra)                              # bucket/key[@version] → data/
 
         subprocess.run(["python", payload,                                                             # run the team's payload in the worktree

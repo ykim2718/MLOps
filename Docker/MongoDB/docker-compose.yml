@@ -1,15 +1,15 @@
-# MongoDB — 제어 노드(머신 A)의 도큐먼트 DB.
+# MongoDB — 제어 노드 (머신 A) 의 document DB.
 # 한 인스턴스에서 yControl / yImprove 등 여러 논리 DB 를 운영한다.
-# MongoDB 는 빈 DB 를 미리 만들지 않고, 첫 쓰기(컬렉션 insert) 시점에 DB/컬렉션을 자동 생성한다.
-# 제어 노드 안 다른 서비스(REST API 등)가 'mongo' 라는 서비스명으로 접속하도록
-# 공유 네트워크 mlops(external)에 붙는다. (먼저 run_mongo.ps1 이 'docker network create mlops' 로 만든다.)
+# MongoDB 는 빈 DB·collection 을 미리 만들지 않고, 첫 쓰기 (collection insert) 시점에 자동 생성한다.
+# 제어 노드 안 다른 서비스 (REST API 등) 가 'mongo' 라는 서비스명으로 접속하도록
+# 공유 네트워크 mlops (external) 에 붙는다. (먼저 run_mongo.ps1 이 'docker network create mlops' 로 만든다.)
 services:
   mongo:
     image: mongo:7
     env_file:
       - docker-compose.env          # MONGO_INITDB_ROOT_USERNAME / MONGO_INITDB_ROOT_PASSWORD 를 주입한다.
     ports:
-      # 호스트 파이썬/도구와 원격 워커(머신 B)가 접속하도록 27017 을 노출한다.
+      # 호스트 파이썬·도구와 원격 worker (머신 B) 가 접속하도록 27017 을 노출한다.
       - "27017:27017"
     volumes:
       - mongo-data:/data/db

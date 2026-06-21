@@ -2,8 +2,9 @@
 
 set -euo pipefail
 
+# Convenience script (Linux) — create the shared network mlops if missing, then restart the stack.
 sudo docker network inspect mlops >/dev/null 2>&1 || sudo docker network create mlops >/dev/null
 
-# compose 스택을 내렸다가(볼륨은 유지) 다시 백그라운드로 띄운다.
+# Take the compose stack down (volumes are kept) and bring it back up in the background.
 sudo docker compose down
 sudo docker compose up -d

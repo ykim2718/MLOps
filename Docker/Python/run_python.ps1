@@ -1,6 +1,7 @@
+# Convenience script (Windows) — create the shared network mlops if missing, then restart the stack.
 docker network inspect mlops *> $null
 if ($LASTEXITCODE -ne 0) { docker network create mlops | Out-Null }
 
-# compose 스택을 내렸다가(볼륨은 유지) 다시 백그라운드로 띄운다.
+# Take the compose stack down (volumes are kept) and bring it back up in the background.
 docker compose down
 docker compose up -d
