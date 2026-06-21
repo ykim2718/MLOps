@@ -63,8 +63,6 @@
   CMD ["python", "start.py"]
   ```
 
-  구성 요소의 의미는 다음과 같습니다.
-
   - `FROM python:3.11.15` — 베이스 이미지를 3.11.15 로 고정합니다.
   - `RUN apt-get install build-essential wget` — 네이티브 확장 빌드에 필요한 시스템 패키지를 설치합니다.
   - `COPY requirements.txt` → `RUN pip install` — 의존성을 설치합니다. 코드 복사보다 **먼저** 두어, 코드만 바뀌면 이 레이어가 캐시되어 재설치를 건너뜁니다.
@@ -74,8 +72,6 @@
   > TA-Lib·ucrdtw 처럼 빌드가 까다로운 패키지는 numpy 헤더와 빌드 격리 (`--no-build-isolation`) 등을 별도로 다뤄야 합니다. 실제 `Dockerfile` 의 주석에 그 이유가 정리되어 있습니다.
 
 ### `docker-compose.yml`
-
-  다음은 docker compose 를 위한 yaml과 execution command 입니다.
 
   ```yaml
   # docker-compose.yml
@@ -97,19 +93,17 @@
       external: true
   ```
 
+  - `build: .` 은 `image:` 대신 현재 폴더의 `Dockerfile` 로 이미지를 직접 빌드한다는 뜻입니다.
+  - `volumes: ./app:/app` 은 호스트의 `app/` 폴더를 컨테이너 `/app` 에 **bind mount** 합니다. 호스트에서 코드를 고치면 재빌드 없이 컨테이너에 즉시 반영되며, 컨테이너가 `/app` 에 쓴 결과 파일도 호스트에 그대로 나타납니다 ([§3](#3-access) 의 핵심입니다).
+  - `restart: "no"` 는 앱이 끝나도 다시 띄우지 않고 `Exited` 상태로 둡니다. 종료 코드와 로그는 `docker compose logs` · `docker ps -a` 로 확인합니다.
+
+  #### Execution Command
+
   ```powershell
   # Create the shared network mlops (leave it as is if it already exists), then build the image and start the container.
   docker network create mlops
   docker compose up -d --build
   ```
-
-  구성 요소의 의미는 다음과 같습니다.
-
-  - `build: .` 은 `image:` 대신 현재 폴더의 `Dockerfile` 로 이미지를 직접 빌드한다는 뜻입니다.
-  - `volumes: ./app:/app` 은 호스트의 `app/` 폴더를 컨테이너 `/app` 에 **bind mount** 합니다. 호스트에서 코드를 고치면 재빌드 없이 컨테이너에 즉시 반영되며, 컨테이너가 `/app` 에 쓴 결과 파일도 호스트에 그대로 나타납니다 ([§3](#3-access) 의 핵심입니다).
-  - `restart: "no"` 는 앱이 끝나도 다시 띄우지 않고 `Exited` 상태로 둡니다. 종료 코드와 로그는 `docker compose logs` · `docker ps -a` 로 확인합니다.
-
-  실행 명령은 다음과 같습니다.
 
   - `docker network create mlops` — 컨테이너가 붙을 공유 외부 네트워크 `mlops` 를 만듭니다 (이미 있으면 그대로 둡니다).
   - `docker compose up -d --build` — 이미지를 빌드하며 컨테이너를 띄웁니다.
