@@ -23,6 +23,7 @@ MongoDB 는 도커 컨테이너로 실행됩니다. `docker compose -p <Project 
 
 ```yaml
 # docker-compose.yml
+name: mongodb
 services:
   mongo:
     image: mongo:7
@@ -53,6 +54,7 @@ networks:
     external: true
 ```
 
+- `name: mongodb` 는 프로젝트명을 파일에 고정합니다. 이 값이 컨테이너·볼륨 이름의 앞가지가 되므로, `-p` 를 붙이지 않아도 (혹은 다른 폴더에서 띄워도) 항상 같은 프로젝트·같은 볼륨에 붙어 등록한 데이터가 어긋나지 않습니다.
 - `image: mongo:7` 은 공식 MongoDB 7 이미지를 사용한다는 뜻입니다.
 - `env_file` 은 루트 계정 (`MONGO_INITDB_ROOT_USERNAME` / `MONGO_INITDB_ROOT_PASSWORD`) 을 yml 에 평문으로 두지 않고 `docker-compose.env` 에서 읽어 주입합니다.
 - `ports: "27017:27017"` 는 호스트 파이썬·도구와 다른 컴퓨터가 접속할 수 있도록 27017 포트를 노출합니다.

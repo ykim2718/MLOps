@@ -16,6 +16,7 @@ MinIO 는 도커 컨테이너로 실행됩니다. 아래는 MinIO 의 `docker-co
 
 ```yaml
 # docker-compose.yml
+name: minio
 services:
   minio:
     image: minio/minio
@@ -52,6 +53,7 @@ networks:
     external: true
 ```
 
+- `name: minio` 는 프로젝트명을 파일에 굳혀 둡니다. 이 값이 컨테이너·볼륨 이름의 앞가지가 되어, `-p` 를 붙이지 않아도 (다른 폴더에서 띄워도) 늘 같은 프로젝트·같은 볼륨에 붙으므로 쌓아 둔 데이터가 어긋나지 않습니다.
 - `image: minio/minio` 는 공식 MinIO server 이미지를 사용한다는 뜻이며, 이 이미지에는 `mc` 클라이언트도 함께 들어 있어 같은 컨테이너 안에서 버킷을 만들 수 있습니다.
 - `entrypoint` 는 server 를 **백그라운드로 띄운 뒤** (`minio server ... &`), `until` 로 server 가 준비될 때까지 재시도하여 alias 를 잡고, `mc` 로 `datasets`/`models`/`mlflow` 버킷을 만들고 `datasets`/`models` 에 버저닝을 켭니다. 마지막 `wait` 가 백그라운드 server 프로세스를 기다려 **컨테이너를 계속 떠 있게** 합니다 (이게 없으면 mc 명령 후 컨테이너가 종료됩니다).
   - `--ignore-existing` 으로 버킷이 이미 있으면 통과하고, 버저닝도 멱등하므로 **재기동해도 안전** 합니다.

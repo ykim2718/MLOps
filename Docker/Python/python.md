@@ -75,6 +75,7 @@
 
   ```yaml
   # docker-compose.yml
+  name: python                          # Fix the project name (prefix of container and volume names).
   services:
     python:
       build: .                        # Build the image from the Dockerfile in the current folder.
@@ -93,6 +94,7 @@
       external: true
   ```
 
+  - `name: python` 은 프로젝트명을 파일에 고정합니다. 이 값이 컨테이너·볼륨 이름의 앞가지가 되므로, `-p` 를 붙이지 않아도 (혹은 다른 폴더에서 띄워도) 항상 같은 프로젝트·같은 볼륨에 붙어 등록한 데이터가 어긋나지 않습니다.
   - `build: .` 은 `image:` 대신 현재 폴더의 `Dockerfile` 로 이미지를 직접 빌드한다는 뜻입니다.
   - `volumes: ./app:/app` 은 호스트의 `app/` 폴더를 컨테이너 `/app` 에 **bind mount** 합니다. 호스트에서 코드를 고치면 재빌드 없이 컨테이너에 즉시 반영되며, 컨테이너가 `/app` 에 쓴 결과 파일도 호스트에 그대로 나타납니다 ([§3](#3-access) 의 핵심입니다).
   - `restart: "no"` 는 앱이 끝나도 다시 띄우지 않고 `Exited` 상태로 둡니다. 종료 코드와 로그는 `docker compose logs` · `docker ps -a` 로 확인합니다.

@@ -3,6 +3,7 @@
 # MongoDB 는 빈 DB·collection 을 미리 만들지 않고, 첫 쓰기 (collection insert) 시점에 자동 생성한다.
 # 제어 노드 안 다른 서비스 (REST API 등) 가 'mongo' 라는 서비스명으로 접속하도록
 # 공유 네트워크 mlops (external) 에 붙는다. (먼저 run_mongo.ps1 이 'docker network create mlops' 로 만든다.)
+name: mongodb
 services:
   mongo:
     image: mongo:7
