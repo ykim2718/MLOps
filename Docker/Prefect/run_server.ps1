@@ -1,8 +1,7 @@
 # run_server.ps1 — bring up the Prefect server compose stack on the Control Node.
 param(
-    [string]$ProjectName = 'mlops',                     # docker compose project name (-p); must match register_pool.ps1
-    [string]$Yaml        = 'docker-compose.server.yml', # the server compose file
-    [string]$Network     = 'mlops'                      # shared external network
+    [string]$Yaml    = 'docker-compose.server.yml', # the server compose file (its top-level name: sets the project)
+    [string]$Network = 'mlops'                      # shared external network
 )
 
 $ErrorActionPreference = "Stop"
@@ -11,4 +10,4 @@ $ErrorActionPreference = "Stop"
 docker network inspect $Network *> $null
 if ($LASTEXITCODE -ne 0) { docker network create $Network | Out-Null }
 
-docker compose -p $ProjectName -f $Yaml up -d
+docker compose -f $Yaml up -d   # project name comes from the compose file's top-level name: (prefect-server)

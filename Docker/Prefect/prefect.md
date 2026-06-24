@@ -80,9 +80,9 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
      Run:
 
      ```powershell
-     .\run_server.ps1 -ProjectName mlops -Yaml docker-compose.server.yml -Network mlops
-     .\register_pool.ps1 -PoolName high_performance  -TemplateFile docker-pool-template-high.json -ConcurrencyLimit 16 -ProjectName mlops -Compose docker-compose.server.yml
-     .\register_pool.ps1 -PoolName lower_performance -TemplateFile docker-pool-template-low.json  -ConcurrencyLimit 4  -ProjectName mlops -Compose docker-compose.server.yml
+     .\run_server.ps1 -Yaml docker-compose.server.yml -Network mlops
+     .\register_pool.ps1 -PoolName high_performance  -TemplateFile docker-pool-template-high.json -ConcurrencyLimit 16 -Compose docker-compose.server.yml
+     .\register_pool.ps1 -PoolName lower_performance -TemplateFile docker-pool-template-low.json  -ConcurrencyLimit 4  -Compose docker-compose.server.yml
      ```
 
   2) **PREFECT DISPATCHER** — 작업 머신마다 1대 · 직접 빌드
@@ -97,7 +97,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
 
      ```powershell
      docker build -f Dockerfile.dispatcher -t prefect-dispatcher:latest .    # build the image once
-     .\run_dispatcher.ps1 -WorkPool high_performance -WorkerLimit 8 -ProjectName mlops
+     .\run_dispatcher.ps1 -WorkPool high_performance -WorkerLimit 8
      ```
 
   3) **PIPELINE FLOW** — job 마다 떴다 사라지는 컨테이너 · 직접 빌드
@@ -132,6 +132,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
 
   ```yaml
   # docker-compose.server.yml
+  name: prefect-server   # compose project name baked in (replaces -p); run_server.ps1 / register_pool.ps1 rely on it
   services:
     prefect_server:
       image: prefecthq/prefect:3-latest
@@ -158,12 +159,11 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
   #### Execution Command
 
   ```powershell
-  .\run_server.ps1 -ProjectName mlops -Yaml docker-compose.server.yml -Network mlops
+  .\run_server.ps1 -Yaml docker-compose.server.yml -Network mlops
   ```
 
   - `run_server.ps1` (코드는 [Appendix D](#appendix-d-run_serverps1)) — 네트워크 생성과 `docker compose up` 을 한 번에 처리합니다.
-  - `-ProjectName` — 프로젝트명.
-  - `-Yaml` — 띄울 compose 파일.
+  - `-Yaml` — 띄울 compose 파일. 프로젝트명은 이 파일의 top-level `name:` (`prefect-server`) 이 정합니다.
   - `-Network` — 붙을 공유 네트워크.
 
   실행 후 대시보드는 **`http://<Host IP>:4200`** 에서 열립니다 (같은 컴퓨터는 `localhost`).
@@ -219,7 +219,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
   > | `--limit` | dispatcher | `8` | `2` | `prefect worker start` (`WORKER_LIMIT`) |
   > | `--concurrency-limit` | pool | `16` | `4` | `work-pool create` (`register_pool.ps1`) |
 
-  **등록 (`register_pool.ps1`)** — server 안 prefect CLI 로 pool 마다 등록합니다 (`<Pool Name>`·`<Template File>`·`<Project Name>` 변수화; 코드는 [Appendix E](#appendix-e-register_poolps1)).
+  **등록 (`register_pool.ps1`)** — server 안 prefect CLI 로 pool 마다 등록합니다 (`<Pool Name>`·`<Template File>` 변수화; 코드는 [Appendix E](#appendix-e-register_poolps1)).
 
   ```powershell
   # Register each tier (run once, after the server is up).
@@ -275,6 +275,7 @@ dispatcher 는 **`docker` work pool** 을 polling 해 job 마다 `pipeline_flow`
 
   ```yaml
   # docker-compose.dispatcher.yml
+  name: prefect-dispatcher   # compose project name baked in (replaces -p); run_dispatcher.ps1 relies on it
   services:
     prefect_dispatcher:
       image: prefect-dispatcher:latest   # built once from Dockerfile.dispatcher (prefect + prefect-docker)
@@ -679,9 +680,8 @@ Prefect 실행 모드는 **serve mode** 와 **work pool mode** 이고, 차이는
 ```powershell
 # run_server.ps1 — bring up the Prefect server compose stack on the Control Node.
 param(
-    [string]$ProjectName = 'mlops',                     # docker compose project name (-p); must match register_pool.ps1
-    [string]$Yaml        = 'docker-compose.server.yml', # the server compose file
-    [string]$Network     = 'mlops'                      # shared external network
+    [string]$Yaml    = 'docker-compose.server.yml', # the server compose file (its top-level name: sets the project)
+    [string]$Network = 'mlops'                      # shared external network
 )
 
 $ErrorActionPreference = "Stop"
@@ -690,7 +690,7 @@ $ErrorActionPreference = "Stop"
 docker network inspect $Network *> $null
 if ($LASTEXITCODE -ne 0) { docker network create $Network | Out-Null }
 
-docker compose -p $ProjectName -f $Yaml up -d
+docker compose -f $Yaml up -d   # project name comes from the compose file's top-level name: (prefect-server)
 ```
 
 ## Appendix E. register_pool.ps1
@@ -710,8 +710,7 @@ param(
     [Parameter(Mandatory = $true)] [string]$PoolName,      # work pool name, e.g. high_performance | lower_performance
     [Parameter(Mandatory = $true)] [string]$TemplateFile,  # base job template mounted into the server at /templates, e.g. docker-pool-template-high.json
     [int]$ConcurrencyLimit = 0,                            # pool-wide max concurrent runs (0 = no limit)
-    [string]$ProjectName = 'mlops',                        # docker compose project name (-p); must match run_server.ps1
-    [string]$Compose     = 'docker-compose.server.yml'     # the server compose that runs prefect_server
+    [string]$Compose       = 'docker-compose.server.yml'   # the server compose (its top-level name: sets the project)
 )
 
 $ErrorActionPreference = "Stop"
@@ -724,7 +723,7 @@ if ($ConcurrencyLimit -gt 0) { $create += @('--concurrency-limit', "$Concurrency
 # The server container has the prefect CLI and the mounted templates (/templates/<TemplateFile>).
 # The API may need a moment after startup, so retry a few times.
 for ($i = 1; $i -le 10; $i++) {
-    docker compose -p $ProjectName -f $Compose exec -T prefect_server prefect @create
+    docker compose -f $Compose exec -T prefect_server prefect @create
     if ($?) { break }
     Start-Sleep -Seconds 3
 }
@@ -747,8 +746,7 @@ for ($i = 1; $i -le 10; $i++) {
 #
 param(
     [string]$WorkPool = 'high_performance',  # the work pool this machine polls: high_performance | lower_performance
-    [int]$WorkerLimit = 8,                    # max pipeline_flow containers this machine spawns concurrently
-    [string]$ProjectName = 'mlops'            # docker compose project name (-p); must match the server compose
+    [int]$WorkerLimit = 8                     # max pipeline_flow containers this machine spawns concurrently
 )
 
 $ErrorActionPreference = "Stop"
@@ -765,8 +763,9 @@ docker network inspect mlops *> $null
 if ($LASTEXITCODE -ne 0) { docker network create mlops | Out-Null }
 
 # Bring the dispatcher stack down (keeping volumes) and back up in the background.
-docker compose -p $ProjectName -f $compose down
-docker compose -p $ProjectName -f $compose up -d
+# project name comes from the compose file's top-level name: (prefect-dispatcher), so down only ever touches this stack.
+docker compose -f $compose down
+docker compose -f $compose up -d
 ```
 
 ## Appendix G. Orchestrator Benchmarking

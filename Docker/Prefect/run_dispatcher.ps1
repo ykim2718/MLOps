@@ -10,8 +10,7 @@
 #
 param(
     [string]$WorkPool = 'high_performance',  # the work pool this machine polls: high_performance | lower_performance
-    [int]$WorkerLimit = 8,                    # max pipeline_flow containers this machine spawns concurrently
-    [string]$ProjectName = 'mlops'            # docker compose project name (-p); must match the server compose
+    [int]$WorkerLimit = 8                     # max pipeline_flow containers this machine spawns concurrently
 )
 
 $ErrorActionPreference = "Stop"
@@ -28,5 +27,6 @@ docker network inspect mlops *> $null
 if ($LASTEXITCODE -ne 0) { docker network create mlops | Out-Null }
 
 # Bring the dispatcher stack down (keeping volumes) and back up in the background.
-docker compose -p $ProjectName -f $compose down
-docker compose -p $ProjectName -f $compose up -d
+# project name comes from the compose file's top-level name: (prefect-dispatcher), so down only ever touches this stack.
+docker compose -f $compose down
+docker compose -f $compose up -d

@@ -9,6 +9,7 @@
 #
 # Build (once):  docker build -f Dockerfile.dispatcher -t prefect-dispatcher:latest .
 # Start:         .\run_dispatcher.ps1 -WorkPool high_performance
+name: prefect-dispatcher   # compose project name baked in (replaces -p); run_dispatcher.ps1 relies on it
 services:
   prefect_dispatcher:
     image: prefect-dispatcher:latest   # built once from Dockerfile.dispatcher (prefect + prefect-docker)

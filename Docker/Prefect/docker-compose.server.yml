@@ -1,4 +1,5 @@
 # docker-compose.server.yml
+name: prefect-server   # compose project name baked in (replaces -p); run_server.ps1 / register_pool.ps1 rely on it
 services:
   prefect_server:
     image: prefecthq/prefect:3-latest
