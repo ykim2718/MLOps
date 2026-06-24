@@ -25,19 +25,25 @@ docker network inspect mlops *> $null
 if ($LASTEXITCODE -ne 0) { docker network create mlops | Out-Null }
 
 # --- Validate WorkPool against the pools registered on the server ------------------------------
-# Query through a throwaway dispatcher container: it carries the same PREFECT_API_URL (env_file) and
-# network the real worker uses, so if this can read the pools the worker will reach them too.
+# Read the registered pools with the host prefect CLI (configured via its PREFECT_API_URL profile).
+# EAP=Continue so the CLI's stderr (progress / version warnings) does not abort the script under Stop.
 function Get-PoolsJsonText {
-    $raw  = docker compose -f $compose run --rm --no-deps -T prefect_dispatcher prefect work-pool ls --output json 2>$null
+    $old = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $raw = prefect work-pool ls --output json 2>$null
+    } finally {
+        $ErrorActionPreference = $old
+    }
     $text = ($raw -join "`n")
     $s = $text.IndexOf('['); $e = $text.LastIndexOf(']')
-    if ($s -lt 0 -or $e -le $s) { return $null }       # no JSON => could not reach the server
+    if ($s -lt 0 -or $e -le $s) { return $null }       # no JSON => prefect CLI missing or server unreachable
     return $text.Substring($s, $e - $s + 1)
 }
 
 $jsonText = Get-PoolsJsonText
 if ($null -eq $jsonText) {
-    throw "Could not read work pools from the Prefect server. Start it (run_server.ps1) and check PREFECT_API_URL in docker-compose.env, then retry."
+    throw "Could not read work pools via the host 'prefect' CLI. Ensure prefect is installed and PREFECT_API_URL points at a running server (run_server.ps1), then retry."
 }
 
 # This dispatcher spawns docker containers, so only docker-type pools are valid
