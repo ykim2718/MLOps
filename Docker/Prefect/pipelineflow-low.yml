@@ -3,7 +3,7 @@ deployments:
   - name: pipelineflow-low
     entrypoint: pipeline.py:pipeline       # <file>:<@flow function>
     work_pool:
-      name: lower_performance
+      name: low_performance
       job_variables:
         image: pipeline-flow:latest
     parameters:

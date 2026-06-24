@@ -15,7 +15,7 @@ services:
     image: prefect-dispatcher:latest   # built once from Dockerfile.dispatcher (prefect + prefect-docker)
     env_file:
       - docker-compose.env          # PREFECT_API_URL (the Prefect server API)
-    command: prefect worker start --pool ${WORK_POOL:-high_performance} --limit ${WORKER_LIMIT:-8}
+    command: prefect worker start --type docker --pool ${WORK_POOL:-high_performance} --limit ${WORKER_LIMIT:-8} --no-create-pool-if-not-found
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock   # host docker socket, to spawn sibling containers
     networks:

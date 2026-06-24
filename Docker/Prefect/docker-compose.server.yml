@@ -10,7 +10,7 @@ services:
       - "4200:4200"                 # dashboard/API. Clients connect on this port.
     volumes:
       - ./docker-pool-template-high.json:/templates/docker-pool-template-high.json:ro   # base job template for the high_performance pool
-      - ./docker-pool-template-low.json:/templates/docker-pool-template-low.json:ro     # base job template for the lower_performance pool
+      - ./docker-pool-template-low.json:/templates/docker-pool-template-low.json:ro     # base job template for the low_performance pool
     networks:
       - mlops
     restart: unless-stopped
