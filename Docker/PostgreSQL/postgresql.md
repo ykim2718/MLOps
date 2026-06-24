@@ -45,6 +45,20 @@ services:
       - mlops
     restart: unless-stopped
 
+  pgadmin:
+    image: dpage/pgadmin4
+    env_file:
+      - docker-compose.env          # injects PGADMIN_DEFAULT_EMAIL / PGADMIN_DEFAULT_PASSWORD
+    ports:
+      - "5050:80"                   # browse the web UI at http://localhost:5050
+    volumes:
+      - pgadmin-data:/var/lib/pgadmin
+    networks:
+      - mlops
+    restart: unless-stopped
+    depends_on:
+      - postgres
+
 configs:
   init_sql:
     content: |
@@ -55,6 +69,7 @@ configs:
 
 volumes:
   pg-data:
+  pgadmin-data:
 
 networks:
   mlops:
@@ -69,6 +84,7 @@ networks:
 - `healthcheck` 는 `pg_isready` 로 기동 완료를 확인하여, 이 DB 에 의존하는 서비스가 준비 상태를 기다릴 수 있게 합니다.
 - `networks: mlops` 는 같은 호스트의 다른 서비스가 `postgres` 서비스명으로 접속하도록 공유 외부 네트워크에 연결합니다.
 - `restart: unless-stopped` 는 컨테이너가 비정상 종료되어도 자동으로 다시 띄웁니다 (사용자가 직접 멈춘 경우는 제외합니다).
+- `pgadmin` 은 DB 를 브라우저에서 보고 다루는 웹 UI (`dpage/pgadmin4`) 로, `5050:80` 으로 노출해 `http://localhost:5050` 으로 띄우고 같은 `mlops` 네트워크 안에서 `postgres` 서버에 붙습니다. 로그인 계정은 `PGADMIN_DEFAULT_EMAIL`·`PGADMIN_DEFAULT_PASSWORD` 로 주입하고, 등록한 server 연결 정보는 `pgadmin-data` 볼륨에 영속 저장합니다. `depends_on: postgres` 로 DB 다음에 띄웁니다.
 
 #### Execution Command
 
@@ -95,6 +111,8 @@ docker compose -p <Project Name> up -d
   # docker-compose.env_example  (all values are CHANGE_ME placeholders — do not expose real values)
   POSTGRES_USER=CHANGE_ME
   POSTGRES_PASSWORD=CHANGE_ME
+  PGADMIN_DEFAULT_EMAIL=CHANGE_ME
+  PGADMIN_DEFAULT_PASSWORD=CHANGE_ME
   ```
 
   - 컨테이너 셸 명령 안에서 위 값을 참조할 때는 `$$POSTGRES_USER` 처럼 `$$` 로 적습니다. `$$` 는 compose 가 `$` 로 바꿔 컨테이너 셸이 `env_file` 값으로 확장하며, `$` 단독은 compose 가 먼저 가로채므로 쓰지 않습니다.
@@ -139,6 +157,19 @@ docker compose -p <Project Name> up -d
   ```
 
   > catalog **테이블 (예: `datasets`)** 은 인프라에서 만들지 않고 **코드에서 자동으로 만듭니다** (이미 있으면 그대로 두고, 없을 때만 생성합니다). 인프라는 빈 `catalog` DB 까지만 준비합니다.
+
+### Web UI (pgAdmin)
+
+  브라우저에서 DB 를 보고 싶으면 함께 띄운 `pgadmin` 컨테이너로 접속합니다. `http://localhost:5050` 을 열고 `PGADMIN_DEFAULT_EMAIL`·`PGADMIN_DEFAULT_PASSWORD` 로 로그인한 뒤, **Add New Server** 에서 PostgreSQL 연결을 등록합니다.
+
+  | Field | Value |
+  |-------|-------|
+  | Host name/address | `postgres` |
+  | Port | `5432` |
+  | Username | `POSTGRES_USER` 값 |
+  | Password | `POSTGRES_PASSWORD` 값 |
+
+  > Host 는 `localhost` 가 아니라 **`postgres`** 입니다. pgAdmin 은 자기 컨테이너 안에서 같은 `mlops` 네트워크의 DB 에 **서비스명**으로 붙으므로, 컨테이너 입장의 `localhost` 는 자기 자신을 가리킵니다. (`http://localhost:5050` 의 `localhost` 는 브라우저가 pgAdmin 의 노출 포트에 붙는 것이라 별개입니다.)
 
 ## 4. Granular Database Access Control
 
