@@ -23,7 +23,8 @@ MongoDB 는 도커 컨테이너로 실행됩니다. `docker compose -p <Project 
 
 ```yaml
 # docker-compose.yml
-name: mongodb
+name: mongodb                       # Fix the project name (prefix of container and volume names).
+
 services:
   mongo:
     image: mongo:7

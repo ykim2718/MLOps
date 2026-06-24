@@ -76,6 +76,7 @@
   ```yaml
   # docker-compose.yml
   name: python                          # Fix the project name (prefix of container and volume names).
+  
   services:
     python:
       build: .                        # Build the image from the Dockerfile in the current folder.

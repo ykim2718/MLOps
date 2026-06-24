@@ -16,7 +16,8 @@ MinIO 는 도커 컨테이너로 실행됩니다. 아래는 MinIO 의 `docker-co
 
 ```yaml
 # docker-compose.yml
-name: minio
+name: minio                         # Fix the project name (prefix of container and volume names).
+
 services:
   minio:
     image: minio/minio

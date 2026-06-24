@@ -44,7 +44,8 @@ MLflow 는 도커 컨테이너로 실행됩니다. backend 인 PostgreSQL (`mlfl
 
 ```yaml
 # docker-compose.yml
-name: mlflow
+name: mlflow                        # Fix the project name (prefix of container and volume names).
+
 services:
   mlflow:
     image: ghcr.io/mlflow/mlflow:latest

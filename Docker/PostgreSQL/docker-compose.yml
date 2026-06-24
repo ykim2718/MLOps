@@ -1,5 +1,6 @@
 # docker-compose.yml
-name: postgresql
+
+name: postgresql                    # Fix the project name (prefix of container and volume names).
 
 services:
   postgres:

@@ -1,8 +1,7 @@
-# MLflow — 제어 노드(머신 A)의 추적 서버 + 모델 레지스트리.
-# backend=PostgreSQL(mlflow DB), artifact=MinIO(s3://mlflow). UI: http://localhost:5000
-# 공유 네트워크 mlops(external)에서 postgres / minio 를 서비스명으로 접속한다.
-# postgres·minio 는 별도 compose 라 depends_on 을 걸 수 없으므로, restart 로 준비될 때까지 재시도한다.
-name: mlflow
+# docker-compose.yml
+
+name: mlflow                        # Fix the project name (prefix of container and volume names).
+
 services:
   mlflow:
     image: ghcr.io/mlflow/mlflow:latest
@@ -19,7 +18,6 @@ services:
       - mlops
     restart: unless-stopped
 
-# 제어 노드 서비스들이 공유하는 외부 네트워크. run_mlflow.ps1 이 미리 생성한다.
 networks:
   mlops:
     external: true
