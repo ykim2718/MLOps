@@ -13,15 +13,21 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# Build the create command; add --concurrency-limit only when a positive limit is given.
+# Build the create command. --overwrite keeps the base job template in sync on re-runs.
+# (work-pool create has no --concurrency-limit in Prefect 3; the pool-wide limit is set separately below.)
 $create = @('work-pool', 'create', $PoolName, '--type', 'docker',
             '--base-job-template', "/templates/$TemplateFile", '--overwrite')
-if ($ConcurrencyLimit -gt 0) { $create += @('--concurrency-limit', "$ConcurrencyLimit") }
 
 # The server container has the prefect CLI and the mounted templates (/templates/<TemplateFile>).
 # The API may need a moment after startup, so retry a few times.
+$created = $false
 for ($i = 1; $i -le 10; $i++) {
     docker compose -f $Compose exec -T prefect_server prefect @create
-    if ($?) { break }
+    if ($?) { $created = $true; break }
     Start-Sleep -Seconds 3
+}
+
+# Pool-wide concurrency limit is a separate command (create does not accept it).
+if ($created -and $ConcurrencyLimit -gt 0) {
+    docker compose -f $Compose exec -T prefect_server prefect work-pool set-concurrency-limit $PoolName "$ConcurrencyLimit"
 }
