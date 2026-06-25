@@ -28,6 +28,15 @@ COMPOSE="docker-compose.dispatcher.yml"
 
 command -v jq >/dev/null 2>&1 || { echo "jq is required to parse 'prefect work-pool ls --output json'. Install jq and retry." >&2; exit 1; }
 
+# The pool validation below uses the host 'prefect' CLI, so it must be installed and on PATH.
+if ! command -v prefect >/dev/null 2>&1; then
+    echo "prefect CLI not found on this host (needed to validate the work pool against the server)." >&2
+    echo "Install it, then retry:" >&2
+    echo "  pipx install prefect && pipx ensurepath     # then open a new shell, or: export PATH=\"\$HOME/.local/bin:\$PATH\"" >&2
+    echo "  export PREFECT_API_URL=http://127.0.0.1:4200/api   # point at the running server (run_server.sh)" >&2
+    exit 1
+fi
+
 # On the same host, dispatcher/pipeline_flow containers reach the server by service name over the shared mlops network.
 # (For a dispatcher on another machine, remove the networks block in the dispatcher compose and set PREFECT_API_URL to http://<host IP>:4200/api.)
 docker network inspect mlops >/dev/null 2>&1 || docker network create mlops >/dev/null
