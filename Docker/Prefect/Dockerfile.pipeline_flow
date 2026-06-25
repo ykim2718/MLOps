@@ -8,5 +8,5 @@ WORKDIR /work
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# pipeline.py — orchestrator (deployment entrypoint); team repo is fetched at runtime into a per-run worktree
+# pipeline.py — orchestrator (deployment entrypoint); team repo is shallow-fetched at runtime into a per-run src/
 COPY pipeline.py .

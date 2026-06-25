@@ -11,29 +11,28 @@ from prefect.blocks.system import Secret
 @flow(name="pipeline", flow_run_name="{member}@{git_commit_hash}")                                          # run name shows whose run (e.g. alice@a1b2c3d)
 def pipeline(git_repo: str, git_commit_hash: str, minio_key: str, minio_bucket: str = "datasets",
              member: str = "", payload: str = "my_flow.py"):
-    log  = get_run_logger()                                                                            # writes to this run's UI logs
-    base = tempfile.mkdtemp(prefix="run-")                                                             # per-run temp dir (removed in finally)
-    repo = os.path.join(base, "repo")                                                                 # git metadata + full history (.git)
-    src  = os.path.join(base, "src")                                                                  # worktree dir: the repo tree at the commit
-    data = os.path.join(base, "data")                                                                 # MinIO download target
+    log    = get_run_logger()                                                                         # writes to this run's UI logs
+    base   = tempfile.mkdtemp(prefix="run-")                                                          # per-run temp dir (removed in finally)
+    script = os.path.join(base, "script")                                                             # team repo snapshot at the commit (shallow)
+    data   = os.path.join(base, "data")                                                               # MinIO download target
     try:
-        subprocess.run(["git", "init", repo], check=True)                                             # git init creates repo/ (no mkdir needed)
-        subprocess.run(["git", "-C", repo, "remote", "add", "origin", git_repo], check=True)
-        subprocess.run(["git", "-C", repo, "fetch", "origin"], check=True)                            # full history (past + present commits)
-        subprocess.run(["git", "-C", repo, "worktree", "add", "--detach", src, git_commit_hash], check=True)  # expand the commit's tree into src/
+        subprocess.run(["git", "init", script], check=True)                                              # git init creates script/ (no mkdir needed)
+        subprocess.run(["git", "-C", script, "remote", "add", "origin", git_repo], check=True)
+        subprocess.run(["git", "-C", script, "fetch", "--depth", "1", "origin", git_commit_hash], check=True)   # just that commit (shallow; no history)
+        subprocess.run(["git", "-C", script, "checkout", "FETCH_HEAD"], check=True)                       # check out the commit snapshot into script/
 
-        os.makedirs(data, exist_ok=True)                                                              # worktree didn't create data/
+        os.makedirs(data, exist_ok=True)                                                              # git didn't create data/
         s3 = boto3.client("s3", endpoint_url=Secret.load("minio-endpoint").get(),                     # credentials loaded from Prefect Secret (§5)
                           aws_access_key_id=Secret.load("minio-access-key").get(),
                           aws_secret_access_key=Secret.load("minio-secret-key").get())
         local = os.path.join(data, os.path.basename(minio_key))                                        # e.g. data/Bennelong Point
         s3.download_file(minio_bucket, minio_key, local)                                               # bucket/key → data/ (latest; pick a version by its key path)
 
-        subprocess.run(["python", payload,                                                             # run the team's payload in the worktree
+        subprocess.run(["python", payload,                                                             # run the team's payload in script/
                         "--git_repo", git_repo, "--git_commit_hash", git_commit_hash,                           # run identity, passed as CLI args
-                        "--member", member, "--data", data], cwd=src, check=True)                     # stdout/stderr stream to this run's logs
+                        "--member", member, "--data", data], cwd=script, check=True)                     # stdout/stderr stream to this run's logs
     except subprocess.CalledProcessError as e:                                                         # payload exited non-zero (crashed)
         log.error(f"payload {payload} crashed (exit {e.returncode}) for {member}@{git_commit_hash}: {e}")   # tag the failure with whose run + message
         raise                                                                                          # re-raise → run marked Failed, logs kept in the UI
     finally:
-        shutil.rmtree(base, ignore_errors=True)                                                        # one cleanup removes repo/ + src/ + data/
+        shutil.rmtree(base, ignore_errors=True)                                                        # one cleanup removes script/ + data/
