@@ -1,12 +1,38 @@
 # Dockerfile.pipeline_flow — shared team Pipeline Flow image (libraries + orchestrator)
+# Dependency install runs once at build time and stays in the layer cache, so later container starts are fast.
 FROM python:3.11.15
-RUN apt-get update && apt-get install -y --no-install-recommends git \
+
+# System packages.
+#   git             : pipeline.py shallow-fetches the team repo into a per-run worktree at runtime
+#   build-essential : compiles C extensions (ucrdtw / dtaidistance / TA-Lib Python wrappers)
+#   wget            : downloads the TA-Lib C library source
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git build-essential wget \
     && rm -rf /var/lib/apt/lists/*
 
+# The TA-Lib Python package needs the C library of the same name, so build and install it from source.
+RUN wget -q http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz \
+    && tar -xzf ta-lib-0.4.0-src.tar.gz \
+    && cd ta-lib \
+    && ./configure --prefix=/usr \
+    && make \
+    && make install \
+    && cd .. \
+    && rm -rf ta-lib ta-lib-0.4.0-src.tar.gz
+
 WORKDIR /work
-# requirements.txt — required: prefect, boto3
+
+# Copy requirements first so this layer is cached when only code changes.
 COPY requirements.txt .
+
+# ucrdtw / TA-Lib import numpy at build time, but pip's build isolation has no numpy, so a plain -r install fails.
+# Install numpy first, then those two with build isolation disabled, then the rest.
+RUN pip install --no-cache-dir numpy==1.26.4
+# SETUPTOOLS_USE_DISTUTILS=stdlib: the setuptools distutils shim lacks the msvccompiler that numpy.distutils looks for.
+RUN SETUPTOOLS_USE_DISTUTILS=stdlib pip install --no-cache-dir --no-build-isolation ucrdtw==0.201
+# TA-Lib 0.4.29's bundled C source uses the numpy 1.x C API; disable isolation so it compiles against the numpy 1.26 above.
+RUN pip install --no-cache-dir --no-build-isolation TA-Lib==0.4.29
 RUN pip install --no-cache-dir -r requirements.txt
 
-# pipeline.py — orchestrator (deployment entrypoint); team repo is shallow-fetched at runtime into a per-run src/
+# pipeline.py — orchestrator (deployment entrypoint). Prefect's docker worker injects the run command; no CMD needed.
 COPY pipeline.py .

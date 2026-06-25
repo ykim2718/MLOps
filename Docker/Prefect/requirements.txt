@@ -1,26 +1,79 @@
 # Python dependencies for the shared team Pipeline Flow image (base: python:3.11.15, see Dockerfile).
 # The team source is NOT baked; it is fetched into a git worktree at runtime, so only libraries are pinned here.
 
-# Prefect runtime (flow execution) — previously provided by the prefecthq base image.
-prefect>=3,<4
+# WorkFlow
+prefect>=3,<4                  # Prefect runtime (flow execution)
+boto3==1.34.131                # Object storage (MinIO, S3-compatible) access
+psycopg2-binary==2.9.9         # Catalog DB (PostgreSQL) access
+mlflow==2.14.1                 # Experiment tracking / model registry
 
-# Object storage (MinIO, S3-compatible) access
-boto3==1.34.131
+# --- 핵심 ML / DL: 모델 학습·추론 프레임워크 ---
+tensorflow==2.17.0             # 딥러닝 프레임워크
+tensorflow-datasets==4.9.9     # 표준 데이터셋 로더
+keras==3.12.1                  # 고수준 신경망 API
+torch==2.9.1                   # 딥러닝 프레임워크 (PyTorch)
+scikit-learn==1.4.2            # 전통적 머신러닝 알고리즘
+lightgbm==4.6.0                # 그래디언트 부스팅 (LightGBM)
+catboost==1.2.10               # 그래디언트 부스팅 (CatBoost)
+imbalanced-learn==0.14.1       # 불균형 데이터 리샘플링
+statsmodels==0.14.6            # 통계 모델·검정
+prophet==1.1.5                 # 시계열 예측
+bayesian-optimization==1.4.3   # 베이지안 하이퍼파라미터 최적화
+keract==4.5.1                  # 신경망 활성화·그래디언트 시각화
+optuna==4.8.0                  # Hyperparameter tuning
 
-# Catalog DB (PostgreSQL) access
-psycopg2-binary==2.9.9
+# --- 수치 / 데이터: 배열·표 연산 및 병렬 처리 ---
+numpy==1.26.4                  # 수치 배열 (전체 의존성의 기준 버전)
+scipy==1.13.1                  # 과학 계산
+pandas==2.0.3                  # 표 형식 데이터 처리
+numba==0.61.2                  # JIT 컴파일 가속
+numpy-ext==0.9.9               # numpy 보조 함수
+dask==2025.12.0                # 병렬·분산 연산
+h5py==3.15.1                   # HDF5 입출력
 
-# Experiment tracking / model registry
-mlflow==2.14.1
+# --- 시계열: 패턴·거리·이벤트 탐지 ---
+stumpy==1.14.1                 # Matrix Profile 기반 모티프 탐색
+pyts==0.13.0                   # 시계열 분류·변환
+dtaidistance==2.4.0            # DTW 거리 (C 확장)
+fastdtw==0.3.4                 # 근사 DTW
+ucrdtw==0.201                  # UCR DTW (C 확장)
+peakdetect==1.2                # 피크 검출
 
-# Hyperparameter tuning
-optuna==3.6.1
+# --- 금융 도메인 데이터: 시세·공시·캘린더·기술지표 ---
+dart-fss==0.4.10               # DART 전자공시 수집
+pandas-datareader==0.10.0      # 외부 금융 데이터 로더
+pandas-market-calendars==4.4.0 # 거래소 개장 캘린더
+ta==0.11.0                     # 기술적 분석 지표 (순수 파이썬)
+TA-Lib==0.4.29                 # 기술적 분석 지표 (C 라이브러리 필요)
 
-# Data processing / parquet I/O
-pandas==2.2.2
-numpy==1.26.4
-pyarrow==16.1.0
-scikit-learn==1.5.0
+# --- 시각화: 그래프·플롯 ---
+matplotlib==3.8.4              # 기본 플로팅
+seaborn==0.11.2                # 통계 시각화
+plotly==6.6.0                  # 인터랙티브 차트
+mplcursors==0.6                # matplotlib 커서·툴팁
+mpld3==0.5.11                  # matplotlib -> D3 웹 출력
+pydot==2.0.0                   # 그래프(DOT) 렌더링
+cycler==0.12.1                 # 플롯 스타일 순환
 
-# Deep learning (large — remove if not needed)
-torch==2.3.1
+# --- 파일 / IO / 유틸: 저장소·문서·암호·일반 유틸 ---
+pymongo==4.6.3                 # MongoDB 드라이버
+openpyxl==3.1.5                # Excel(xlsx) 읽기·쓰기
+PyMuPDF==1.27.2.3              # PDF 처리
+Pillow==12.2.0                 # 이미지 처리
+pycryptodome==3.20.0           # 암호화 알고리즘
+bcrypt==4.2.0                  # 비밀번호 해싱
+xmltodict==0.12.0              # XML <-> dict 변환
+deepdiff==7.0.1                # 객체 차이 비교
+semver==3.0.4                  # 시맨틱 버전 처리
+lockfile==0.12.2               # 파일 잠금
+click==8.4.2                   # CLI 작성
+rich==15.0.0                   # 터미널 서식 출력
+tqdm==4.68.3                   # 진행률 표시줄
+psutil==7.2.2                  # 시스템·프로세스 정보
+packaging==24.2                # 버전·패키지 메타데이터 처리
+python-dateutil==2.9.0.post0   # 날짜 파싱·연산
+pytz==2024.2                   # 시간대 데이터
+tzlocal==5.4.3                 # 로컬 시간대 감지
+typing-extensions==4.15.0      # 타입 힌트 백포트
+protobuf==4.25.9               # 직렬화 (TensorFlow 의존)
+pyarrow==15.0.2                # parquet I/O; mlflow 2.14.1 requires pyarrow<16
