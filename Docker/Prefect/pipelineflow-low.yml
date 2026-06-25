@@ -1,4 +1,4 @@
-# pipelineflow-low.yml — low-tier deployment definition
+# pipelineflow-low.yml - low-tier deployment definition
 deployments:
   - name: pipelineflow-low
     entrypoint: pipeline.py:pipeline       # <file>:<@flow function>
