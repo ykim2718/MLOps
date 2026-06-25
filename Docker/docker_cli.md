@@ -201,12 +201,14 @@ docker ps                       # sudo 없이 정상 동작하면 완료.
 
 > **보안 주의** — `docker` 그룹은 사실상 root 권한과 같습니다 (컨테이너로 호스트 파일시스템을 마운트할 수 있음). 신뢰하는 1인 개발 머신에서만 쓰고, 공용 서버에서는 `sudo` 를 유지하는 편이 안전합니다.
 
-## Appendix A. Build & Run
+## Appendix A. Terminology
+
+- **build context** — `docker build` 가 이미지를 구울 때 도커 데몬에 통째로 보내는 파일 묶음. 보통 `Dockerfile` 이 있는 폴더가 기준이며, `COPY`·`ADD` 는 이 안의 파일만 집어올 수 있습니다. `.dockerignore` 로 보낼 파일을 추려 묶음을 가볍게 합니다.
+
+## Appendix B. Build & Run
 
 도커는 **이미지를 굽는 단계**와 **컨테이너를 띄우는 단계**로 나뉩니다. 두 단계는 각각 다른 파일이 맡습니다.
 
 $$\text{Dockerfile} \longrightarrow \text{Build (이미지 생성)}$$
 
 $$\text{docker-compose.yml} \longrightarrow \text{Run (컨테이너 가동)}$$
-
-**build context** — `docker build` 가 이미지를 구울 때 도커 데몬에 통째로 보내는 파일 묶음. 보통 `Dockerfile` 이 있는 폴더가 기준이며, `COPY`·`ADD` 는 이 안의 파일만 집어올 수 있습니다. `.dockerignore` 로 보낼 파일을 추려 묶음을 가볍게 합니다.
