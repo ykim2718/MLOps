@@ -208,6 +208,9 @@ git config --get core.longpaths            # 적용 여부를 확인한다(true 
 ## Appendix A. Terminology
 
 - **.git** — 저장소의 모든 것이 담긴 숨김 폴더. 커밋·가지·이력·설정이 여기에 들어 있어, 이 폴더가 곧 local repository 입니다. `git init` 으로 만들어지며 (또는 `git clone` 이 받아 옴), 지우면 이력이 사라지고 보통 폴더로 돌아갑니다.
+- **.gitattributes** — 경로별 취급 규칙을 적는 파일. 줄바꿈 정규화 (`text=auto`), `diff`·`merge` 방식, `linguist`·LFS 지정 등을 경로 패턴에 걸어 둡니다.
+- **.gitignore** — 추적하지 않을 파일을 패턴으로 적는 파일. 빌드 산출물·캐시·비밀키 등을 적어 두면 `git status` 와 `add` 에서 빠집니다 (이미 추적 중인 파일에는 적용되지 않음).
+- **.gitmodules** — submodule 의 경로와 원격 주소를 적어 두는 파일. `git submodule add` 로 채워지며, 다른 저장소를 하위 폴더로 끌어와 고정된 커밋에 묶어 둡니다.
 - **branch** — 커밋을 가리키는 움직이는 이름표. 본줄을 건드리지 않고 갈라져 작업하다 나중에 합칩니다.
 - **detached HEAD** — HEAD 가 가지가 아닌 특정 커밋을 직접 가리키는 상태. 여기서 커밋하면 어느 가지에도 매이지 않아, 가지를 새로 만들지 않으면 잃기 쉽습니다.
 - **HEAD** — branch and commit history pointer. 보통 현재 가지의 맨 끝 커밋을 가리키며, 가지가 아닌 특정 커밋을 직접 가리키면 detached 상태입니다.
