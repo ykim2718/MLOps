@@ -323,7 +323,7 @@ dispatcher 는 **`docker` work pool** 을 polling 해 job 마다 `pipeline_flow`
 
 ### 3.3 Scaling
 
-  **처리량·확장** — `--limit` 을 키우거나, **다른 머신에서 dispatcher 를 더 띄워 같은 pool 에 붙입니다** (그 머신은 `docker-compose.env` 의 `PREFECT_API_URL`=`http://<server IP>:4200/api`, `networks` 블록 제거). 여러 dispatcher 는 같은 pool 의 큐를 나눠 가집니다.
+  **처리량·확장** — `--limit` 을 키우거나, **다른 머신에서 dispatcher 를 더 띄워 같은 pool 에 붙입니다** (그 머신은 `docker-compose.env` 의 `PREFECT_API_URL`=`http://<server IP>:4200/api`, `docker-compose.dispatcher.yml` 의 `networks:` 블록 제거). 여러 dispatcher 는 같은 prefect server 에 있는 pool 의 큐를 나눠 가집니다.
 
 ### 3.4 Verification
 
