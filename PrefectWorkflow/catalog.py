@@ -216,7 +216,7 @@ def _ext_counts(minio_path):
     """minio_path 아래 객체를 확장자별로 세어 {ext: count} 로 반환."""
     import boto3
     from urllib.parse import urlparse
-    ep = resolve("MINIO_ENDPOINT", "minio_endpoint", default="http://localhost:9000", secret=False)
+    ep = resolve("MINIO_ENDPOINT", "minio-endpoint", default="http://localhost:9000")
     ak = resolve("MINIO_ACCESS_KEY", "minio-access-key", default="minioadmin")
     sk = resolve("MINIO_SECRET_KEY", "minio-secret-key", default="minioadmin")
     s3 = boto3.client("s3", endpoint_url=ep,
