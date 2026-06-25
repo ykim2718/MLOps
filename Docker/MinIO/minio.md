@@ -4,7 +4,7 @@
 
 - **S3 (Amazon Simple Storage Service)**: AWS의 오브젝트 스토리지. 파일을 "객체 (object)" 단위로 저장하며, **버킷 (bucket)** 이라는 최상위 공간 안에 키 (경로) 로 파일을 넣습니다.
 - **버킷 (bucket)**: 오브젝트를 담는 최상위 컨테이너.
-- **버저닝 (versioning)**: 같은 키로 다시 올려도 이전 오브젝트를 보존하는 기능. MinIO 버저닝은 **덮어쓰기 사고를 막는 보조 안전장치**입니다.
+- **버저닝 (versioning)**: 같은 키로 다시 올려도 이전 오브젝트를 보존하는 기능. MinIO 버저닝은 **덮어쓰기 사고를 막는 보조 안전장치**입니다. 업로드마다 자동 붙는 **VersionId 는 수동 복구 전용** 입니다 — 덮어쓰기 사고 시 `mc ls --versions` 로 이전 버전을 찾아 `mc cp --version-id <id>` 로 되살릴 때만 쓰고, 평소 데이터 버전 선택은 VersionId 가 아니라 **키 경로** 로 합니다 (버전을 경로에 담아 서로 다른 키로 둠).
 
 ## 1. MinIO Installation
 
@@ -68,6 +68,7 @@ networks:
 #### Execution Command
 
 ```powershell
+# CLI
 # create the shared network mlops (ignore the error if it already exists), then start the container in the background.
 docker network create mlops
 docker compose -p <Project Name> up -d
@@ -91,6 +92,7 @@ docker compose -p <Project Name> up -d
 **② 도커 컨테이너 셸에서 사용 (설치 불필요)** — `minio/minio` 이미지에는 `mc` 가 함께 들어 있으므로, **떠 있는 `minio` 컨테이너의 셸에서 바로 `mc` 를 쓸 수 있습니다.** 기동 시 `local` alias 도 이미 설정돼 있어 별도 등록 없이 명령이 동작합니다.
 
 ```powershell
+# CLI
 # run mc once in the running minio container
 docker compose exec minio mc ls local
 
@@ -105,20 +107,21 @@ docker compose exec -it minio sh
 
 MinIO는 S3 호환이라 두 가지 클라이언트로 접근합니다 — **파이썬은 AWS SDK `boto3`**, **CLI는 `mc` (MinIO Client)**. `endpoint_url` (boto3) 또는 alias (mc) 만 MinIO 주소로 지정하면 실제 AWS S3와 동일하게 동작합니다.
 
-> 아래 예시는 **`datasets` 버킷의 `SYDNEY/` 폴더에 `001.parquet` … `010.parquet`** 가 있다고 가정합니다 (객체 키: `SYDNEY/001.parquet` … `SYDNEY/010.parquet`).
+> 아래 예시는 **`datasets` 버킷의 `sydney/silver/v3/` 폴더에 `001.parquet` … `010.parquet`** 가 있다고 가정합니다 (객체 키: `sydney/silver/v3/001.parquet` … `sydney/silver/v3/010.parquet`).
 
-### Python (`boto3`)
+  먼저 클라이언트만 잡으면, 이후 upload (3.1)·download (3.2) 가 같은 `s3` / `local` 을 씁니다.
 
   ```python
+  # Python
   import io, os, boto3, pandas as pd
 
   # ── env vars / parameters ──
   ENDPOINT   = os.environ.get("MINIO_ENDPOINT", "http://localhost:9000")
   ACCESS_KEY = os.environ["MINIO_ACCESS_KEY"]
   SECRET_KEY = os.environ["MINIO_SECRET_KEY"]
-  BUCKET     = "datasets"               # bucket name
-  PREFIX     = "SYDNEY/"                # folder (prefix)
-  KEY        = "SYDNEY/001.parquet"     # single object key
+  BUCKET     = "datasets"                         # bucket name
+  PREFIX     = "sydney/silver/v3/"                # folder (prefix)
+  KEY        = "sydney/silver/v3/001.parquet"     # single object key
 
   s3 = boto3.client(
       "s3",
@@ -126,63 +129,85 @@ MinIO는 S3 호환이라 두 가지 클라이언트로 접근합니다 — **파
       aws_access_key_id=ACCESS_KEY,
       aws_secret_access_key=SECRET_KEY,
   )
+  ```
 
-  # ── list: list objects under the PREFIX folder (paginated) ──
+  ```powershell
+  # CLI
+  # mc alias (once) — referenced as 'local' afterwards.
+  # format: mc alias set <alias> <url> <ACCESS_KEY> <SECRET_KEY>
+  #   <ACCESS_KEY> = MINIO_ROOT_USER, <SECRET_KEY> = MINIO_ROOT_PASSWORD (actual values in docker-compose.env)
+  mc alias set local http://<server>:9000 <ACCESS_KEY> <SECRET_KEY>
+  ```
+
+  - 인자: **`Bucket`** (버킷명) + **`Key`** (버킷 안 객체 경로, 예: `sydney/silver/v3/001.parquet`) + **`Filename`** (로컬 경로).
+
+### 3.1 Upload
+
+  로컬 파일 → MinIO 객체 (put).
+
+  > **권장 키 경로** — 데이터는 `s3://<bucket>/<member>/<experiment>/<version>/<filename>` 형태로 키를 둡니다. 버전이 경로에 들어가 버전마다 다른 키가 되므로 서로 덮어쓰지 않고, 경로만 봐도 누구의·어느 실험의·어느 버전인지 드러납니다. `<experiment>` 는 예컨대 medallion architecture 의 단계 (`bronze`·`silver`·`gold`) 가 될 수 있습니다.
+
+  예시 — `s3://datasets/sydney/silver/v3/001.parquet`
+
+  ```python
+  # Python
+  s3.upload_file("001.parquet", BUCKET, KEY)               # one object
+  ```
+
+  ```powershell
+  # CLI
+  mc cp .\001.parquet local/datasets/sydney/silver/v3/               # one
+  mc cp --recursive .\v3\ local/datasets/sydney/silver/v3/           # the whole folder
+  ```
+
+### 3.2 Download
+
+  MinIO 객체 → 로컬 파일, 또는 메모리로 스트리밍 (get). 목록 조회도 여기서 합니다.
+
+  ```python
+  # Python
+  # ── list: objects under the PREFIX folder (paginated) ──
   for page in s3.get_paginator("list_objects_v2").paginate(Bucket=BUCKET, Prefix=PREFIX):
       for obj in page.get("Contents", []):
-          print(obj["Key"], obj["Size"])               # SYDNEY/001.parquet 12345 ...
+          print(obj["Key"], obj["Size"])               # sydney/silver/v3/001.parquet 12345 ...
 
   # ── download: one object → local file ──
   s3.download_file(BUCKET, KEY, "001.parquet")
 
-  # ── download: the whole folder (PREFIX) — fetch every object under the prefix and save with the same structure ──
+  # ── download: the whole folder (PREFIX) — every object under the prefix, same structure ──
   for page in s3.get_paginator("list_objects_v2").paginate(Bucket=BUCKET, Prefix=PREFIX):
       for obj in page.get("Contents", []):
-          key = obj["Key"]                                  # e.g. SYDNEY/001.parquet
-          os.makedirs(os.path.dirname(key), exist_ok=True)  # create the SYDNEY/ folder locally
-          s3.download_file(BUCKET, key, key)                # → ./SYDNEY/001.parquet … 010.parquet
-
-  # ── upload: local file → object key ──
-  s3.upload_file("001.parquet", BUCKET, KEY)
+          key = obj["Key"]                                  # e.g. sydney/silver/v3/001.parquet
+          os.makedirs(os.path.dirname(key), exist_ok=True)  # create the sydney/silver/v3/ folder locally
+          s3.download_file(BUCKET, key, key)                # → ./sydney/silver/v3/001.parquet … 010.parquet
 
   # ── streaming: read straight into memory without downloading (no disk save) ──
   body = s3.get_object(Bucket=BUCKET, Key=KEY)["Body"].read()
-  df = pd.read_parquet(io.BytesIO(body))               # into a DataFrame without creating a local file
+  df = pd.read_parquet(io.BytesIO(body))               # into a DataFrame without a local file
 
-  # ── large objects: read only part of the bytes with Range (not the whole thing, just the start / a specific range) ──
+  # ── large objects: read only part of the bytes with Range (resumable in chunks) ──
   head = s3.get_object(Bucket=BUCKET, Key=KEY,
                        Range="bytes=0-1048575")["Body"].read()   # 0–1048575 = first 1MB (1024*1024)
   # for the next range, shift the window like Range="bytes=1048576-2097151" and repeat in chunks (resumable)
   ```
 
-  - 인자: **`Bucket`** (버킷명) + **`Key`** (버킷 안 객체 경로, 예: `SYDNEY/001.parquet`) + **`Filename`** (로컬 경로).
-  - `download_file`/`upload_file` 은 **디스크를 거치고**, **`get_object` 은 메모리로 스트리밍**합니다 (대용량은 `Range` 로 부분 읽기 가능).
-  - `s3fs`/`pyarrow` 를 쓰면 `pd.read_parquet("s3://datasets/SYDNEY/001.parquet", storage_options=...)` 처럼 `s3://` 를 직접 읽을 수도 있습니다.
-
-### CLI (`mc`)
-
   ```powershell
-  # register the alias (once) — referenced as 'local' afterwards
-  # format: mc alias set <alias> <url> <ACCESS_KEY> <SECRET_KEY>
-  #   <ACCESS_KEY> = MINIO_ROOT_USER, <SECRET_KEY> = MINIO_ROOT_PASSWORD (actual values in docker-compose.env)
-  mc alias set local http://<server>:9000 <ACCESS_KEY> <SECRET_KEY>
-
+  # CLI
   # ── list ──
-  mc ls local/datasets/SYDNEY/                  # list objects in the SYDNEY/ folder
-  mc ls --recursive local/datasets/SYDNEY/      # recurse into subfolders
+  mc ls local/datasets/sydney/silver/v3/                  # list objects in the sydney/silver/v3/ folder
+  mc ls --recursive local/datasets/sydney/silver/v3/      # recurse into subfolders
 
   # ── download (get) ──
-  mc cp local/datasets/SYDNEY/001.parquet .\               # one → current folder
-  mc cp --recursive local/datasets/SYDNEY/ .\SYDNEY\       # the whole folder
-
-  # ── upload (put) ──
-  mc cp .\001.parquet local/datasets/SYDNEY/               # one
-  mc cp --recursive .\SYDNEY\ local/datasets/SYDNEY/       # the whole folder
+  mc cp local/datasets/sydney/silver/v3/001.parquet .\               # one → current folder
+  mc cp --recursive local/datasets/sydney/silver/v3/ .\v3\           # the whole folder
 
   # ── streaming: pipe to stdout without downloading ──
-  mc cat local/datasets/SYDNEY/001.parquet > 001.parquet               # redirect to a file
-  mc cat local/datasets/SYDNEY/001.parquet | <command>                 # process directly via pipe
+  mc cat local/datasets/sydney/silver/v3/001.parquet > 001.parquet               # redirect to a file
+  mc cat local/datasets/sydney/silver/v3/001.parquet | <command>                 # process directly via pipe
   ```
+
+  - `download_file`/`upload_file` 은 **디스크를 거치고**, **`get_object` 은 메모리로 스트리밍**합니다 (대용량은 `Range` 로 부분 읽기 가능).
+  - `s3fs`/`pyarrow` 를 쓰면 `pd.read_parquet("s3://datasets/sydney/silver/v3/001.parquet", storage_options=...)` 처럼 `s3://` 를 직접 읽을 수도 있습니다.
 
   > 정리: **`boto3` = 파이썬 코드 안에서, `mc` = 터미널에서** 같은 객체에 list / download / upload / streaming 합니다. 둘 다 S3 주소만 MinIO (`endpoint_url` / alias) 로 바꾸면 되므로, 로컬·온프레미스에서 S3를 그대로 대체합니다.
 
@@ -211,6 +236,7 @@ MINIO_ROOT_PASSWORD=CHANGE_ME
 ### (1) 읽기 전용 사용자 만들기 (내장 `readonly`)
 
   ```powershell
+  # CLI
   # create the user (name + secret) then attach the readonly policy
   mc admin user add local member1 <member1-secret>
   mc admin policy attach local readonly --user member1
@@ -219,6 +245,7 @@ MINIO_ROOT_PASSWORD=CHANGE_ME
   이제 `member1` / `<member1-secret>` 를 access key/secret key 로 쓰면 **모든 버킷을 다운로드 (GetObject)·조회 (ListBucket) 만** 할 수 있고, 업로드·삭제는 거부됩니다.
 
   ```python
+  # Python
   import boto3
 
   # ── env vars / parameters ──
@@ -264,6 +291,7 @@ MINIO_ROOT_PASSWORD=CHANGE_ME
   - 위 예시 의미: **`datasets` 버킷은 읽기·목록만**, **`models/member1/*` 에만 읽기+쓰기** → 공유 데이터는 못 바꾸고 자기 영역에만 산출물을 남깁니다.
 
   ```powershell
+  # CLI
   # create the user once (login principal)
   mc admin user add local member1 <member1-login-secret>
 
@@ -280,6 +308,7 @@ MINIO_ROOT_PASSWORD=CHANGE_ME
 ### (3) 확인 · 해제
 
   ```powershell
+  # CLI
   mc admin user list local                       # list users
   mc admin user info local member1               # check the attached policy
   mc admin user svcacct list local member1       # list issued access keys
@@ -293,6 +322,7 @@ MINIO_ROOT_PASSWORD=CHANGE_ME
   발급한 **Access Key / Secret Key** 는 코드에 기록하지 말고 **환경변수나 파라미터**로 주입하여, 코드가 `os.environ` 에서 읽게 합니다.
 
   ```powershell
+  # CLI
   # inject via env vars (common to boto3 and other clients)
   $env:MINIO_ENDPOINT   = "http://<server>:9000"   # localhost on the same PC, the server IP/host on another
   $env:MINIO_ACCESS_KEY = "<issued access key>"
@@ -310,19 +340,34 @@ MINIO_ROOT_PASSWORD=CHANGE_ME
 
 `mc` (MinIO Client) 로 버킷·오브젝트·사용자·정책을 다룹니다. 이 문서에서 쓰는 주요 명령만 정리합니다 (`mc` 설치·실행은 [§2](#2-mc-installation) 참고).
 
-| Category | Command | Description |
-|----------|---------|-------------|
-| Alias | `mc alias set <alias> <url> <ACCESS_KEY> <SECRET_KEY>` | server 를 alias 로 등록합니다 (이후 `local` 등으로 참조). |
-| Object | `mc ls [--recursive] [--versions] <alias>/<bucket>/<prefix>` | 객체 목록을 봅니다 (버전 포함 조회 가능). |
-| Object | `mc cp [--recursive] <src> <dst>` | 복사 — 다운로드 (`local/...` → `.`) / 업로드 (`.` → `local/...`). |
-| Object | `mc cat <alias>/<bucket>/<key>` | 객체를 표준출력으로 스트리밍합니다 (다운로드 없이 파이프). |
-| Bucket | `mc mb [--ignore-existing] <alias>/<bucket>` | 버킷을 만듭니다 (`--ignore-existing` 은 멱등). |
-| Versioning | `mc version enable\|info <alias>/<bucket>` | 버저닝을 켜거나 상태를 조회합니다. |
-| Health | `mc ready <alias>` | server 준비 상태를 확인합니다 (healthcheck 에서 사용). |
-| Admin | `mc admin user add <alias> <user> <secret>` | 사용자를 만듭니다. |
-| Admin | `mc admin policy attach <alias> <policy> --user <user>` | 사용자에 정책을 부여합니다 (`readonly` 등). |
-| Admin | `mc admin user svcacct add [--policy <file>] <alias> <user>` | 프로그램용 access key 를 발급합니다 (인라인 정책 가능). |
-| Admin | `mc admin user list\|info` · `svcacct list\|rm` · `policy detach` · `user disable` | 사용자·키·정책을 확인하고 해제합니다. |
+### Alias
+
+  - `mc alias set <alias> <url> <ACCESS_KEY> <SECRET_KEY>` — server 를 alias 로 등록합니다 (이후 `local` 등으로 참조).
+
+### Object
+
+  - `mc ls [--recursive] [--versions] <alias>/<bucket>/<prefix>` — 객체 목록을 봅니다 (버전 포함 조회 가능).
+  - `mc cp [--recursive] <src> <dst>` — 복사 — 다운로드 (`local/...` → `.`) / 업로드 (`.` → `local/...`).
+  - `mc cat <alias>/<bucket>/<key>` — 객체를 표준출력으로 스트리밍합니다 (다운로드 없이 파이프).
+
+### Bucket
+
+  - `mc mb [--ignore-existing] <alias>/<bucket>` — 버킷을 만듭니다 (`--ignore-existing` 은 멱등).
+
+### Versioning
+
+  - `mc version enable|info <alias>/<bucket>` — 버저닝을 켜거나 상태를 조회합니다.
+
+### Health
+
+  - `mc ready <alias>` — server 준비 상태를 확인합니다 (healthcheck 에서 사용).
+
+### Admin
+
+  - `mc admin user add <alias> <user> <secret>` — 사용자를 만듭니다.
+  - `mc admin policy attach <alias> <policy> --user <user>` — 사용자에 정책을 부여합니다 (`readonly` 등).
+  - `mc admin user svcacct add [--policy <file>] <alias> <user>` — 프로그램용 access key 를 발급합니다 (인라인 정책 가능).
+  - `mc admin user list|info` · `svcacct list|rm` · `policy detach` · `user disable` — 사용자·키·정책을 확인하고 해제합니다.
 
 > 권한을 좁힌 키 발급·정책 운영의 상세는 [§5](#5-read-only--scoped-access-keys), 버킷·버저닝 수동 처리는 Appendix C 를 참고합니다.
 
@@ -331,6 +376,7 @@ MINIO_ROOT_PASSWORD=CHANGE_ME
 보통은 `minio` 서비스가 기동 시 자동 처리하므로 불필요합니다. **스택을 쓰지 않거나 버킷·버저닝을 직접 제어하고 싶을 때만** 아래처럼 수동으로 실행합니다 (`mc` 설치는 [mc Installation](#2-mc-installation) 참고).
 
 ```powershell
+# CLI
 # register the server alias with MinIO Client (mc)
 mc alias set local http://<server>:9000 <ACCESS_KEY> <SECRET_KEY>
 
@@ -355,6 +401,7 @@ mc version enable local/models
 mc가 설치되었을 경우,
 
 ```powershell
+# CLI
 # (1) check status — prints "versioning is enabled" or "is un-versioned"
 mc version info local/datasets
 
@@ -370,6 +417,7 @@ mc ls --versions local/datasets/test.txt   # if you see 2 versions, versioning i
 docker 컨테이너 셸로 확인할 경우 (호스트에 mc 를 설치하지 않아도 됨), 떠 있는 `minio` 컨테이너 셸에서 확인합니다. `minio/minio` 이미지에 `mc` 가 있고 기동 시 `local` alias 가 이미 설정돼 있어, alias 등록 없이 바로 확인됩니다.
 
 ```powershell
+# CLI
 # run once
 docker compose exec minio mc version info local/datasets
 
@@ -385,6 +433,7 @@ exit
 python (boto3) 이 설치되었을 경우,
 
 ```python
+# Python
 import boto3
 
 # ── env vars / parameters ──
