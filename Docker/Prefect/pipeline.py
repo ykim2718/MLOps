@@ -13,13 +13,14 @@ def pipeline(git_repo: str, git_commit_hash: str, minio_key: str, minio_bucket: 
              member: str = "", payload: str = "my_flow.py"):
     log    = get_run_logger()                                                                         # writes to this run's UI logs
     base   = tempfile.mkdtemp(prefix="run-")                                                          # per-run temp dir (removed in finally)
-    script = os.path.join(base, "script")                                                             # team repo snapshot at the commit (shallow)
+    repo   = os.path.join(base, "repo")                                                               # git database (.git + the fetched commit)
+    script = os.path.join(base, "script")                                                             # worktree: team repo snapshot at the commit
     data   = os.path.join(base, "data")                                                               # MinIO download target
     try:
-        subprocess.run(["git", "init", script], check=True)                                              # git init creates script/ (no mkdir needed)
-        subprocess.run(["git", "-C", script, "remote", "add", "origin", git_repo], check=True)
-        subprocess.run(["git", "-C", script, "fetch", "--depth", "1", "origin", git_commit_hash], check=True)   # just that commit (shallow; no history)
-        subprocess.run(["git", "-C", script, "checkout", "FETCH_HEAD"], check=True)                       # check out the commit snapshot into script/
+        subprocess.run(["git", "init", repo], check=True)                                             # git init creates repo/ (no mkdir needed)
+        subprocess.run(["git", "-C", repo, "remote", "add", "origin", git_repo], check=True)
+        subprocess.run(["git", "-C", repo, "fetch", "--depth", "1", "origin", git_commit_hash], check=True)  # just that commit (shallow; no history)
+        subprocess.run(["git", "-C", repo, "worktree", "add", "--detach", script, git_commit_hash], check=True)  # expand the commit into script/ (clean worktree)
 
         os.makedirs(data, exist_ok=True)                                                              # git didn't create data/
         s3 = boto3.client("s3", endpoint_url=Secret.load("minio-endpoint").get(),                     # credentials loaded from Prefect Secret (§5)
@@ -35,4 +36,4 @@ def pipeline(git_repo: str, git_commit_hash: str, minio_key: str, minio_bucket: 
         log.error(f"payload {payload} crashed (exit {e.returncode}) for {member}@{git_commit_hash}: {e}")   # tag the failure with whose run + message
         raise                                                                                          # re-raise → run marked Failed, logs kept in the UI
     finally:
-        shutil.rmtree(base, ignore_errors=True)                                                        # one cleanup removes script/ + data/
+        shutil.rmtree(base, ignore_errors=True)                                                        # one cleanup removes repo/ + script/ + data/
