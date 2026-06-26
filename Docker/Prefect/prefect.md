@@ -67,64 +67,55 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
 
 ## 2. Installation
 
-설치는 **2 routings** (docker · pool) + **3 dockers** (server → dispatcher → pipeline_flow) 입니다. [Installation Sequence](#installation-sequence) 가 설치 순서와 단계별 key-value set 을, [Setup Files](#setup-files) 가 구성요소별 파일과 실행 명령을 정리합니다.
+설치는 **2 routings** (docker · pool) + **3 dockers** (server → dispatcher → pipeline_flow) 입니다. [Installation Sequence](#installation-sequence) 가 설치 순서와 단계별 configuration 을, [Setup Files](#setup-files) 가 구성요소별 파일과 실행 명령을 정리합니다.
 
 ### Installation Sequence
 
-  2 routings (docker · pool) + 3 dockers 의 설치 순서와, 각 단계가 요구하는 key-value set 입니다 (파일 전체와 실행 명령은 아래 [Setup Files](#setup-files)).
+  2 routings (docker · pool) + 3 dockers 의 설치 순서와, 각 단계가 요구하는 configuration 입니다 (파일 전체와 실행 명령은 아래 [Setup Files](#setup-files)).
 
   ```text
   NETWORK ── docker network create mlops          # routing 1 — docker routing: container ↔ container
              shared external network; all 3 dockers attach by service name
 
   ══ DOCKER 1 ── PREFECT SERVER ════════════════════════════════════════════
-     files : docker-compose.server.yml · run_server.ps1 · register_pool.ps1
-             docker-pool-template-high.json · docker-pool-template-low.json
-     run   : run_server.ps1                       # create network + compose up -d
-     keys  → docker-compose.env
-             PREFECT_SERVER_DATABASE_CONNECTION_URL = postgres:5432/prefect
-             PREFECT_UI_API_URL                     = http://localhost:4200/api
+     files  : docker-compose.server.yml · run_server.ps1 · register_pool.ps1
+              docker-pool-template-high.json · docker-pool-template-low.json
+     run    : run_server.ps1                      # create network + compose up -d
+     config → docker-compose.env
+              PREFECT_SERVER_DATABASE_CONNECTION_URL = postgres:5432/prefect
+              PREFECT_UI_API_URL                     = http://localhost:4200/api
        │
        └─ Work Pool Registration ── register_pool.ps1   # routing 2 — pool routing: run → pool (once, after server up)
-          keys → base job template (docker-pool-template-{high,low}.json)
-                 image    = pipeline-flow:latest
-                 env      = { PREFECT_API_URL: http://prefect_server:4200/api }
-                 networks = [mlops]   auto_remove = true   mem_limit = 16g | 4g
-                 concurrency-limit (pool) = 16 | 4
+          config → base job template (docker-pool-template-{high,low}.json)
+                   image    = pipeline-flow:latest
+                   env      = { PREFECT_API_URL: http://prefect_server:4200/api }
+                   networks = [mlops]   auto_remove = true   mem_limit = 16g | 4g
+                   concurrency-limit (pool) = 16 | 4
        ▼
   ══ DOCKER 2 ── PREFECT DISPATCHER ════════════════════════════════════════
-     files : Dockerfile.dispatcher · docker-compose.dispatcher.yml · run_dispatcher.ps1
-     run   : docker build -f Dockerfile.dispatcher -t prefect-dispatcher:latest .
-             run_dispatcher.ps1 -WorkPool <tier>  # compose up -d
-     keys  → docker-compose.env + shell
-             PREFECT_API_URL = http://prefect_server:4200/api
-             WORK_POOL = high_performance | low_performance
-             WORKER_LIMIT = 8 | 2                 # worker --limit
+     files  : Dockerfile.dispatcher · docker-compose.dispatcher.yml · run_dispatcher.ps1
+     run    : docker build -f Dockerfile.dispatcher -t prefect-dispatcher:latest .
+              run_dispatcher.ps1 -WorkPool <tier>  # compose up -d
+     config → docker-compose.env + shell
+              PREFECT_API_URL = http://prefect_server:4200/api
+              WORK_POOL = high_performance | low_performance
+              WORKER_LIMIT = 8 | 2                 # worker --limit
        ▼
   ══ DOCKER 3 ── PIPELINE FLOW ═════════════════════════════════════════════
-     files : Dockerfile.pipeline_flow · requirements.txt · pipeline.py
-             pipelineflow-high.yml · pipelineflow-low.yml
-     run   : docker build -f Dockerfile.pipeline_flow -t pipeline-flow:latest .
-             prefect deploy --prefect-file pipelineflow-<tier>.yml --name pipelineflow-<tier> --no-prompt
-     keys  → deployment parameters (pipelineflow-{high,low}.yml)
-             git_repo · git_commit_hash · minio_key · minio_bucket · member · payload
+     files  : Dockerfile.pipeline_flow · requirements.txt · pipeline.py
+              pipelineflow-high.yml · pipelineflow-low.yml
+     run    : docker build -f Dockerfile.pipeline_flow -t pipeline-flow:latest .
+              prefect deploy --prefect-file pipelineflow-<tier>.yml --name pipelineflow-<tier> --no-prompt
+     config → deployment parameters (pipelineflow-{high,low}.yml)
+              git_repo · git_commit_hash · minio_key · minio_bucket · member · payload
        │
        └─ Prefect Secret (admin, once)            # stored on server; needed before first run
-          keys → run-code credentials
-                 minio-endpoint · minio-access-key · minio-secret-key
-                 catalog-dsn · optuna-dsn
+          config → run-code credentials
+                   minio-endpoint · minio-access-key · minio-secret-key
+                   catalog-dsn · optuna-dsn
 
-  shared : docker-compose.env                     # gitignored; read by DOCKER 1 + DOCKER 2
+  shared : docker-compose.env
   ```
-
-  key-value set 은 4 개입니다 — 위 2 routings · 3 dockers 가 소비하는 설정값 묶음입니다 (`mlops` network 는 routing 이라 제외).
-
-  | Set | Defined in | Read by |
-  |-----|------------|---------|
-  | `docker-compose.env` | gitignored file | server · dispatcher |
-  | base job template | `docker-pool-template-{high,low}.json` | server (spawning a flow container) |
-  | deployment parameters | `pipelineflow-{high,low}.yml` | server (passed to `pipeline()` on trigger) |
-  | Prefect Secret | stored on the server | `pipeline_flow` run code (`Secret.load(...)`) |
 
   > 전제 — 이 3 docker 앞에 **PostgreSQL → (MinIO/MLflow)** 가 먼저 떠 있어야 합니다. `docker-compose.env` 의 DB URL 과 Secret 의 MinIO 키가 그 스택을 가리키므로, 각 폴더 compose 로 먼저 띄웁니다 (이 문서 범위 밖).
 
@@ -184,7 +175,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
   - **공유** — 세 컨테이너가 모두 읽음
 
      ```
-     └─ docker-compose.env             credentials · PREFECT_API_URL (gitignore)
+     └─ docker-compose.env             credentials · PREFECT_API_URL
      ```
 
 ## 3. Prefect Server Container
@@ -590,7 +581,7 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
 
 ### docker-compose.env
 
-  **server·dispatcher 용 값** (backend DB URL·Control Node 주소) 은 `docker-compose.env` 한 파일에 모읍니다. 실제 값 파일은 `.gitignore` 로 제외하고, 비운 `docker-compose.env_example` 만 커밋합니다.
+  **server·dispatcher 용 값** (backend DB URL·Control Node 주소) 은 `docker-compose.env` 한 파일에 모읍니다.
 
   ```dotenv
   # docker-compose.env_example  (every value is a placeholder — never expose real values)
