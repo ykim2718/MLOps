@@ -1,20 +1,28 @@
 """test_dp.py — data preparation (test)
 
-input : test raw parquet
-output: test transformed parquet
+Reuses the raw test split that train_dp created and applies the same cleaning,
+keeping train/test consistent.
+
+input : raw/test.npz (from train_dp)
+output: interim/test_transformed.npz
 """
 import os
 
+import numpy as np
 
-def run(in_path="data/raw/test.parquet",
-        out_path="data/interim/test_transformed.parquet"):
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    # TODO: train_dp 와 동일한 정제 로직 적용
-    with open(out_path, "w", encoding="utf-8") as f:
-        f.write(f"transformed-from:{in_path}\n")
-    print(f"[test_dp] {in_path} -> {out_path}")
-    return out_path
+
+def run(work_dir):
+    raw = os.path.join(work_dir, "raw", "test.npz")
+    out = os.path.join(work_dir, "interim", "test_transformed.npz")
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+
+    d = np.load(raw)
+    X, y = d["X"], d["y"]
+    mask = np.isfinite(X).all(axis=1)                            # same no-op cleaning as train_dp
+    np.savez(out, X=X[mask], y=y[mask])
+    print(f"[test_dp] {raw} -> {out} (rows={int(mask.sum())})")
+    return out
 
 
 if __name__ == "__main__":
-    run()
+    run("data")

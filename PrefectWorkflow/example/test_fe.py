@@ -1,34 +1,38 @@
 """test_fe.py — feature engineering (test)
 
-input : test transformed parquet, fe_train.json (train에서 fit된 변환기 재사용)
-output: test_feature.parquet, fe_test.json
+Reuses the scaler fitted by train_fe (artifacts/fe_train.json) — transform only,
+no fit — so train and test use the exact same scaling (no train/test skew).
 
-핵심: test는 변환기를 새로 fit 하지 않는다. train 단계가 만든 fe_train.json 을
-그대로 "적용(transform)"해야 train/test skew 가 생기지 않는다.
+input : interim/test_transformed.npz, artifacts/fe_train.json
+output: feature/test_feature.npz, artifacts/fe_test.json
 """
 import json
 import os
 
+import numpy as np
 
-def run(in_path="data/interim/test_transformed.parquet",
-        fe_train_meta="artifacts/fe_train.json",
-        out_feature="data/feature/test_feature.parquet",
-        out_fe_meta="artifacts/fe_test.json"):
-    os.makedirs(os.path.dirname(out_feature), exist_ok=True)
-    os.makedirs(os.path.dirname(out_fe_meta), exist_ok=True)
 
-    with open(fe_train_meta, encoding="utf-8") as f:
-        fe_train = json.load(f)        # train에서 fit된 변환기/통계 재사용
+def run(work_dir):
+    interim = os.path.join(work_dir, "interim", "test_transformed.npz")
+    fe_train = os.path.join(work_dir, "artifacts", "fe_train.json")
+    out_feat = os.path.join(work_dir, "feature", "test_feature.npz")
+    out_meta = os.path.join(work_dir, "artifacts", "fe_test.json")
+    os.makedirs(os.path.dirname(out_feat), exist_ok=True)
 
-    # TODO: fe_train 통계를 test에 transform(적용)만 한다 (fit 금지)
-    with open(out_feature, "w", encoding="utf-8") as f:
-        f.write(f"features-from:{in_path}\n")
-    with open(out_fe_meta, "w", encoding="utf-8") as f:
-        json.dump({"applied_from": fe_train_meta, "reused": fe_train}, f, indent=2)
+    with open(fe_train, encoding="utf-8") as f:
+        fe = json.load(f)                                        # reuse train-fitted center/scale
+    center, scale = np.array(fe["center"]), np.array(fe["scale"])
 
-    print(f"[test_fe] {in_path} (+{fe_train_meta}) -> {out_feature}, {out_fe_meta}")
-    return out_feature, out_fe_meta
+    d = np.load(interim)
+    X, y = d["X"], d["y"]
+    X_scaled = (X - center) / scale                             # APPLY only (no fit)
+    np.savez(out_feat, X=X_scaled, y=y)
+    with open(out_meta, "w", encoding="utf-8") as f:
+        json.dump({"applied_from": fe_train, "scaling": fe["scaling"]}, f)
+
+    print(f"[test_fe] {interim} (+{fe_train}) -> {out_feat}")
+    return out_feat
 
 
 if __name__ == "__main__":
-    run()
+    run("data")

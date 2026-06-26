@@ -1,41 +1,54 @@
 """train_fe.py — feature engineering (train)
 
-input : train transformed parquet, optuna.json (FE 튜닝 설정)
-output: train_feature.parquet, fe_train.json (train에 fit된 변환기/통계)
+Fits a scaler on the TRAIN data (type chosen by optuna.json fe.scaling) and saves
+the fitted statistics (center/scale) to artifacts/fe_train.json. test_fe reuses
+these — transform only, no fit — so train/test share identical scaling (no skew).
 
-핵심: 변환기를 train 데이터에 "fit"하고, 그 결과(스케일러 평균/분산 등)를
-fe_train.json 으로 저장한다. test 단계는 이 fe_train.json 을 "재사용"만 한다.
+input : interim/train_transformed.npz, optuna.json
+output: feature/train_feature.npz, artifacts/fe_train.json
 """
 import json
 import os
 
+import numpy as np
+from sklearn.preprocessing import MinMaxScaler, StandardScaler
 
-def run(in_path="data/interim/train_transformed.parquet",
-        optuna_cfg="optuna.json",
-        out_feature="data/feature/train_feature.parquet",
-        out_fe_meta="artifacts/fe_train.json"):
-    os.makedirs(os.path.dirname(out_feature), exist_ok=True)
-    os.makedirs(os.path.dirname(out_fe_meta), exist_ok=True)
+
+def run(work_dir, optuna_cfg="optuna.json"):
+    interim = os.path.join(work_dir, "interim", "train_transformed.npz")
+    feat_dir = os.path.join(work_dir, "feature")
+    art_dir = os.path.join(work_dir, "artifacts")
+    os.makedirs(feat_dir, exist_ok=True)
+    os.makedirs(art_dir, exist_ok=True)
 
     cfg = {}
     if os.path.exists(optuna_cfg):
         with open(optuna_cfg, encoding="utf-8") as f:
             cfg = json.load(f)
+    scaling = cfg.get("fe", {}).get("scaling", "standard")
 
-    # TODO: train에 변환기를 fit -> feature 생성. fit 결과를 fe_train.json 에 저장
-    fe_params = {
-        "scaler_mean": 0.0,
-        "scaler_std": 1.0,
-        "fe_config": cfg.get("fe", {}),
-    }
-    with open(out_fe_meta, "w", encoding="utf-8") as f:
-        json.dump(fe_params, f, indent=2)
-    with open(out_feature, "w", encoding="utf-8") as f:
-        f.write(f"features-from:{in_path}\n")
+    d = np.load(interim)
+    X, y = d["X"], d["y"]
 
-    print(f"[train_fe] {in_path} -> {out_feature}, {out_fe_meta}")
-    return out_feature, out_fe_meta
+    # Both scalers reduce to (X - center) / scale, so test_fe can re-apply with two arrays.
+    if scaling == "minmax":
+        sc = MinMaxScaler().fit(X)                                 # FIT only on train
+        center, scale = sc.data_min_, sc.data_range_
+    else:
+        sc = StandardScaler().fit(X)                              # FIT only on train
+        center, scale = sc.mean_, sc.scale_
+    scale = np.where(scale == 0, 1.0, scale)                      # guard constant columns
+
+    X_scaled = (X - center) / scale
+    np.savez(os.path.join(feat_dir, "train_feature.npz"), X=X_scaled, y=y)
+
+    fe_meta = os.path.join(art_dir, "fe_train.json")
+    with open(fe_meta, "w", encoding="utf-8") as f:
+        json.dump({"scaling": scaling, "center": center.tolist(), "scale": scale.tolist()}, f)
+
+    print(f"[train_fe] {interim} -> feature/train_feature.npz, {fe_meta} (scaling={scaling})")
+    return fe_meta
 
 
 if __name__ == "__main__":
-    run()
+    run("data")

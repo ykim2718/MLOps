@@ -1,28 +1,35 @@
 """test.py — inference on the test set
 
-input : test_feature.parquet, fe_test.json, model/ folder (train이 만든 모델)
-output: test.json (테스트 추론 결과)
+Loads the model train.py produced and predicts on the test features.
+
+input : feature/test_feature.npz, model/model.txt (from train)
+output: artifacts/test.json (predictions + probabilities)
 """
 import json
 import os
 
+import lightgbm as lgb
+import numpy as np
 
-def run(feature="data/feature/test_feature.parquet",
-        fe_meta="artifacts/fe_test.json",
-        model_dir="model/",
-        out="artifacts/test.json"):
-    model_file = os.path.join(model_dir, "model.pt")
-    # TODO: model_file 로드 후 feature 로 추론
-    _ = model_file
 
+def run(work_dir):
+    feat = os.path.join(work_dir, "feature", "test_feature.npz")
+    model_path = os.path.join(work_dir, "model", "model.txt")
+    out = os.path.join(work_dir, "artifacts", "test.json")
     os.makedirs(os.path.dirname(out), exist_ok=True)
-    predictions = {"predictions": [0, 1, 1, 0], "model": model_file}
-    with open(out, "w", encoding="utf-8") as f:
-        json.dump(predictions, f, indent=2)
 
-    print(f"[test] {feature} (+{model_dir}) -> {out}")
+    d = np.load(feat)
+    X = d["X"]
+    booster = lgb.Booster(model_file=model_path)                 # load the trained model
+    proba = booster.predict(X)
+    pred = (proba >= 0.5).astype(int)
+
+    with open(out, "w", encoding="utf-8") as f:
+        json.dump({"n": int(len(pred)), "predictions": pred.tolist(),
+                   "proba": [round(float(p), 4) for p in proba]}, f)
+    print(f"[test] {feat} (+{model_path}) -> {out} (n={int(len(pred))})")
     return out
 
 
 if __name__ == "__main__":
-    run()
+    run("data")

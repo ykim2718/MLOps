@@ -1,64 +1,64 @@
-"""train.py — model training (+ Optuna hyperparameter tuning)
+"""train.py — model training with Optuna tuning (LightGBM)
 
-input : train_feature.parquet, fe_train.json, optuna.json
-output: model/ folder, train.json (학습 메타: best params/지표/모델 경로)
+Optuna calls objective() once per trial: it suggests LightGBM hyperparameters,
+scores them with cross-validation, and returns the score; Optuna uses that to pick
+the next trial. The best params then train the final model.
+
+input : feature/train_feature.npz, optuna.json (n_trials)
+output: model/model.txt (LightGBM booster), artifacts/train.json (best params/score)
 """
 import json
 import os
 
-try:
-    import optuna
-    HAS_OPTUNA = True
-except ImportError:           # 예시가 optuna 없이도 돌도록 fallback
-    HAS_OPTUNA = False
+import lightgbm as lgb
+import numpy as np
+import optuna
+from sklearn.model_selection import cross_val_score
 
 
-def objective(trial):
-    """Optuna가 매 trial마다 호출하는 '목적 함수'.
+def run(work_dir, optuna_cfg="optuna.json"):
+    feat = os.path.join(work_dir, "feature", "train_feature.npz")
+    model_dir = os.path.join(work_dir, "model")
+    art_dir = os.path.join(work_dir, "artifacts")
+    os.makedirs(model_dir, exist_ok=True)
+    os.makedirs(art_dir, exist_ok=True)
 
-    - trial.suggest_*() 로 하이퍼파라미터를 "제안받아"
-    - 그 값으로 학습/검증을 한 뒤
-    - 점수(여기선 검증 정확도)를 return 한다.
-    Optuna는 반환된 점수를 보고 다음 trial의 하이퍼파라미터를 더 똑똑하게 고른다.
-    """
-    lr = trial.suggest_float("lr", 1e-4, 1e-1, log=True)
-    n_estimators = trial.suggest_int("n_estimators", 50, 300)
-    # TODO: 실제로는 위 파라미터로 모델 학습 후 검증셋 점수를 계산
-    val_acc = 1.0 - abs(lr - 0.01) - (n_estimators - 150) ** 2 * 1e-6  # 가짜 점수
-    return val_acc            # direction="maximize" 대상
-
-
-def run(feature="data/feature/train_feature.parquet",
-        fe_meta="artifacts/fe_train.json",
-        optuna_cfg="optuna.json",
-        out_model="model/",
-        out_meta="artifacts/train.json"):
-    os.makedirs(out_model, exist_ok=True)
-    os.makedirs(os.path.dirname(out_meta), exist_ok=True)
-
-    n_trials = 20
+    n_trials, direction = 5, "maximize"
     if os.path.exists(optuna_cfg):
         with open(optuna_cfg, encoding="utf-8") as f:
-            n_trials = json.load(f).get("n_trials", 20)
+            cfg = json.load(f)
+        n_trials = cfg.get("n_trials", n_trials)
+        direction = cfg.get("direction", direction)
 
-    if HAS_OPTUNA:
-        study = optuna.create_study(direction="maximize")
-        study.optimize(objective, n_trials=n_trials)   # objective 를 n_trials 번 호출
-        best_params, best_value = study.best_params, study.best_value
-    else:
-        best_params, best_value = {"lr": 0.01, "n_estimators": 150}, 0.95
+    d = np.load(feat)
+    X, y = d["X"], d["y"]
 
-    # TODO: best_params 로 최종 모델 학습 후 out_model 에 저장
-    with open(os.path.join(out_model, "model.pt"), "w", encoding="utf-8") as f:
-        f.write("trained-weights\n")
+    def objective(trial):                                          # Optuna calls this each trial
+        params = dict(
+            num_leaves=trial.suggest_int("num_leaves", 8, 64),
+            learning_rate=trial.suggest_float("learning_rate", 1e-3, 0.3, log=True),
+            n_estimators=trial.suggest_int("n_estimators", 30, 200),
+        )
+        clf = lgb.LGBMClassifier(verbose=-1, **params)
+        return cross_val_score(clf, X, y, cv=3, scoring="accuracy").mean()   # score -> Optuna
 
-    meta = {"best_params": best_params, "best_value": best_value, "model_path": out_model}
-    with open(out_meta, "w", encoding="utf-8") as f:
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
+    study = optuna.create_study(direction=direction)
+    study.optimize(objective, n_trials=n_trials)                  # call objective n_trials times
+
+    best = lgb.LGBMClassifier(verbose=-1, **study.best_params)    # final fit on full train
+    best.fit(X, y)
+    model_path = os.path.join(model_dir, "model.txt")
+    best.booster_.save_model(model_path)
+
+    meta = {"best_params": study.best_params, "best_cv_accuracy": round(study.best_value, 4),
+            "model_path": model_path, "n_trials": n_trials}
+    with open(os.path.join(art_dir, "train.json"), "w", encoding="utf-8") as f:
         json.dump(meta, f, indent=2)
 
-    print(f"[train] best={best_params} value={best_value:.4f} -> {out_model}, {out_meta}")
-    return out_model, out_meta
+    print(f"[train] best={study.best_params} cv_acc={study.best_value:.4f} -> {model_path}")
+    return meta
 
 
 if __name__ == "__main__":
-    run()
+    run("data")
