@@ -312,6 +312,52 @@ git config --get core.longpaths            # 적용 여부를 확인한다(true 
 
 > `--global` 은 현재 사용자 전체에 적용합니다. 한 저장소만 켜려면 그 폴더에서 `--global` 을 뺍니다. Windows 자체 제한도 풀려면 관리자 권한으로 레지스트리의 `LongPathsEnabled` 를 1 로 둡니다.
 
+## 5. Nested Repositories
+
+메인 저장소 안에 다른 저장소를 특정 커밋으로 고정해 하위 폴더로 끼워 넣습니다. 두 방식이 있습니다 — `submodule` 은 포인터만 두고, `subtree` 는 코드를 통째로 합칩니다.
+
+| Aspect | submodule | subtree |
+|--------|-----------|---------|
+| 저장 방식 | 커밋 포인터 (링크) | 파일째 합침 |
+| 받는 쪽 | `--recurse-submodules` 필요 | 그냥 clone 으로 끝 |
+| 부가 파일 | `.gitmodules` 생성 | 없음 |
+| 되돌려 보내기 | 하위 모듈에서 직접 push | `subtree push` |
+| 적합한 경우 | 버전 고정·독립 관리 | 의존 코드를 품어 단순화 |
+
+### Submodule — 포인터로 잇기
+
+하위 폴더에 다른 저장소를 **특정 커밋 포인터** 로 둡니다. 메인에는 주소와 커밋 해시만 적히고, 실제 파일은 각자의 저장소가 관리합니다.
+
+```bash
+git submodule add <url> <path>             # <path> 에 다른 저장소를 하위 모듈로 더한다(.gitmodules 생성).
+git submodule add -b <branch> <url> <path> # 특정 가지를 기준으로 더한다.
+git clone --recurse-submodules <url>       # 하위 모듈까지 함께 복제한다.
+git submodule update --init --recursive    # 복제 뒤 하위 모듈 내용을 받아 채운다.
+git submodule update --remote <path>       # 하위 모듈을 원격 최신 커밋으로 올린다.
+git submodule status                       # 각 하위 모듈이 가리키는 커밋을 본다.
+```
+
+버전을 올릴 때는 하위 모듈을 원하는 커밋으로 옮긴 뒤, 메인에서 그 포인터 변화를 커밋합니다.
+
+```bash
+cd <path> && git checkout <commit>         # 하위 모듈을 원하는 커밋으로 맞춘다.
+cd .. && git add <path> && git commit -m "bump submodule"  # 메인에 새 포인터를 기록한다.
+```
+
+> 메인에는 하위 모듈의 **커밋 해시만** 담깁니다. 받는 사람은 `--recurse-submodules` 나 `submodule update --init` 을 해야 실제 파일이 채워집니다.
+
+### Subtree — 코드째 합치기
+
+다른 저장소의 파일을 **메인 이력 안으로 통째로 합쳐** 하위 폴더에 둡니다. 받는 사람은 별도 명령 없이 보통 폴더처럼 바로 씁니다 (`.gitmodules` 없음).
+
+```bash
+git subtree add --prefix=<path> <url> <branch> --squash   # <path> 에 다른 저장소를 합친다(이력은 한 커밋으로 압축).
+git subtree pull --prefix=<path> <url> <branch> --squash  # 원격의 새 변경을 끌어와 갱신한다.
+git subtree push --prefix=<path> <url> <branch>           # <path> 의 변경을 그 원격으로 되돌려 보낸다.
+```
+
+> `--squash` 는 끌어온 이력을 한 커밋으로 눌러 메인 이력을 깔끔하게 둡니다. 빼면 원본 커밋이 그대로 섞여 들어옵니다.
+
 ## Appendix A. Terminology
 
 - **.git** — 저장소의 모든 것이 담긴 숨김 폴더. 커밋·가지·이력·설정이 여기에 들어 있어, 이 폴더가 곧 local repository 입니다. `git init` 으로 만들어지며 (또는 `git clone` 이 받아 옴), 지우면 이력이 사라지고 보통 폴더로 돌아갑니다.
