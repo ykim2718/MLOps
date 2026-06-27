@@ -2,7 +2,7 @@
 # Idempotent: --overwrite keeps the base job template in sync. Run after the server is up (run_server.ps1).
 #
 #   .\register_pool.ps1 -PoolName high_performance  -TemplateFile docker-pool-template-high.json -ConcurrencyLimit 16
-#   .\register_pool.ps1 -PoolName low_performance -TemplateFile docker-pool-template-low.json  -ConcurrencyLimit 4
+#   .\register_pool.ps1 -PoolName low_performance -TemplateFile docker-pool-template-low.json  -ConcurrencyLimit 8
 #
 param(
     [Parameter(Mandatory = $true)] [string]$PoolName,      # work pool name, e.g. high_performance | low_performance

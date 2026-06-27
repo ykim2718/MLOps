@@ -90,7 +90,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
                    image    = pipeline-flow:latest
                    env      = { PREFECT_API_URL: http://prefect_server:4200/api }
                    networks = [mlops]   auto_remove = true   mem_limit = 16g | 4g
-                   concurrency-limit (pool) = 16 | 4
+                   concurrency-limit (pool) = 16 | 8
        ▼
   ══ DOCKER 2 ── PREFECT DISPATCHER ════════════════════════════════════════
      files  : Dockerfile.dispatcher · docker-compose.dispatcher.yml · run_dispatcher.ps1
@@ -99,7 +99,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
      config → docker-compose.env + shell
               PREFECT_API_URL = http://prefect_server:4200/api
               WORK_POOL = high_performance | low_performance
-              WORKER_LIMIT = 8 | 2                 # worker --limit
+              WORKER_LIMIT = 8 | 4                 # worker --limit
        ▼
   ══ DOCKER 3 ── PIPELINE FLOW ═════════════════════════════════════════════
      files  : Dockerfile.pipeline_flow · requirements.txt · pipeline.py
@@ -138,7 +138,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
      ```powershell
      .\run_server.ps1 -Yaml docker-compose.server.yml -Network mlops
      .\register_pool.ps1 -PoolName high_performance  -TemplateFile docker-pool-template-high.json -ConcurrencyLimit 16 -Compose docker-compose.server.yml
-     .\register_pool.ps1 -PoolName low_performance -TemplateFile docker-pool-template-low.json  -ConcurrencyLimit 4  -Compose docker-compose.server.yml
+     .\register_pool.ps1 -PoolName low_performance -TemplateFile docker-pool-template-low.json  -ConcurrencyLimit 8  -Compose docker-compose.server.yml
      ```
 
   2) **PREFECT DISPATCHER** — 작업 머신마다 1대 · 직접 빌드
@@ -154,6 +154,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
      ```powershell
      docker build -f Dockerfile.dispatcher -t prefect-dispatcher:latest .    # build the image once
      .\run_dispatcher.ps1 -WorkPool high_performance -WorkerLimit 8
+     .\run_dispatcher.ps1 -WorkPool low_performance -WorkerLimit 4
      ```
 
   3) **PIPELINE FLOW** — job 마다 떴다 사라지는 컨테이너 · 직접 빌드
@@ -277,8 +278,8 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
   > | Field | Target | High | Low | Source |
   > |---|---|---|---|---|
   > | `mem_limit` | memory | `16g` | `4g` | base job template (`docker-pool-template-high.json`·`docker-pool-template-low.json`) |
-  > | `--limit` | dispatcher | `8` | `2` | `prefect worker start` (`WORKER_LIMIT`) |
-  > | `--concurrency-limit` | pool | `16` | `4` | `work-pool set-concurrency-limit` (`register_pool.ps1`) |
+  > | `--limit` | dispatcher | `8` | `4` | `prefect worker start` (`WORKER_LIMIT`) |
+  > | `--concurrency-limit` | pool | `16` | `8` | `work-pool set-concurrency-limit` (`register_pool.ps1`) |
 
   #### Registration
 
@@ -287,7 +288,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
   ```powershell
   # Register each tier (run once, after the server is up).
   .\register_pool.ps1 -PoolName high_performance  -TemplateFile docker-pool-template-high.json -ConcurrencyLimit 16
-  .\register_pool.ps1 -PoolName low_performance -TemplateFile docker-pool-template-low.json  -ConcurrencyLimit 4
+  .\register_pool.ps1 -PoolName low_performance -TemplateFile docker-pool-template-low.json  -ConcurrencyLimit 8
   ```
 
   #### Verification
@@ -815,7 +816,7 @@ server 에 work pool 을 등록 (또는 갱신) 하는 스크립트입니다 ([�
 # Idempotent: --overwrite keeps the base job template in sync. Run after the server is up (run_server.ps1).
 #
 #   .\register_pool.ps1 -PoolName high_performance  -TemplateFile docker-pool-template-high.json -ConcurrencyLimit 16
-#   .\register_pool.ps1 -PoolName low_performance -TemplateFile docker-pool-template-low.json  -ConcurrencyLimit 4
+#   .\register_pool.ps1 -PoolName low_performance -TemplateFile docker-pool-template-low.json  -ConcurrencyLimit 8
 #
 param(
     [Parameter(Mandatory = $true)] [string]$PoolName,      # work pool name, e.g. high_performance | low_performance

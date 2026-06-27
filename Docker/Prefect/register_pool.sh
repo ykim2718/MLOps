@@ -3,7 +3,7 @@
 # Idempotent: --overwrite keeps the base job template in sync. Run after the server is up (run_server.sh).
 #
 #   ./register_pool.sh --pool-name high_performance --template-file docker-pool-template-high.json --concurrency-limit 16
-#   ./register_pool.sh --pool-name low_performance  --template-file docker-pool-template-low.json  --concurrency-limit 4
+#   ./register_pool.sh --pool-name low_performance  --template-file docker-pool-template-low.json  --concurrency-limit 8
 #
 set -euo pipefail
 
