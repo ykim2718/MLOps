@@ -162,7 +162,7 @@ script/                          # team repo, git-delivered into a per-run workt
 
 ### Team Common Repo (Nested Repository)
 
-  공통 코드 (공통 단계·유틸·catalog 접근 계층 등) 를 여러 팀원 repo 에서 함께 쓰려면 공통 repo 를 각 repo 안에 **nested repository** 로 만들어 심습니다. `git subtree` 로 공통 repo 를 하위 경로 (`<path>`) 에 합쳐 한 커밋 트리로 관리하므로, runtime 의 shallow `git fetch` + `git worktree` 가 공통 코드까지 한 번에 펼칩니다 (서브모듈과 달리 별도 init/fetch 가 없습니다).
+  공통 코드 (공통 단계·유틸·catalog 접근 계층 등) 를 여러 팀원 repo 에서 함께 쓰려면 공통 repo 를 각 repo 안에 **nested repository** 로 만들어 심습니다. `git subtree` 로 공통 repo 를 하위 경로 (`<path>`) 에 합쳐 한 커밋 트리로 관리하므로, runtime 의 shallow `git fetch` + `git worktree` 가 공통 코드까지 한 번에 펼칩니다 (submodule 과 달리 별도 init/fetch 가 없습니다).
 
   ```powershell
   # Creation — add the common repo under <path> as a squashed subtree (once).

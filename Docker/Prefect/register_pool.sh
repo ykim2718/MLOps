@@ -2,8 +2,8 @@
 # register_pool.sh — register (or update) one Prefect work pool on the running server.
 # Idempotent: --overwrite keeps the base job template in sync. Run after the server is up (run_server.sh).
 #
-#   ./register_pool.sh --pool high_performance --template docker-pool-template-high.json --concurrency-limit 16
-#   ./register_pool.sh --pool low_performance  --template docker-pool-template-low.json  --concurrency-limit 4
+#   ./register_pool.sh --pool-name high_performance --template-file docker-pool-template-high.json --concurrency-limit 16
+#   ./register_pool.sh --pool-name low_performance  --template-file docker-pool-template-low.json  --concurrency-limit 4
 #
 set -euo pipefail
 
@@ -14,8 +14,8 @@ COMPOSE="docker-compose.server.yml"   # the server compose (its top-level name: 
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --pool)              POOL_NAME="$2"; shift 2 ;;
-        --template)          TEMPLATE_FILE="$2"; shift 2 ;;
+        --pool-name)         POOL_NAME="$2"; shift 2 ;;
+        --template-file)     TEMPLATE_FILE="$2"; shift 2 ;;
         --concurrency-limit) CONCURRENCY_LIMIT="$2"; shift 2 ;;
         --compose)           COMPOSE="$2"; shift 2 ;;
         *) echo "Unknown option: $1" >&2; exit 1 ;;
@@ -23,7 +23,7 @@ while [ $# -gt 0 ]; do
 done
 
 if [ -z "$POOL_NAME" ] || [ -z "$TEMPLATE_FILE" ]; then
-    echo "Usage: $0 --pool <name> --template <file> [--concurrency-limit N] [--compose file]" >&2
+    echo "Usage: $0 --pool-name <name> --template-file <file> [--concurrency-limit N] [--compose file]" >&2
     exit 1
 fi
 
