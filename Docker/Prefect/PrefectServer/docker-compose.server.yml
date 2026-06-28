@@ -5,7 +5,7 @@ services:
     image: prefecthq/prefect:3-latest
     command: prefect server start --host 0.0.0.0
     env_file:
-      - docker-compose.env          # injects PREFECT_SERVER_DATABASE_CONNECTION_URL
+      - ../docker-compose.env       # injects PREFECT_SERVER_DATABASE_CONNECTION_URL (shared, kept at Docker/Prefect root)
     environment:
       # the UI hands this API URL to the browser; docker-compose.env's PREFECT_API_URL is the internal
       # hostname (prefect_server) the browser can't resolve, so use the host's published port instead.

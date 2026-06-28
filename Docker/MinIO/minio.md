@@ -1,5 +1,7 @@
 # MinIO — Object Storage
 
+<sub>rev. 100</sub>
+
 **MinIO**는 **AWS S3 (Amazon Simple Storage Service) 와 100% 호환되는 오픈소스 오브젝트 스토리지**입니다. 클라우드 (AWS) 없이 사내 server 나 로컬 도커에 띄워 "내 S3"처럼 쓸 수 있어, 데이터셋·모델·MLflow artifact 등 **실제 대용량 데이터의 보관 위치**로 사용합니다.
 
 - **S3 (Amazon Simple Storage Service)**: AWS의 오브젝트 스토리지. 파일을 "객체 (object)" 단위로 저장하며, **버킷 (bucket)** 이라는 최상위 공간 안에 키 (경로) 로 파일을 넣습니다.

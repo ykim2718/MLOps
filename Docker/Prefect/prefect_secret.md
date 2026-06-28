@@ -1,5 +1,7 @@
 # Prefect Secret
 
+<sub>rev. 10</sub>
+
 Prefect의 **Secret 블록**으로 비밀값 (키·비밀번호·자격증명) 을 **Prefect server 에 저장**하고, 코드에서 **이름으로 불러와** 안전하게 쓴다.
 
 ---

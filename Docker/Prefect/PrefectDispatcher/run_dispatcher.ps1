@@ -1,4 +1,5 @@
 # run_dispatcher.ps1 — start the Prefect dispatcher compose stack on a worker machine.
+# __version__ = "0.0.20"  # Semantic Versioning:  Version = Major.Minor.Patch
 #
 # Brings up prefect_dispatcher, which polls the given WorkPool. WORK_POOL/WORKER_LIMIT are read from
 # this shell at "docker compose up" (compose interpolation), so they are exported below.

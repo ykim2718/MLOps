@@ -1,4 +1,5 @@
 # check_status.ps1 - health & wiring check for the Prefect MLOps stack (per prefect.md "1. Architecture").
+# __version__ = "0.0.20"  # Semantic Versioning:  Version = Major.Minor.Patch
 #
 # Read-only. It inspects, it never changes anything. It verifies the always-on pieces are up and
 # correctly wired, then prints an ASCII diagram of the architecture with live [ OK ] / [WARN] / [FAIL]:

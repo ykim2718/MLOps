@@ -1,5 +1,7 @@
 # Git CLI (Command Line Interface)
 
+<sub>rev. 100</sub>
+
 자주 쓰는 git 명령을 **작업 영역**과 **역할**로 분류했습니다. `<branch>` · `<remote>` · `<commit>` · `<file>` 은 실제 이름으로 바꿔 씁니다. 문법은 PowerShell · bash 공통입니다.
 
 ## 1. The Four Standard Areas
@@ -246,6 +248,16 @@ git restore --staged <file>               # stage 에서 내린다(작업 내용
 git commit -m "메시지"                     # 담아 둔 변경을 이력으로 굳힌다.
 git commit -am "메시지"                    # 추적 중인 파일을 add + commit 한 번에(새 파일 제외).
 git commit --amend -m "메시지"             # 직전 커밋을 고쳐 다시 쓴다(아직 push 전일 때).
+```
+
+### History — log · rev-list
+
+이력을 훑고 커밋 수를 셉니다.
+
+```bash
+git log --oneline                          # 커밋을 한 줄씩 간추려 본다.
+git rev-list --count HEAD                  # HEAD 까지의 전체 커밋 수를 센다.
+git rev-list --count HEAD <file>           # 그 파일을 건드린 커밋 수만 센다.
 ```
 
 ### Stash

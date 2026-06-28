@@ -1,5 +1,7 @@
 # AI/ML Workflow Automation — Prefect + MinIO + MLflow + Optuna + PostgreSQL
 
+<sub>rev. 20</sub>
+
 Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환경입니다. 이 문서는 **전체 워크플로우의 인덱스 (개요)** 이고, 도구별 상세는 컴포넌트 문서로 잇습니다.
 
 **Prefect 를 "실행 orchestrator" 로 두고**, 실험 추적·하이퍼파라미터 튜닝·데이터 보관/버전관리는 다른 도구가 맡아 **역할을 나눠 함께 씁니다**. "언제·무엇을·어떤 순서로 실행할지" 는 Prefect, "그 실행에서 나온 실험 기록·튜닝 결과·데이터/모델" 은 각 도구가 맡습니다.
@@ -341,18 +343,20 @@ def inference_flow():
 
 ## Appendix A. catalog.py CLI
 
-`catalog.py` 는 데이터 카탈로그 (PostgreSQL `catalog` DB 장부) 와 MinIO 객체를 함께 다루는 접근 계층이자 CLI 입니다. flow 에서 라이브러리로 import 해 쓰거나 ([§3 Data Catalog](#3-data)), 아래 CLI 로 직접 둘러보기·업로드·다운로드·삭제합니다. 자격증명은 환경변수 (`POSTGRESQL_CATALOG_DSN`·`MINIO_ENDPOINT`·`MINIO_ACCESS_KEY`·`MINIO_SECRET_KEY`) 가 우선이고, 없으면 Prefect Secret 블록에서 가져옵니다. 업로드·다운로드·삭제는 boto3 로 처리하므로 `mc` 가 필요 없습니다.
+`catalog.py` 는 데이터 카탈로그 (PostgreSQL `catalog` DB 장부) 와 MinIO 객체를 함께 다루는 접근 계층이자 CLI 입니다. flow 에서 라이브러리로 import 해 쓰거나 ([§3 Data Catalog](#3-data)), 아래 CLI 로 직접 둘러보기·업로드·다운로드·삭제합니다. **catalog.py 는 컨테이너 밖에서 실행** 되므로 자격증명은 Prefect 프로필 ([§6 Server Connection](#6-python-execution) 의 `prefect config set PREFECT_API_URL=...`) 로 연결된 **Prefect Secret 블록** 에서 가져옵니다 (필요한 4개 블록은 아래 [Credentials](#credentials-prefect-secret-blocks), 없으면 default). 프로세스 환경변수나 `docker-compose.env` 파일은 쓰지 않습니다 (그 파일은 컨테이너 스택용이라 host 의 catalog.py 가 찾을 수 없음). 업로드·다운로드·삭제는 boto3 로 처리하므로 `mc` 가 필요 없습니다.
 
-| Command | Purpose |
-|---|---|
-| `list` | 데이터셋 목록 (최신 버전 요약) |
-| `versions <id>` | 한 데이터셋의 버전 이력 |
-| `tree [id] [--files]` | 데이터셋 > 버전 트리 (`--files` 면 MinIO 파일 종류별 개수) |
-| `find <id> [key=value ...]` | metadata 키=값 검색 |
-| `upload <spec.json>` | MinIO 적재 + catalog 등록 (JSON spec) |
-| `download <id> [version] [dest]` | 버전 객체 다운로드 (version 생략 시 최신, dest 기본 `./<id>`) |
-| `remove <id> [version] [--yes]` | MinIO + catalog 에서 영구 삭제 (version 생략 시 데이터셋 전체) |
-| `objects [id]` | MinIO 에 실제로 있는 객체 나열 (catalog 무관) |
+**Target** 은 명령이 접속하는 곳입니다 (**PostgreSQL** = catalog DB 장부, **MinIO** = 객체 저장소). 각 명령은 실행 시작 시 접속 대상 (PostgreSQL DSN — 비밀번호 가림 · MinIO endpoint) 과 **자격증명 출처** (`[creds: prefect-block | default]`) 를 stderr 로 먼저 출력해 "어디로 접속해 도는지, 자격증명을 어디서 가져왔는지" 를 알립니다. Prefect 서버 블록에서 가져오면 `prefect-block`, 서버 미연결·블록 없음이면 `default` 로 표시됩니다. `--version`/`-V` 로 버전을 확인합니다.
+
+| Command | Target | Purpose |
+|---|---|---|
+| `list` | PostgreSQL | 데이터셋 목록 (최신 버전 요약) |
+| `versions <id>` | PostgreSQL | 한 데이터셋의 버전 이력 |
+| `tree [id] [--files]` | PostgreSQL (+MinIO `--files`) | 데이터셋 > 버전 트리 (`--files` 면 MinIO 파일 종류별 개수) |
+| `find <id> [key=value ...]` | PostgreSQL | metadata 키=값 검색 |
+| `upload <spec.json>` | MinIO + PostgreSQL | MinIO 적재 + catalog 등록 (JSON spec) |
+| `download <id> [version] [dest]` | PostgreSQL + MinIO | 버전 객체 다운로드 (version 생략 시 최신, dest 기본 `./<id>`) |
+| `remove <id> [version] [--yes]` | MinIO + PostgreSQL | MinIO + catalog 에서 영구 삭제 (version 생략 시 데이터셋 전체) |
+| `objects [id]` | MinIO | MinIO 에 실제로 있는 객체 나열 (catalog 무관) |
 
 ```powershell
 python catalog.py list                              # dataset summary (latest version)
@@ -374,3 +378,20 @@ python catalog.py objects sydney_202605             # raw MinIO objects (not the
 ```
 
 > 버전은 불변 (immutable) 입니다 — 같은 `dataset_id`/`version` 이 MinIO 나 catalog 에 이미 있으면 `upload` 는 덮어쓰지 않고 중단합니다 (버전을 올려 다시 시도). `remove` 는 MinIO 객체 (모든 버전·삭제마커) 와 catalog 행을 영구 삭제하므로 `--yes` 없이는 `DELETE` 입력을 요구합니다.
+
+### Credentials (Prefect Secret blocks)
+
+  catalog.py 가 필요로 하는 값은 **딱 4개** 이고, 모두 Prefect 서버의 **Secret 블록** 으로 가져옵니다 (관리자가 1회 등록 — [prefect.md](../Docker/Prefect/prefect.md) §5 Credentials).
+
+  | Block | Role | Target |
+  |---|---|---|
+  | `catalog-dsn` | `catalog` DB 접속 DSN (user·pass·host·port·db 를 한 문자열에 포함) | PostgreSQL |
+  | `minio-endpoint` | MinIO 주소 (`http://<host>:9000`) | MinIO |
+  | `minio-access-key` | MinIO 접속 키 | MinIO |
+  | `minio-secret-key` | MinIO 비밀 키 | MinIO |
+
+  `PREFECT_API_URL` (Prefect 프로필) 은 위 블록을 받기 위한 **접속점일 뿐** catalog 데이터가 아닙니다. catalog.py 는 `mlflow`·`optuna`·`prefect` DB 를 직접 접속하지 않으므로 그 자격증명은 필요 없습니다.
+
+  **사용자별 MinIO 키 (`-m <member>`)** — MinIO 를 건드리는 명령 (`upload`·`download`·`remove`·`objects`·`tree --files`) 에 `-m <member>` 를 주면 `minio-access-key-<member>`·`minio-secret-key-<member>` 블록을 먼저 써서 **그 사용자의 버킷 권한 (policy) 으로** 접속합니다. 그 블록이 없으면 공유 `minio-access-key`·`minio-secret-key` 로 떨어집니다 (`minio-endpoint` 는 한 MinIO 라 공유). 실행 배너의 `[creds: …]` 에 누구 키로 도는지 (`prefect-block (member=alice)` / `prefect-block (shared)` / `default`) 표시됩니다. `catalog-dsn` 은 현재 공유이며, 같은 방식으로 `catalog-dsn-<member>` 로 확장할 수 있습니다.
+
+  > **권한 차단은 MinIO policy 로** — 공유 키만 등록하면 모두 같은 신원으로 동작하고 (이 경우 격리는 경로 규칙 `s3://.../{member}/...`, [§3 Output Placement](#3-data)), Prefect 블록 자체엔 사용자별 접근제어가 없습니다. 진짜 사용자별 차단은 사용자별 키 블록을 등록하고 `-m` 로 실행하되, **그 키들이 MinIO 에서 버킷 policy 로 제한** 되어 있어야 실제로 막힙니다.

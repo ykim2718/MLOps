@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # run_server.sh — bring up the Prefect server compose stack on the Control Node.
+# __version__ = "0.0.20"  # Semantic Versioning:  Version = Major.Minor.Patch
 set -euo pipefail
 
 YAML="docker-compose.server.yml"   # the server compose file (its top-level name: sets the project)

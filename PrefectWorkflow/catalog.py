@@ -33,10 +33,16 @@ PostgreSQL `catalog` DB 의 `datasets` 테이블을 다룬다.
        python catalog.py remove   sydney_202605 --yes     # 확인 프롬프트 건너뛰기
        python catalog.py objects  sydney_202605           # MinIO 에 실제 있는 객체 나열
 
-연결 주소는 환경변수 POSTGRESQL_CATALOG_DSN 으로 덮어쓸 수 있다(로컬/원격 서버 공용).
-환경변수가 없으면 Prefect 서버의 블록(`catalog-dsn` Secret 등)에서 가져온다 → resolve() 참고.
-즉 팀원은 자격증명을 하드코딩하거나 docker-compose.env 를 보지 않고도(Prefect 서버에 연결만
-돼 있으면) 동작한다(관리자가 register_blocks.py 로 블록을 등록해 둔 경우).
+자격증명·연결 주소는 Prefect 프로필(`prefect config set PREFECT_API_URL=...`)로 연결된 Prefect
+서버의 **블록 1개**(`Jason`)에서 가져온다 → _section() 참고. 이 블록은 minio·catalog·optuna 세
+섹션(nested dict)을 담고, 비밀 값은 SecretDict 로 가려진다. catalog.py 는 컨테이너 밖에서 도는
+도구라 docker-compose.env(Docker/Prefect/ 에 있어 찾을 수 없음)도, 프로세스 환경변수도 쓰지
+않는다. 서버 미연결/블록 없음이면 default(localhost)로 떨어진다(관리자가 Credentials(...).save("Jason")
+으로 등록해 둔 경우 인증되어 동작).
+
+MinIO 키는 사용자별로 쓸 수 있다: `-m <member>` 를 주면 블록 `Jason-<member>` 를 먼저 찾아 그
+사용자의 minio 섹션 키(버킷 policy)로 접속하고, 없으면 공유 블록 `Jason` 으로 떨어진다(catalog·
+optuna 섹션은 항상 공유) → _section().
 """
 import argparse
 import json
@@ -48,58 +54,53 @@ import textwrap
 import psycopg2
 from psycopg2.extras import Json, RealDictCursor
 
-__version__ = "0.0.11"  # Semantic Versioning:  Version = Major.Minor.Patch
+__version__ = "0.0.17"  # Semantic Versioning:  Version = Major.Minor.Patch
+
+BLOCK_NAME = "Jason"   # the one credential block (per-member: "Jason-<member>")
+
+# Prefect is optional: import lazily so catalog.py still runs (on _DEFAULTS) without prefect installed.
+try:
+    from prefect.blocks.core import Block
+    from prefect.blocks.fields import SecretDict
+
+    class Credentials(Block):              # must match pipeline.py exactly (class name + fields)
+        minio: SecretDict                  # endpoint, access_key, secret_key
+        catalog: SecretDict                # endpoint, username, password, database
+        optuna: SecretDict                 # endpoint, username, password, database
+except Exception:                          # prefect missing -> _section() falls back to _DEFAULTS
+    Credentials = None
+
+_DEFAULTS = {
+    "minio":   {"endpoint": "http://localhost:9000", "access_key": "minioadmin", "secret_key": "minioadmin"},
+    "catalog": {"endpoint": "localhost:5432", "username": "postgres", "password": "postgres", "database": "catalog"},
+    "optuna":  {"endpoint": "localhost:5432", "username": "postgres", "password": "postgres", "database": "optuna"},
+}
 
 
-def _load_compose_env():
-    """docker-compose.env(같은 폴더 또는 상위 폴더)를 읽어 os.environ 에 채운다.
+def _section(section, member=None):
+    """한 섹션(dict)을 (값, 출처) 로 해석한다: 블록 1개("Jason") 를 불러 그 섹션을 돌려준다.
 
-    docker-compose.yml 과 같은 한 곳(docker-compose.env)에서 자격증명/엔드포인트를
-    가져오기 위한 헬퍼. 이미 설정된 환경변수는 덮어쓰지 않으므로(setdefault),
-    셸이나 .ps1 스크립트가 준 값이 항상 우선한다.
+    'minio' 는 member 블록("Jason-<member>") 을 먼저 찾아 그 사용자의 MinIO 권한(버킷 policy)으로
+    접속하고, 없으면 공유 블록("Jason") → _DEFAULTS 로 떨어진다. 'catalog'/'optuna' 는 공용 DB 라
+    항상 공유 블록을 쓴다. catalog.py 는 컨테이너 밖에서 도는 도구라 docker-compose.env 도, 프로세스
+    환경변수도 쓰지 않는다 (블록만). 출처는 'prefect-block (...)' | 'default'.
     """
-    here = os.path.dirname(os.path.abspath(__file__))
-    for d in (here, os.path.dirname(here)):
-        path = os.path.join(d, "docker-compose.env")
-        if os.path.isfile(path):
-            with open(path, encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line or line.startswith("#") or "=" not in line:
-                        continue
-                    k, v = line.split("=", 1)
-                    os.environ.setdefault(k.strip(), v.strip())
-            break
-
-
-_load_compose_env()
-
-
-def resolve(env_name, block_name, *, default=None, secret=True):
-    """자격증명/설정 1개를 해석한다: 환경변수 우선 → Prefect 블록 → default.
-
-    - 서버 / 관리자 / .ps1 경로: 환경변수(os.environ)가 이미 있어 그대로 사용(블록 조회 안 함).
-    - 팀원 로컬 실행: 환경변수가 없으면 PREFECT_API_URL 로 연결된 Prefect 서버의
-      Secret(secret=True) 또는 Variable(secret=False) 블록에서 가져온다
-      (관리자가 register_blocks.py 로 등록해 둔 값).
-    prefect 미설치 / 서버 미연결 / 블록 없음 등으로 실패하면 조용히 default 로 떨어진다.
-    """
-    v = os.environ.get(env_name)
-    if v:
-        return v
-    try:
-        if secret:
-            from prefect.blocks.system import Secret
-            return Secret.load(block_name).get()
-        from prefect.variables import Variable
-        return Variable.get(block_name)
-    except Exception:
-        return default
+    if Credentials is not None:
+        names = ([f"{BLOCK_NAME}-{member}"] if (member and section == "minio") else []) + [BLOCK_NAME]
+        for name in names:
+            try:
+                d = getattr(Credentials.load(name), section).get_secret_value()   # SecretDict -> plain dict
+                return d, (f"prefect-block (member={member})" if name != BLOCK_NAME else "prefect-block (shared)")
+            except Exception:                                                      # block missing / server down
+                continue
+    return _DEFAULTS[section], "default"
 
 
 def _dsn():
-    return resolve("POSTGRESQL_CATALOG_DSN", "catalog-dsn",
-                   default="postgresql://postgres:postgres@localhost:5432/catalog")
+    """공유 블록의 'catalog' 섹션 필드로 DSN 을 조립한다 (DSN 문자열을 통째로 저장하지 않음)."""
+    cfg, _ = _section("catalog")
+    host, _, port = cfg["endpoint"].partition(":")           # "postgres:5432"
+    return f"postgresql://{cfg['username']}:{cfg['password']}@{host}:{port or '5432'}/{cfg['database']}"
 
 DDL = """
 CREATE TABLE IF NOT EXISTS datasets (
@@ -168,13 +169,14 @@ def _check_name(name, field):
             "(no spaces, uppercase, or '-').")
 
 
-def upload(spec):
+def upload(spec, member=None):
     """JSON spec 한 건으로 MinIO 에 데이터를 올리고 catalog 에 버전 레코드를 등록한다.
 
     spec keys:
       dataset_id (req) · version (req) · path (req, 파일 또는 폴더)
-      bucket (기본 'datasets') · created_by · description · metadata (dict) · prefect_run_id
+      bucket (기본 'datasets') · created_by · description · metadata (dict) · prefect_run_id · member
 
+    member (인자 또는 spec['member']) 가 있으면 그 사용자의 MinIO 키로 올린다.
     버전은 불변 (immutable): 같은 dataset_id/version 이 MinIO 나 catalog 에 이미 있으면
     덮어쓰지 않고 중단한다 (버전을 올려 다시 시도).
     """
@@ -182,13 +184,14 @@ def upload(spec):
     version = spec["version"]
     path = spec["path"]
     bucket = spec.get("bucket", "datasets")
+    member = member or spec.get("member")
 
     _check_name(dataset_id, "dataset_id")
     _check_name(version, "version")
     if not os.path.exists(path):
         raise FileNotFoundError(f"path not found: {path}")
 
-    s3 = _s3()
+    s3 = _s3(member)
     prefix = f"{dataset_id}/{version}/"
     minio_path = f"s3://{bucket}/{prefix}"
     if get(dataset_id, version) or s3.list_objects_v2(
@@ -223,10 +226,11 @@ def upload(spec):
 # --------------------------------------------------------------------------- #
 # 다운로드 / 삭제 (MinIO ± catalog) — boto3 직접 (mc 불필요)
 # --------------------------------------------------------------------------- #
-def download(dataset_id, version=None, dest=None):
+def download(dataset_id, version=None, dest=None, member=None):
     """catalog 에서 minio_path 를 찾아 (version 생략 시 최신) 그 아래 객체를 dest 로 내려받는다.
 
-    dest 기본값은 `./<dataset_id>`. "search → select → download" 흐름.
+    dest 기본값은 `./<dataset_id>`. member 를 주면 그 사용자의 MinIO 키로 받는다.
+    "search → select → download" 흐름.
     """
     from urllib.parse import urlparse
     _check_name(dataset_id, "dataset_id")
@@ -239,7 +243,7 @@ def download(dataset_id, version=None, dest=None):
     u = urlparse(row["minio_path"])                # s3://bucket/key/...
     bucket, prefix = u.netloc, u.path.lstrip("/")
     dest = dest or dataset_id
-    s3 = _s3()
+    s3 = _s3(member)
     n = 0
     for page in s3.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=prefix):
         for obj in page.get("Contents", []):
@@ -271,9 +275,10 @@ def _delete_prefix(s3, bucket, prefix):
     return deleted
 
 
-def remove(dataset_id, version=None, *, yes=False):
+def remove(dataset_id, version=None, *, yes=False, member=None):
     """MinIO 객체와 catalog 행을 영구 삭제한다 (version 생략 시 데이터셋 전체).
 
+    member 를 주면 그 사용자의 MinIO 키로 지운다 (그 사용자 권한으로만 삭제 가능).
     되돌릴 수 없다. yes=False 면 'DELETE' 입력을 요구한다 (CLI 안전장치).
     """
     from urllib.parse import urlparse
@@ -291,7 +296,7 @@ def remove(dataset_id, version=None, *, yes=False):
         if input("Type DELETE to confirm: ") != "DELETE":
             raise SystemExit("cancelled (did not type DELETE).")
 
-    n_obj = _delete_prefix(_s3(), bucket, prefix)
+    n_obj = _delete_prefix(_s3(member), bucket, prefix)
     with _conn() as c, c.cursor() as cur:
         if version:
             cur.execute("DELETE FROM datasets WHERE dataset_id=%s AND version=%s",
@@ -302,10 +307,10 @@ def remove(dataset_id, version=None, *, yes=False):
     print(f"[catalog] removed {shown}: {n_obj} object(s), {n_rows} catalog row(s)")
 
 
-def objects(dataset_id=None, *, bucket="datasets"):
-    """MinIO 에 실제로 있는 객체를 나열한다 (catalog 등록과 무관한 원본 보기)."""
+def objects(dataset_id=None, *, bucket="datasets", member=None):
+    """MinIO 에 실제로 있는 객체를 나열한다 (catalog 등록과 무관한 원본 보기). member 키 우선."""
     prefix = f"{dataset_id}/" if dataset_id else ""
-    s3 = _s3()
+    s3 = _s3(member)
     rows = []
     for page in s3.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=prefix):
         for obj in page.get("Contents", []):
@@ -395,20 +400,22 @@ def tree():
 # --------------------------------------------------------------------------- #
 # 파일 종류(확장자) 집계 — MinIO 객체를 세어 트리에 표시 (boto3 는 필요할 때만 import)
 # --------------------------------------------------------------------------- #
-def _s3():
-    """MinIO(S3 호환) 클라이언트. 자격증명은 resolve() 로 환경변수 → Prefect 블록 순으로 가져온다."""
+def _s3(member=None):
+    """MinIO(S3 호환) 클라이언트. 블록의 'minio' 섹션(endpoint·access·secret)을 그대로 쓴다.
+
+    member 를 주면 그 사용자의 블록("Jason-<member>")의 minio 키로 접속해 버킷 권한이 사용자별로
+    적용된다. 없으면 공유 블록("Jason") → _DEFAULTS 로 떨어진다.
+    """
     import boto3
-    ep = resolve("MINIO_ENDPOINT", "minio-endpoint", default="http://localhost:9000")
-    ak = resolve("MINIO_ACCESS_KEY", "minio-access-key", default="minioadmin")
-    sk = resolve("MINIO_SECRET_KEY", "minio-secret-key", default="minioadmin")
-    return boto3.client("s3", endpoint_url=ep,
-                        aws_access_key_id=ak, aws_secret_access_key=sk)
+    m, _ = _section("minio", member)                  # endpoint/access_key/secret_key (per-user, fallback shared)
+    return boto3.client("s3", endpoint_url=m["endpoint"],
+                        aws_access_key_id=m["access_key"], aws_secret_access_key=m["secret_key"])
 
 
-def _ext_counts(minio_path):
+def _ext_counts(minio_path, member=None):
     """minio_path 아래 객체를 확장자별로 세어 {ext: count} 로 반환."""
     from urllib.parse import urlparse
-    s3 = _s3()
+    s3 = _s3(member)
     u = urlparse(minio_path)                       # s3://bucket/key/...
     bucket, prefix = u.netloc, u.path.lstrip("/")
     counts = {}
@@ -447,7 +454,7 @@ def _print_rows(rows, cols):
         print("  ".join(str(r.get(c, "")).ljust(widths[c]) for c in cols))
 
 
-def _cmd_tree(dataset_id=None, with_files=False):
+def _cmd_tree(dataset_id=None, with_files=False, member=None):
     """dataset_id > version 트리를 출력. with_files 면 버전 옆에 MinIO 파일 종류별 개수."""
     for ds, vers in tree().items():
         if dataset_id and ds != dataset_id:
@@ -459,10 +466,16 @@ def _cmd_tree(dataset_id=None, with_files=False):
                 row = get(ds, v)
                 if row and row.get("minio_path"):
                     try:
-                        line += "  " + _fmt_counts(_ext_counts(row["minio_path"]))
+                        line += "  " + _fmt_counts(_ext_counts(row["minio_path"], member))
                     except Exception as e:
                         line += f"  (count failed: {e})"
             print(line)
+
+
+def _add_member(sp):
+    """MinIO 를 건드리는 명령에 -m/--member 를 붙인다 (그 사용자의 MinIO 키로 접속)."""
+    sp.add_argument("-m", "--member", type=str, default=None,
+                    help="use this member's MinIO keys (minio-*-<member>), else the shared key")
 
 
 def _build_parser():
@@ -476,14 +489,25 @@ def _build_parser():
           python catalog.py download sydney_202605 v2 ./out   # version omitted -> latest; dest -> ./<id>
           python catalog.py remove sydney_202605 v2 --yes     # version omitted -> whole dataset
           python catalog.py objects sydney_202605             # raw MinIO objects (not the catalog)
+          python catalog.py download sydney_202605 v2 -m alice  # MinIO ops as member 'alice' (-m)
 
         upload spec.json:
           {"dataset_id": "sydney_202605", "version": "v2", "path": "./out",
            "bucket": "datasets", "created_by": "zoo", "description": "fab2 CH3",
            "metadata": {"fab": "fab2", "chamber": "CH3"}}
 
-        credentials (env, else Prefect Secret blocks via resolve()):
-          POSTGRESQL_CATALOG_DSN, MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY
+        targets (each command prints where it connects + creds source at start):
+          [PostgreSQL] = catalog DB ledger,  [MinIO] = object storage
+          creds source: prefect-block | default
+          list/versions/find = PostgreSQL    objects = MinIO
+          upload/download/remove = both      tree = PostgreSQL (+MinIO with --files)
+
+        credentials — from ONE Prefect block "Jason" (via the Prefect profile's PREFECT_API_URL),
+        else default. catalog.py runs outside the container: no env vars, no docker-compose.env.
+          block "Jason" sections (nested dict, hidden via SecretDict):
+            minio = {endpoint, access_key, secret_key}; catalog/optuna = {endpoint, username, password, database}
+          per-user MinIO (-m <member>): block "Jason-<member>" first, else shared "Jason"
+                          (each member's bucket policy applies; catalog/optuna stay shared).
         """)
     p = argparse.ArgumentParser(
         prog="catalog.py",
@@ -494,42 +518,68 @@ def _build_parser():
     sub = p.add_subparsers(dest="cmd", required=True,    # exactly one command (mutually exclusive)
                            metavar="<command>")
 
-    sub.add_parser("list", help="list datasets (latest-version summary)")
+    sub.add_parser("list", help="[PostgreSQL] list datasets (latest-version summary)")
 
-    sp = sub.add_parser("versions", help="show one dataset's version history")
+    sp = sub.add_parser("versions", help="[PostgreSQL] show one dataset's version history")
     sp.add_argument("dataset_id", type=str)
 
-    sp = sub.add_parser("tree", help="print the dataset > version tree")
+    sp = sub.add_parser("tree", help="[PostgreSQL; --files also MinIO] dataset > version tree")
     sp.add_argument("dataset_id", type=str, nargs="?", default=None,
                     help="limit to one dataset (default: all)")
     sp.add_argument("--files", action="store_true", default=False,
                     help="show MinIO file-type counts per version")
+    _add_member(sp)
 
-    sp = sub.add_parser("find", help="search by dataset_id + metadata key=value")
+    sp = sub.add_parser("find", help="[PostgreSQL] search by dataset_id + metadata key=value")
     sp.add_argument("dataset_id", type=str)
     sp.add_argument("filters", type=str, nargs="*", default=[], metavar="key=value",
                     help="metadata filters")
 
-    sp = sub.add_parser("upload", help="upload files to MinIO + register, from a JSON spec")
+    sp = sub.add_parser("upload", help="[MinIO + PostgreSQL] upload files + register, from a JSON spec")
     sp.add_argument("spec", type=str, metavar="spec.json")
+    _add_member(sp)
 
-    sp = sub.add_parser("download", help="download a version's objects from MinIO")
+    sp = sub.add_parser("download", help="[PostgreSQL + MinIO] look up in catalog, download objects")
     sp.add_argument("dataset_id", type=str)
     sp.add_argument("version", type=str, nargs="?", default=None, help="default: latest")
     sp.add_argument("dest", type=str, nargs="?", default=None, help="default: ./<dataset_id>")
+    _add_member(sp)
 
-    sp = sub.add_parser("remove", help="PERMANENTLY delete from MinIO + catalog")
+    sp = sub.add_parser("remove", help="[MinIO + PostgreSQL] PERMANENTLY delete objects + rows")
     sp.add_argument("dataset_id", type=str)
     sp.add_argument("version", type=str, nargs="?", default=None,
                     help="default: entire dataset (all versions)")
     sp.add_argument("--yes", action="store_true", default=False,
                     help="skip the DELETE confirmation")
+    _add_member(sp)
 
-    sp = sub.add_parser("objects", help="list raw MinIO objects (not the catalog)")
+    sp = sub.add_parser("objects", help="[MinIO] list raw MinIO objects (not the catalog)")
     sp.add_argument("dataset_id", type=str, nargs="?", default=None,
                     help="limit to one dataset (default: all)")
+    _add_member(sp)
 
     return p
+
+
+def _mask_dsn(dsn):
+    """DSN 의 비밀번호를 *** 로 가린다 (배너 노출용)."""
+    return re.sub(r"(://[^:/@]+:)[^@]*(@)", r"\1***\2", dsn)
+
+
+# 명령별 접속 대상 (PostgreSQL catalog DB / MinIO object storage)
+_PG_CMDS = {"list", "versions", "tree", "find", "upload", "download", "remove"}
+_MINIO_CMDS = {"upload", "download", "remove", "objects"}
+
+
+def _print_targets(cmd, with_files=False, member=None):
+    """실행 전, 이 명령이 접속하는 대상 + 자격증명 출처(누구 키인지 포함)를 stderr 로 알린다."""
+    print(f"[catalog.py v{__version__}] command: {cmd}", file=sys.stderr)
+    if cmd in _PG_CMDS:
+        _, src = _section("catalog")
+        print(f"  PostgreSQL (catalog DB): {_mask_dsn(_dsn())}  [creds: {src}]", file=sys.stderr)
+    if cmd in _MINIO_CMDS or (cmd == "tree" and with_files):
+        m, src = _section("minio", member)
+        print(f"  MinIO (object storage):  {m['endpoint']}  [creds: {src}]", file=sys.stderr)
 
 
 def _main(argv):
@@ -539,6 +589,8 @@ def _main(argv):
         return
     a = parser.parse_args(argv)
     cmd = a.cmd                                             # exactly one command (required)
+    member = getattr(a, "member", None)
+    _print_targets(cmd, with_files=getattr(a, "files", False), member=member)
 
     if cmd == "list":
         _print_rows(list_datasets(),
@@ -547,20 +599,20 @@ def _main(argv):
         _print_rows(versions(a.dataset_id),
                     ["version", "created_by", "created_at", "minio_path"])
     elif cmd == "tree":
-        _cmd_tree(a.dataset_id, a.files)
+        _cmd_tree(a.dataset_id, a.files, member)
     elif cmd == "find":
         filters = dict(kv.split("=", 1) for kv in a.filters if "=" in kv)
         _print_rows(find(a.dataset_id, **filters),
                     ["dataset_id", "version", "created_by", "minio_path"])
     elif cmd == "upload":
         with open(a.spec, encoding="utf-8") as f:
-            upload(json.load(f))
+            upload(json.load(f), member=member)
     elif cmd == "download":
-        download(a.dataset_id, a.version, a.dest)
+        download(a.dataset_id, a.version, a.dest, member=member)
     elif cmd == "remove":
-        remove(a.dataset_id, a.version, yes=a.yes)
+        remove(a.dataset_id, a.version, yes=a.yes, member=member)
     elif cmd == "objects":
-        _print_rows(objects(a.dataset_id), ["key", "size"])
+        _print_rows(objects(a.dataset_id, member=member), ["key", "size"])
 
 
 if __name__ == "__main__":

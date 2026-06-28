@@ -5,7 +5,16 @@ import subprocess
 import tempfile
 import boto3
 from prefect import flow, get_run_logger
-from prefect.blocks.system import Secret
+from prefect.blocks.core import Block
+from prefect.blocks.fields import SecretDict
+
+__version__ = "0.0.13"  # Semantic Versioning:  Version = Major.Minor.Patch
+
+
+class Credentials(Block):                          # ONE block holds everything as nested dicts; values hidden
+    minio: SecretDict                              # endpoint, access_key, secret_key
+    catalog: SecretDict                            # endpoint, username, password, database
+    optuna: SecretDict                             # endpoint, username, password, database
 
 
 @flow(name="pipeline", flow_run_name="{member}@{git_commit_hash}")                                          # run name shows whose run (e.g. alice@a1b2c3d)
@@ -23,9 +32,10 @@ def pipeline(git_repo: str, git_commit_hash: str, minio_key: str, minio_bucket: 
         subprocess.run(["git", "-C", repo, "worktree", "add", "--detach", script, git_commit_hash], check=True)  # expand the commit into script/ (clean worktree)
 
         os.makedirs(data, exist_ok=True)                                                              # git didn't create data/
-        s3 = boto3.client("s3", endpoint_url=Secret.load("minio-endpoint").get(),                     # credentials loaded from Prefect Secret (§5)
-                          aws_access_key_id=Secret.load("minio-access-key").get(),
-                          aws_secret_access_key=Secret.load("minio-secret-key").get())
+        minio = Credentials.load("Jason").minio.get_secret_value()                                    # one block -> minio section (§6)
+        s3 = boto3.client("s3", endpoint_url=minio["endpoint"],
+                          aws_access_key_id=minio["access_key"],
+                          aws_secret_access_key=minio["secret_key"])
         local = os.path.join(data, os.path.basename(minio_key))                                        # e.g. data/Bennelong Point
         s3.download_file(minio_bucket, minio_key, local)                                               # bucket/key → data/ (latest; pick a version by its key path)
 

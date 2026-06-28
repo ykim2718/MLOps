@@ -1,5 +1,7 @@
 # Troubleshooting
 
+<sub>rev. 10</sub>
+
 운영 중 마주친 문제를 증상·원인·진단·해결 순으로 모읍니다. 새 이슈는 H2 항목으로 덧붙입니다.
 
 ## Prefect server unreachable on :4200 — empty reply / RemoteProtocolError

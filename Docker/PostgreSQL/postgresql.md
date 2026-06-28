@@ -1,5 +1,7 @@
 # PostgreSQL — Backend Metadata Store
 
+<sub>rev. 100</sub>
+
 PostgreSQL 은 Prefect Automation Workflow stack의 **Backend Metadata Store** 역할을 합니다. 한 인스턴스 안에서 `prefect` · `mlflow` · `optuna` · `catalog` **4개의 논리 DB** 를 함께 운영하며, 각 도구가 자기 DB 에만 접속합니다 — **Prefect** (오케스트레이터) → `prefect`, **MLflow** (실험 추적·모델 레지스트리) → `mlflow`, **Optuna** (하이퍼파라미터 튜닝) → `optuna`, **Python** (데이터 catalog 접근 계층) → `catalog`. 실제 대용량 데이터·모델·아티팩트는 여기 두지 않고 오브젝트 스토리지에 보관하며, PostgreSQL 에는 **메타데이터 (상태·기록·catalog) 만** 저장합니다.
 
 ## 1. Role

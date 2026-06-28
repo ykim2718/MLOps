@@ -1,4 +1,5 @@
 # register_pool.ps1 — register (or update) one Prefect work pool on the running server.
+# __version__ = "0.0.20"  # Semantic Versioning:  Version = Major.Minor.Patch
 # Idempotent: --overwrite keeps the base job template in sync. Run after the server is up (run_server.ps1).
 #
 #   .\register_pool.ps1 -PoolName high_performance  -TemplateFile docker-pool-template-high.json -ConcurrencyLimit 16

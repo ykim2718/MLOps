@@ -1,4 +1,5 @@
 # run_server.ps1 — bring up the Prefect server compose stack on the Control Node.
+# __version__ = "0.0.20"  # Semantic Versioning:  Version = Major.Minor.Patch
 param(
     [string]$Yaml    = 'docker-compose.server.yml', # the server compose file (its top-level name: sets the project)
     [string]$Network = 'mlops'                      # shared external network

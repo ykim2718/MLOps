@@ -1,8 +1,10 @@
+# rev. 11
 # Python dependencies for the shared team Pipeline Flow image (base: python:3.11.15, see Dockerfile).
 # The team source is NOT baked; it is fetched into a git worktree at runtime, so only libraries are pinned here.
 
 # WorkFlow
 prefect>=3,<4                  # Prefect runtime (flow execution)
+pydantic>=2,<3                 # Prefect blocks are pydantic models (SecretDict in pipeline.py); pinned to Prefect 3
 boto3==1.34.131                # Object storage (MinIO, S3-compatible) access
 psycopg2-binary==2.9.9         # Catalog DB (PostgreSQL) access
 mlflow==2.14.1                 # Experiment tracking / model registry

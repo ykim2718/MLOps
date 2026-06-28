@@ -1,5 +1,7 @@
 # Docker CLI (Command Line Interface)
 
+<sub>rev. 100</sub>
+
 각 컴포넌트를 도커로 띄우고 운영할 때 공통으로 쓰는 명령을 모았습니다.
 
 ## 1. Setup

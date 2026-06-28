@@ -1,5 +1,6 @@
 #!/bin/sh
 # prune_loop.sh - periodically delete OFFLINE (stale) worker records from the server.
+# __version__ = "0.0.20"  # Semantic Versioning:  Version = Major.Minor.Patch
 # Runs as the 'worker_pruner' sidecar in the server stack (alpine + curl + jq, no python).
 # Prefect marks dead workers OFFLINE but never deletes them; this prunes them so only live
 # dispatchers remain. Live (ONLINE) workers are never touched. Read-only check is check_status.ps1.
