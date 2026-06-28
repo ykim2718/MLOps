@@ -6,13 +6,13 @@
   },
   "postgresql_catalog": {
     "endpoint": "postgres:5432",
-    "username": "catalog_user",
+    "username": "<CATALOG_USER>",
     "password": "<CATALOG_DB_PASSWORD>",
     "database": "catalog"
   },
   "postgresql_optuna": {
     "endpoint": "postgres:5432",
-    "username": "optuna_user",
+    "username": "<OPTUNA_USER>",
     "password": "<OPTUNA_DB_PASSWORD>",
     "database": "optuna"
   }
