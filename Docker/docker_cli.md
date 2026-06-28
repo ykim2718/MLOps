@@ -45,7 +45,8 @@ docker compose ps                                # 컨테이너 상태를 확인
 
 docker compose stop                # 컨테이너를 정지한다 (제거하지 않는다).
 docker compose start               # 정지된 컨테이너를 다시 시작한다.
-docker compose restart             # 컨테이너를 재시작한다.
+docker compose restart             # 스택의 컨테이너를 재시작한다.
+docker restart <container>         # 컨테이너 하나를 이름으로 재시작한다 (compose 밖에서).
 
 docker compose down                # 정지 + 컨테이너/네트워크 제거 (named volume 의 데이터는 유지).
 docker compose down -v             # named volume 까지 삭제하여 데이터를 초기화한다 (주의).
