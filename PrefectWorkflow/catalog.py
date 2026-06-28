@@ -19,13 +19,31 @@ PostgreSQL `catalog` DB 의 `datasets` 테이블을 다룬다.
        python catalog.py tree                         # 데이터셋 > 버전 트리
        python catalog.py find sydney_202605 fab=fab2  # 검색(metadata 키=값)
 
+3) JSON spec 으로 업로드 + 등록 (MinIO 적재와 catalog 등록을 한 번에):
+       python catalog.py upload spec.json
+   spec.json 예시:
+       {"dataset_id": "sydney_202605", "version": "v2", "path": "./out",
+        "bucket": "datasets", "created_by": "zoo", "description": "fab2 CH3",
+        "metadata": {"fab": "fab2", "chamber": "CH3"}}
+   (boto3 로 올리므로 mc 불필요. 버전은 불변 — 이미 있으면 중단.)
+
+4) 다운로드 / 삭제 / 원본 객체 보기 (모두 boto3, mc 불필요):
+       python catalog.py download sydney_202605 v2 ./out  # 없으면 최신, dest 기본 ./<id>
+       python catalog.py remove   sydney_202605 v2        # 한 버전 (생략 시 전체) — 영구 삭제
+       python catalog.py remove   sydney_202605 --yes     # 확인 프롬프트 건너뛰기
+       python catalog.py objects  sydney_202605           # MinIO 에 실제 있는 객체 나열
+
 연결 주소는 환경변수 POSTGRESQL_CATALOG_DSN 으로 덮어쓸 수 있다(로컬/원격 서버 공용).
 환경변수가 없으면 Prefect 서버의 블록(`catalog-dsn` Secret 등)에서 가져온다 → resolve() 참고.
 즉 팀원은 자격증명을 하드코딩하거나 docker-compose.env 를 보지 않고도(Prefect 서버에 연결만
 돼 있으면) 동작한다(관리자가 register_blocks.py 로 블록을 등록해 둔 경우).
 """
+import argparse
+import json
 import os
+import re
 import sys
+import textwrap
 
 import psycopg2
 from psycopg2.extras import Json, RealDictCursor
@@ -131,6 +149,168 @@ def register(dataset_id, version, minio_path, *, created_by=None,
 
 
 # --------------------------------------------------------------------------- #
+# 업로드 (MinIO 적재 + catalog 등록) — JSON spec 으로 구동
+# --------------------------------------------------------------------------- #
+_NAME_RE = re.compile(r"^[a-z0-9_.]+$")
+
+
+def _check_name(name, field):
+    """dataset_id / version 이름 규칙: 소문자·숫자·`_`·`.` 만 (공백·대문자·`-` 불가).
+
+    이 값이 그대로 MinIO 경로와 catalog 키가 되므로 강제한다.
+    """
+    if not name or not _NAME_RE.match(name):
+        raise ValueError(
+            f"{field} '{name}' invalid: allowed lowercase a-z, digits 0-9, '_', '.' "
+            "(no spaces, uppercase, or '-').")
+
+
+def upload(spec):
+    """JSON spec 한 건으로 MinIO 에 데이터를 올리고 catalog 에 버전 레코드를 등록한다.
+
+    spec keys:
+      dataset_id (req) · version (req) · path (req, 파일 또는 폴더)
+      bucket (기본 'datasets') · created_by · description · metadata (dict) · prefect_run_id
+
+    버전은 불변 (immutable): 같은 dataset_id/version 이 MinIO 나 catalog 에 이미 있으면
+    덮어쓰지 않고 중단한다 (버전을 올려 다시 시도).
+    """
+    dataset_id = spec["dataset_id"]
+    version = spec["version"]
+    path = spec["path"]
+    bucket = spec.get("bucket", "datasets")
+
+    _check_name(dataset_id, "dataset_id")
+    _check_name(version, "version")
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"path not found: {path}")
+
+    s3 = _s3()
+    prefix = f"{dataset_id}/{version}/"
+    minio_path = f"s3://{bucket}/{prefix}"
+    if get(dataset_id, version) or s3.list_objects_v2(
+            Bucket=bucket, Prefix=prefix, MaxKeys=1).get("KeyCount", 0):
+        raise FileExistsError(f"version already exists: {minio_path} (bump the version)")
+
+    # upload a file, or a folder (recursive)
+    n_files, size_bytes = 0, 0
+    if os.path.isdir(path):
+        for root, _, files in os.walk(path):
+            for fn in files:
+                fp = os.path.join(root, fn)
+                key = prefix + os.path.relpath(fp, path).replace(os.sep, "/")
+                s3.upload_file(fp, bucket, key)
+                n_files += 1
+                size_bytes += os.path.getsize(fp)
+    else:
+        s3.upload_file(path, bucket, prefix + os.path.basename(path))
+        n_files, size_bytes = 1, os.path.getsize(path)
+
+    ensure_schema()
+    register(dataset_id, version, minio_path,
+             created_by=spec.get("created_by"),
+             n_files=n_files, size_bytes=size_bytes,
+             prefect_run_id=spec.get("prefect_run_id"),
+             description=spec.get("description"),
+             metadata=spec.get("metadata") or {})
+    print(f"[catalog] uploaded {n_files} file(s), {size_bytes} B -> {minio_path} and registered")
+    return minio_path
+
+
+# --------------------------------------------------------------------------- #
+# 다운로드 / 삭제 (MinIO ± catalog) — boto3 직접 (mc 불필요)
+# --------------------------------------------------------------------------- #
+def download(dataset_id, version=None, dest=None):
+    """catalog 에서 minio_path 를 찾아 (version 생략 시 최신) 그 아래 객체를 dest 로 내려받는다.
+
+    dest 기본값은 `./<dataset_id>`. "search → select → download" 흐름.
+    """
+    from urllib.parse import urlparse
+    _check_name(dataset_id, "dataset_id")
+    if version:
+        _check_name(version, "version")
+    row = get(dataset_id, version)
+    if not row:
+        raise LookupError(f"not in catalog: '{dataset_id}' (version={version or 'latest'})")
+
+    u = urlparse(row["minio_path"])                # s3://bucket/key/...
+    bucket, prefix = u.netloc, u.path.lstrip("/")
+    dest = dest or dataset_id
+    s3 = _s3()
+    n = 0
+    for page in s3.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=prefix):
+        for obj in page.get("Contents", []):
+            key = obj["Key"]
+            if key.endswith("/"):
+                continue
+            rel = key[len(prefix):] if key.startswith(prefix) else key
+            target = os.path.join(dest, rel.replace("/", os.sep))
+            os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
+            s3.download_file(bucket, key, target)
+            n += 1
+    print(f"[catalog] downloaded {n} file(s): {row['minio_path']} -> {dest}")
+    return dest
+
+
+def _delete_prefix(s3, bucket, prefix):
+    """prefix 아래 모든 객체 (버전·삭제마커 포함) 를 지운다. 지운 개수를 반환."""
+    deleted, batch = 0, []
+    for page in s3.get_paginator("list_object_versions").paginate(Bucket=bucket, Prefix=prefix):
+        for item in page.get("Versions", []) + page.get("DeleteMarkers", []):
+            batch.append({"Key": item["Key"], "VersionId": item["VersionId"]})
+            if len(batch) == 1000:                 # delete_objects caps at 1000 keys per call
+                s3.delete_objects(Bucket=bucket, Delete={"Objects": batch})
+                deleted += len(batch)
+                batch = []
+    if batch:
+        s3.delete_objects(Bucket=bucket, Delete={"Objects": batch})
+        deleted += len(batch)
+    return deleted
+
+
+def remove(dataset_id, version=None, *, yes=False):
+    """MinIO 객체와 catalog 행을 영구 삭제한다 (version 생략 시 데이터셋 전체).
+
+    되돌릴 수 없다. yes=False 면 'DELETE' 입력을 요구한다 (CLI 안전장치).
+    """
+    from urllib.parse import urlparse
+    _check_name(dataset_id, "dataset_id")
+    if version:
+        _check_name(version, "version")
+
+    row = get(dataset_id, version)                 # derive the real bucket from a catalog row if any
+    bucket = urlparse(row["minio_path"]).netloc if row else "datasets"
+    prefix = f"{dataset_id}/{version}/" if version else f"{dataset_id}/"
+    shown = f"s3://{bucket}/{prefix}" + (" (single version)" if version else " (ENTIRE dataset)")
+
+    if not yes:
+        print(f"About to PERMANENTLY delete {shown} from MinIO and catalog.")
+        if input("Type DELETE to confirm: ") != "DELETE":
+            raise SystemExit("cancelled (did not type DELETE).")
+
+    n_obj = _delete_prefix(_s3(), bucket, prefix)
+    with _conn() as c, c.cursor() as cur:
+        if version:
+            cur.execute("DELETE FROM datasets WHERE dataset_id=%s AND version=%s",
+                        (dataset_id, version))
+        else:
+            cur.execute("DELETE FROM datasets WHERE dataset_id=%s", (dataset_id,))
+        n_rows = cur.rowcount
+    print(f"[catalog] removed {shown}: {n_obj} object(s), {n_rows} catalog row(s)")
+
+
+def objects(dataset_id=None, *, bucket="datasets"):
+    """MinIO 에 실제로 있는 객체를 나열한다 (catalog 등록과 무관한 원본 보기)."""
+    prefix = f"{dataset_id}/" if dataset_id else ""
+    s3 = _s3()
+    rows = []
+    for page in s3.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=prefix):
+        for obj in page.get("Contents", []):
+            rows.append({"key": obj["Key"], "size": obj["Size"]})
+    return rows
+
+
+# --------------------------------------------------------------------------- #
 # 읽기 / 검색
 # --------------------------------------------------------------------------- #
 def find(dataset_id=None, **filters):
@@ -212,15 +392,20 @@ def tree():
 # --------------------------------------------------------------------------- #
 # 파일 종류(확장자) 집계 — MinIO 객체를 세어 트리에 표시 (boto3 는 필요할 때만 import)
 # --------------------------------------------------------------------------- #
-def _ext_counts(minio_path):
-    """minio_path 아래 객체를 확장자별로 세어 {ext: count} 로 반환."""
+def _s3():
+    """MinIO(S3 호환) 클라이언트. 자격증명은 resolve() 로 환경변수 → Prefect 블록 순으로 가져온다."""
     import boto3
-    from urllib.parse import urlparse
     ep = resolve("MINIO_ENDPOINT", "minio-endpoint", default="http://localhost:9000")
     ak = resolve("MINIO_ACCESS_KEY", "minio-access-key", default="minioadmin")
     sk = resolve("MINIO_SECRET_KEY", "minio-secret-key", default="minioadmin")
-    s3 = boto3.client("s3", endpoint_url=ep,
-                      aws_access_key_id=ak, aws_secret_access_key=sk)
+    return boto3.client("s3", endpoint_url=ep,
+                        aws_access_key_id=ak, aws_secret_access_key=sk)
+
+
+def _ext_counts(minio_path):
+    """minio_path 아래 객체를 확장자별로 세어 {ext: count} 로 반환."""
+    from urllib.parse import urlparse
+    s3 = _s3()
     u = urlparse(minio_path)                       # s3://bucket/key/...
     bucket, prefix = u.netloc, u.path.lstrip("/")
     counts = {}
@@ -259,49 +444,115 @@ def _print_rows(rows, cols):
         print("  ".join(str(r.get(c, "")).ljust(widths[c]) for c in cols))
 
 
+def _cmd_tree(dataset_id=None, with_files=False):
+    """dataset_id > version 트리를 출력. with_files 면 버전 옆에 MinIO 파일 종류별 개수."""
+    for ds, vers in tree().items():
+        if dataset_id and ds != dataset_id:
+            continue
+        print(ds)
+        for v in vers:
+            line = f"  └─ {v}"
+            if with_files:
+                row = get(ds, v)
+                if row and row.get("minio_path"):
+                    try:
+                        line += "  " + _fmt_counts(_ext_counts(row["minio_path"]))
+                    except Exception as e:
+                        line += f"  (count failed: {e})"
+            print(line)
+
+
+def _build_parser():
+    epilog = textwrap.dedent("""\
+        examples:
+          python catalog.py list                              # dataset summary (latest version)
+          python catalog.py versions sydney_202605            # one dataset's version history
+          python catalog.py tree --files                      # dataset > version tree (+ file-type counts)
+          python catalog.py find sydney_202605 fab=fab2       # search by metadata key=value
+          python catalog.py upload spec.json                  # upload to MinIO + register (JSON spec)
+          python catalog.py download sydney_202605 v2 ./out   # version omitted -> latest; dest -> ./<id>
+          python catalog.py remove sydney_202605 v2 --yes     # version omitted -> whole dataset
+          python catalog.py objects sydney_202605             # raw MinIO objects (not the catalog)
+
+        upload spec.json:
+          {"dataset_id": "sydney_202605", "version": "v2", "path": "./out",
+           "bucket": "datasets", "created_by": "zoo", "description": "fab2 CH3",
+           "metadata": {"fab": "fab2", "chamber": "CH3"}}
+
+        credentials (env, else Prefect Secret blocks via resolve()):
+          POSTGRESQL_CATALOG_DSN, MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY
+        """)
+    p = argparse.ArgumentParser(
+        prog="catalog.py",
+        description="Data catalog (PostgreSQL ledger) + MinIO object operations.",
+        epilog=epilog,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = p.add_subparsers(dest="cmd", required=True,    # exactly one command (mutually exclusive)
+                           metavar="<command>")
+
+    sub.add_parser("list", help="list datasets (latest-version summary)")
+
+    sp = sub.add_parser("versions", help="show one dataset's version history")
+    sp.add_argument("dataset_id", type=str)
+
+    sp = sub.add_parser("tree", help="print the dataset > version tree")
+    sp.add_argument("dataset_id", type=str, nargs="?", default=None,
+                    help="limit to one dataset (default: all)")
+    sp.add_argument("--files", action="store_true", default=False,
+                    help="show MinIO file-type counts per version")
+
+    sp = sub.add_parser("find", help="search by dataset_id + metadata key=value")
+    sp.add_argument("dataset_id", type=str)
+    sp.add_argument("filters", type=str, nargs="*", default=[], metavar="key=value",
+                    help="metadata filters")
+
+    sp = sub.add_parser("upload", help="upload files to MinIO + register, from a JSON spec")
+    sp.add_argument("spec", type=str, metavar="spec.json")
+
+    sp = sub.add_parser("download", help="download a version's objects from MinIO")
+    sp.add_argument("dataset_id", type=str)
+    sp.add_argument("version", type=str, nargs="?", default=None, help="default: latest")
+    sp.add_argument("dest", type=str, nargs="?", default=None, help="default: ./<dataset_id>")
+
+    sp = sub.add_parser("remove", help="PERMANENTLY delete from MinIO + catalog")
+    sp.add_argument("dataset_id", type=str)
+    sp.add_argument("version", type=str, nargs="?", default=None,
+                    help="default: entire dataset (all versions)")
+    sp.add_argument("--yes", action="store_true", default=False,
+                    help="skip the DELETE confirmation")
+
+    sp = sub.add_parser("objects", help="list raw MinIO objects (not the catalog)")
+    sp.add_argument("dataset_id", type=str, nargs="?", default=None,
+                    help="limit to one dataset (default: all)")
+
+    return p
+
+
 def _main(argv):
-    cmd = argv[0] if argv else "list"
+    a = _build_parser().parse_args(argv)
+    cmd = a.cmd                                             # exactly one command (required)
 
     if cmd == "list":
         _print_rows(list_datasets(),
                     ["dataset_id", "versions", "latest_version", "latest_by", "last_updated"])
-
     elif cmd == "versions":
-        if len(argv) < 2:
-            sys.exit("usage: python catalog.py versions <dataset_id>")
-        _print_rows(versions(argv[1]),
+        _print_rows(versions(a.dataset_id),
                     ["version", "created_by", "created_at", "minio_path"])
-
     elif cmd == "tree":
-        # tree [--files] [dataset_id]
-        #   --files : 각 버전 옆에 MinIO 파일 종류별 개수 표시 (예: (128 parquet, 13 csv))
-        with_files = "--files" in argv
-        only = next((a for a in argv[1:] if a != "--files"), None)
-        for ds, vers in tree().items():
-            if only and ds != only:
-                continue
-            print(ds)
-            for v in vers:
-                line = f"  └─ {v}"
-                if with_files:
-                    row = get(ds, v)
-                    if row and row.get("minio_path"):
-                        try:
-                            line += "  " + _fmt_counts(_ext_counts(row["minio_path"]))
-                        except Exception as e:
-                            line += f"  (count failed: {e})"
-                print(line)
-
+        _cmd_tree(a.dataset_id, a.files)
     elif cmd == "find":
-        if len(argv) < 2:
-            sys.exit("usage: python catalog.py find <dataset_id> [key=value ...]")
-        dataset_id = argv[1]
-        filters = dict(kv.split("=", 1) for kv in argv[2:] if "=" in kv)
-        _print_rows(find(dataset_id, **filters),
+        filters = dict(kv.split("=", 1) for kv in a.filters if "=" in kv)
+        _print_rows(find(a.dataset_id, **filters),
                     ["dataset_id", "version", "created_by", "minio_path"])
-
-    else:
-        sys.exit("commands: list | versions <id> | tree | find <id> [key=value ...]")
+    elif cmd == "upload":
+        with open(a.spec, encoding="utf-8") as f:
+            upload(json.load(f))
+    elif cmd == "download":
+        download(a.dataset_id, a.version, a.dest)
+    elif cmd == "remove":
+        remove(a.dataset_id, a.version, yes=a.yes)
+    elif cmd == "objects":
+        _print_rows(objects(a.dataset_id), ["key", "size"])
 
 
 if __name__ == "__main__":

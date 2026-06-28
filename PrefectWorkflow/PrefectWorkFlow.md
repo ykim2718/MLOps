@@ -93,7 +93,7 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
 
   여러 데이터셋·모델을 만들고 비교·재현하려면 산출물을 **버전 관리** 하고 무엇이 어디 있는지 **검색** 할 수 있어야 합니다. 이 스택은 실제 데이터를 MinIO 에, 가벼운 메타데이터·버전 이력·계보를 PostgreSQL `catalog` DB 에 둡니다.
 
-  `catalog` 은 `catalog` DB 안의 테이블 하나 (`datasets`) 이며, MinIO 의 실제 데이터를 가리키는 **메타데이터 장부** 입니다. 이 장부를 다루는 **catalog 접근 계층** (테이블 생성·버전 등록·검색) 이 워크플로우에서 데이터의 위치·버전·계보를 기록합니다.
+  `catalog` 은 `catalog` DB 안의 테이블 하나 (`datasets`) 이며, MinIO 의 실제 데이터를 가리키는 **메타데이터 장부** 입니다. 이 장부를 다루는 **catalog 접근 계층** (테이블 생성·버전 등록·검색) 이 워크플로우에서 데이터의 위치·버전·계보를 기록합니다. CLI 둘러보기·업로드·다운로드·삭제는 [Appendix A. catalog.py CLI](#appendix-a-catalogpy-cli) 를 참고합니다.
 
 #### Versioning
 
@@ -336,3 +336,41 @@ def inference_flow():
 
 - **Prefect (`@task(retries=3)` / `@flow`)** — 언제·어떤 순서로 실행할지, 실패 시 재시도·로깅을 맡습니다.
 - **MLflow (`mlflow.pyfunc.load_model`)** — `models:/mnist-classifier/Production` 으로 레지스트리에서 실제 모델을 내려받아 로드합니다.
+
+---
+
+## Appendix A. catalog.py CLI
+
+`catalog.py` 는 데이터 카탈로그 (PostgreSQL `catalog` DB 장부) 와 MinIO 객체를 함께 다루는 접근 계층이자 CLI 입니다. flow 에서 라이브러리로 import 해 쓰거나 ([§3 Data Catalog](#3-data)), 아래 CLI 로 직접 둘러보기·업로드·다운로드·삭제합니다. 자격증명은 환경변수 (`POSTGRESQL_CATALOG_DSN`·`MINIO_ENDPOINT`·`MINIO_ACCESS_KEY`·`MINIO_SECRET_KEY`) 가 우선이고, 없으면 Prefect Secret 블록에서 가져옵니다. 업로드·다운로드·삭제는 boto3 로 처리하므로 `mc` 가 필요 없습니다.
+
+| Command | Purpose |
+|---|---|
+| `list` | 데이터셋 목록 (최신 버전 요약) |
+| `versions <id>` | 한 데이터셋의 버전 이력 |
+| `tree [id] [--files]` | 데이터셋 > 버전 트리 (`--files` 면 MinIO 파일 종류별 개수) |
+| `find <id> [key=value ...]` | metadata 키=값 검색 |
+| `upload <spec.json>` | MinIO 적재 + catalog 등록 (JSON spec) |
+| `download <id> [version] [dest]` | 버전 객체 다운로드 (version 생략 시 최신, dest 기본 `./<id>`) |
+| `remove <id> [version] [--yes]` | MinIO + catalog 에서 영구 삭제 (version 생략 시 데이터셋 전체) |
+| `objects [id]` | MinIO 에 실제로 있는 객체 나열 (catalog 무관) |
+
+```powershell
+python catalog.py list                              # dataset summary (latest version)
+python catalog.py versions sydney_202605            # one dataset's version history
+python catalog.py tree --files                      # dataset > version tree (+ file-type counts)
+python catalog.py find sydney_202605 fab=fab2       # search by metadata key=value
+python catalog.py upload spec.json                  # upload to MinIO + register (JSON spec)
+python catalog.py download sydney_202605 v2 ./out   # version omitted -> latest; dest -> ./<id>
+python catalog.py remove sydney_202605 v2 --yes     # version omitted -> whole dataset
+python catalog.py objects sydney_202605             # raw MinIO objects (not the catalog)
+```
+
+`upload` 의 `spec.json` 예시입니다.
+
+```json
+{"dataset_id": "sydney_202605", "version": "v2", "path": "./out",
+ "bucket": "datasets", "created_by": "zoo", "description": "fab2 CH3",
+ "metadata": {"fab": "fab2", "chamber": "CH3"}}
+```
+
+> 버전은 불변 (immutable) 입니다 — 같은 `dataset_id`/`version` 이 MinIO 나 catalog 에 이미 있으면 `upload` 는 덮어쓰지 않고 중단합니다 (버전을 올려 다시 시도). `remove` 는 MinIO 객체 (모든 버전·삭제마커) 와 catalog 행을 영구 삭제하므로 `--yes` 없이는 `DELETE` 입력을 요구합니다.
