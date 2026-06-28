@@ -769,6 +769,8 @@ Flow Runs
 - **§5 Pipeline Flow**
   - `prefect deploy` (또는 `flow.deploy(...)`) — deployment 를 등록합니다 (§5.2).
   - `prefect deployment run "<flow>/<deployment>" -p <key>=<value>` — 등록된 deployment 를 파라미터와 함께 trigger 합니다 (§5.3).
+- **§6 Credentials**
+  - `prefect block ls` — server 에 등록된 블록 (Prefect Secret 등) 을 표 (ID·Type·Name·Slug) 로 출력합니다. run-code 자격증명 (`minio-endpoint`·`catalog-dsn` 등) 이 등록됐는지 확인합니다 (§6). 블록은 **그 server 의 DB 에 저장** 되므로 server 마다 따로 등록해야 하며, 등록 시점의 `PREFECT_API_URL` 이 가리킨 server 에 들어갑니다.
 
 ## Appendix C. Execution Architecture
 

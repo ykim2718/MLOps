@@ -19,6 +19,20 @@ services:
       - mlops
     restart: unless-stopped
 
+  worker_pruner:
+    image: alpine:3                     # tiny; installs curl + jq at start (no python image)
+    depends_on:
+      - prefect_server
+    environment:
+      - PREFECT_API_URL=http://prefect_server:4200/api   # internal server API the sidecar prunes via
+      - PRUNE_INTERVAL_SECONDS=3600                       # prune cadence (hourly)
+    volumes:
+      - ./prune_loop.sh:/prune_loop.sh:ro
+    command: ["sh", "-c", "tr -d '\\r' < /prune_loop.sh | sh"]   # strip CR (Windows EOL) then run
+    networks:
+      - mlops
+    restart: unless-stopped
+
 networks:
   mlops:
     external: true

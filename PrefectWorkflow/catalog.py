@@ -48,6 +48,9 @@ import textwrap
 import psycopg2
 from psycopg2.extras import Json, RealDictCursor
 
+__version__ = "0.0.11"  # Semantic Versioning:  Version = Major.Minor.Patch
+
+
 def _load_compose_env():
     """docker-compose.env(같은 폴더 또는 상위 폴더)를 읽어 os.environ 에 채운다.
 
@@ -484,9 +487,10 @@ def _build_parser():
         """)
     p = argparse.ArgumentParser(
         prog="catalog.py",
-        description="Data catalog (PostgreSQL ledger) + MinIO object operations.",
+        description=f"catalog.py v{__version__} - Data catalog (PostgreSQL ledger) + MinIO object operations.",
         epilog=epilog,
         formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("-V", "--version", action="version", version=f"catalog.py {__version__}")
     sub = p.add_subparsers(dest="cmd", required=True,    # exactly one command (mutually exclusive)
                            metavar="<command>")
 
@@ -529,7 +533,11 @@ def _build_parser():
 
 
 def _main(argv):
-    a = _build_parser().parse_args(argv)
+    parser = _build_parser()
+    if not argv:                                           # no command -> show full help on stdout
+        parser.print_help()
+        return
+    a = parser.parse_args(argv)
     cmd = a.cmd                                             # exactly one command (required)
 
     if cmd == "list":
