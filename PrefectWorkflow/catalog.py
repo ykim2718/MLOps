@@ -34,8 +34,8 @@ PostgreSQL `catalog` DB 의 `datasets` 테이블을 다룬다.
        python catalog.py objects  sydney_202605           # MinIO 에 실제 있는 객체 나열
 
 자격증명·연결 주소는 Prefect 프로필(`prefect config set PREFECT_API_URL=...`)로 연결된 Prefect
-서버의 **블록 1개**(`Jason`)에서 가져온다 → _section() 참고. 이 블록은 minio·catalog·optuna 세
-섹션(nested dict)을 담고, 비밀 값은 SecretDict 로 가려진다. catalog.py 는 컨테이너 밖에서 도는
+서버의 **블록 1개**(`Jason`)에서 가져온다 → _section() 참고. 이 블록은 minio·postgresql_catalog·
+postgresql_optuna 세 섹션(nested dict)을 담고, 비밀 값은 SecretDict 로 가려진다. catalog.py 는 컨테이너 밖에서 도는
 도구라 docker-compose.env(Docker/Prefect/ 에 있어 찾을 수 없음)도, 프로세스 환경변수도 쓰지
 않는다. 서버 미연결/블록 없음이면 default(localhost)로 떨어진다(관리자가 Credentials(...).save("Jason")
 으로 등록해 둔 경우 인증되어 동작).
@@ -54,7 +54,7 @@ import textwrap
 import psycopg2
 from psycopg2.extras import Json, RealDictCursor
 
-__version__ = "0.0.17"  # Semantic Versioning:  Version = Major.Minor.Patch
+__version__ = "0.0.18"  # Semantic Versioning:  Version = Major.Minor.Patch
 
 BLOCK_NAME = "Jason"   # the one credential block (per-member: "Jason-<member>")
 
@@ -65,15 +65,15 @@ try:
 
     class Credentials(Block):              # must match pipeline.py exactly (class name + fields)
         minio: SecretDict                  # endpoint, access_key, secret_key
-        catalog: SecretDict                # endpoint, username, password, database
-        optuna: SecretDict                 # endpoint, username, password, database
+        postgresql_catalog: SecretDict     # endpoint, username, password, database
+        postgresql_optuna: SecretDict      # endpoint, username, password, database
 except Exception:                          # prefect missing -> _section() falls back to _DEFAULTS
     Credentials = None
 
 _DEFAULTS = {
-    "minio":   {"endpoint": "http://localhost:9000", "access_key": "minioadmin", "secret_key": "minioadmin"},
-    "catalog": {"endpoint": "localhost:5432", "username": "postgres", "password": "postgres", "database": "catalog"},
-    "optuna":  {"endpoint": "localhost:5432", "username": "postgres", "password": "postgres", "database": "optuna"},
+    "minio":              {"endpoint": "http://localhost:9000", "access_key": "minioadmin", "secret_key": "minioadmin"},
+    "postgresql_catalog": {"endpoint": "localhost:5432", "username": "postgres", "password": "postgres", "database": "catalog"},
+    "postgresql_optuna":  {"endpoint": "localhost:5432", "username": "postgres", "password": "postgres", "database": "optuna"},
 }
 
 
@@ -81,8 +81,8 @@ def _section(section, member=None):
     """한 섹션(dict)을 (값, 출처) 로 해석한다: 블록 1개("Jason") 를 불러 그 섹션을 돌려준다.
 
     'minio' 는 member 블록("Jason-<member>") 을 먼저 찾아 그 사용자의 MinIO 권한(버킷 policy)으로
-    접속하고, 없으면 공유 블록("Jason") → _DEFAULTS 로 떨어진다. 'catalog'/'optuna' 는 공용 DB 라
-    항상 공유 블록을 쓴다. catalog.py 는 컨테이너 밖에서 도는 도구라 docker-compose.env 도, 프로세스
+    접속하고, 없으면 공유 블록("Jason") → _DEFAULTS 로 떨어진다. 'postgresql_catalog'/'postgresql_optuna' 는
+    공용 DB 라 항상 공유 블록을 쓴다. catalog.py 는 컨테이너 밖에서 도는 도구라 docker-compose.env 도, 프로세스
     환경변수도 쓰지 않는다 (블록만). 출처는 'prefect-block (...)' | 'default'.
     """
     if Credentials is not None:
@@ -97,8 +97,8 @@ def _section(section, member=None):
 
 
 def _dsn():
-    """공유 블록의 'catalog' 섹션 필드로 DSN 을 조립한다 (DSN 문자열을 통째로 저장하지 않음)."""
-    cfg, _ = _section("catalog")
+    """공유 블록의 'postgresql_catalog' 섹션 필드로 DSN 을 조립한다 (DSN 문자열을 통째로 저장하지 않음)."""
+    cfg, _ = _section("postgresql_catalog")
     host, _, port = cfg["endpoint"].partition(":")           # "postgres:5432"
     return f"postgresql://{cfg['username']}:{cfg['password']}@{host}:{port or '5432'}/{cfg['database']}"
 
@@ -505,7 +505,8 @@ def _build_parser():
         credentials — from ONE Prefect block "Jason" (via the Prefect profile's PREFECT_API_URL),
         else default. catalog.py runs outside the container: no env vars, no docker-compose.env.
           block "Jason" sections (nested dict, hidden via SecretDict):
-            minio = {endpoint, access_key, secret_key}; catalog/optuna = {endpoint, username, password, database}
+            minio = {endpoint, access_key, secret_key}
+            postgresql_catalog/postgresql_optuna = {endpoint, username, password, database}
           per-user MinIO (-m <member>): block "Jason-<member>" first, else shared "Jason"
                           (each member's bucket policy applies; catalog/optuna stay shared).
         """)
@@ -575,7 +576,7 @@ def _print_targets(cmd, with_files=False, member=None):
     """실행 전, 이 명령이 접속하는 대상 + 자격증명 출처(누구 키인지 포함)를 stderr 로 알린다."""
     print(f"[catalog.py v{__version__}] command: {cmd}", file=sys.stderr)
     if cmd in _PG_CMDS:
-        _, src = _section("catalog")
+        _, src = _section("postgresql_catalog")
         print(f"  PostgreSQL (catalog DB): {_mask_dsn(_dsn())}  [creds: {src}]", file=sys.stderr)
     if cmd in _MINIO_CMDS or (cmd == "tree" and with_files):
         m, src = _section("minio", member)

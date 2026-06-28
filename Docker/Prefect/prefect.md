@@ -1,6 +1,6 @@
 # Prefect Pipeline Orchestration on Docker
 
-<sub>rev. 502</sub>
+<sub>rev. 503</sub>
 
 > 공식 사이트: [https://www.prefect.io/](https://www.prefect.io/)
 
@@ -116,7 +116,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
        │
        └─ Credential block (admin, once)          # one block on server; needed before first run
           config → run-code credentials (one Prefect block, nested)
-                   Jason { minio · catalog · optuna }
+                   Jason { minio · postgresql_catalog · postgresql_optuna }
 
   shared : docker-compose.env                      # at Docker/Prefect/ root; server & dispatcher read ../docker-compose.env
   ```
@@ -560,12 +560,12 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
   from prefect.blocks.core import Block
   from prefect.blocks.fields import SecretDict
 
-  __version__ = "0.0.13"  # Semantic Versioning:  Version = Major.Minor.Patch
+  __version__ = "0.0.14"  # Semantic Versioning:  Version = Major.Minor.Patch
 
   class Credentials(Block):                          # ONE block holds everything as nested dicts; values hidden
       minio: SecretDict                              # endpoint, access_key, secret_key
-      catalog: SecretDict                            # endpoint, username, password, database
-      optuna: SecretDict                             # endpoint, username, password, database
+      postgresql_catalog: SecretDict                 # endpoint, username, password, database
+      postgresql_optuna: SecretDict                  # endpoint, username, password, database
 
   @flow(name="pipeline", flow_run_name="{member}@{git_commit_hash}")                                          # run name shows whose run (e.g. alice@a1b2c3d)
   def pipeline(git_repo: str, git_commit_hash: str, minio_key: str, minio_bucket: str = "datasets",
@@ -648,15 +648,15 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
 
 ### Credential Blocks
 
-  코드가 **MinIO** 와 PostgreSQL 의 `catalog`·`optuna` DB 에 접속할 자격증명을 **블록 단 한 개** 에 모읍니다 — **이름 하나** 로 저장·로드하고, 그 안에 `minio`·`catalog`·`optuna` 세 묶음을 **nested dict** 로 담습니다. 비밀 값은 `SecretDict` 로 가려집니다. server 에 한 번 저장하면 컨테이너·머신마다 따로 넣지 않아도 됩니다.
+  코드가 **MinIO** 와 PostgreSQL 의 `catalog`·`optuna` DB 에 접속할 자격증명을 **블록 단 한 개** 에 모읍니다 — **이름 하나** 로 저장·로드하고, 그 안에 `minio`·`postgresql_catalog`·`postgresql_optuna` 세 묶음을 **nested dict** 로 담습니다. 비밀 값은 `SecretDict` 로 가려집니다. server 에 한 번 저장하면 컨테이너·머신마다 따로 넣지 않아도 됩니다.
 
-  블록 클래스는 `Credentials` **하나** (`minio`·`catalog`·`optuna` 세 `SecretDict` 필드) 이고, 블록 이름도 `Jason` **하나** 입니다. **`pipeline.py`** 와 **`catalog.py`** (모든 팀원이 쓰는 공통 라이브러리) 가 같은 클래스를 정의해 씁니다 — Prefect 는 블록 타입을 클래스 이름 + 필드로 식별하므로 한쪽 `save`, 다른 쪽 `load` 가 맞물립니다. 팀원별로 나누려면 `Jason-<member>` 처럼 **이름만** 바꿉니다 (여전히 한 개).
+  블록 클래스는 `Credentials` **하나** (`minio`·`postgresql_catalog`·`postgresql_optuna` 세 `SecretDict` 필드) 이고, 블록 이름도 `Jason` **하나** 입니다. **`pipeline.py`** 와 **`catalog.py`** (모든 팀원이 쓰는 공통 라이브러리) 가 같은 클래스를 정의해 씁니다 — Prefect 는 블록 타입을 클래스 이름 + 필드로 식별하므로 한쪽 `save`, 다른 쪽 `load` 가 맞물립니다. 팀원별로 나누려면 `Jason-<member>` 처럼 **이름만** 바꿉니다 (여전히 한 개).
 
   ```text
   Jason                       # the one block name -- load this, get everything
-  ├─ minio    : endpoint, access_key, secret_key
-  ├─ catalog  : endpoint, username, password, database
-  └─ optuna   : endpoint, username, password, database
+  ├─ minio              : endpoint, access_key, secret_key
+  ├─ postgresql_catalog : endpoint, username, password, database
+  └─ postgresql_optuna  : endpoint, username, password, database
   ```
 
   ```python
@@ -665,8 +665,8 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
 
   Credentials(
       minio={"endpoint": "http://minio:9000", "access_key": "<MINIO_ACCESS_KEY>", "secret_key": "<MINIO_SECRET_KEY>"},
-      catalog={"endpoint": "postgres:5432", "username": "catalog_user", "password": "<CATALOG_DB_PASSWORD>", "database": "catalog"},
-      optuna={"endpoint": "postgres:5432", "username": "optuna_user", "password": "<OPTUNA_DB_PASSWORD>", "database": "optuna"},
+      postgresql_catalog={"endpoint": "postgres:5432", "username": "catalog_user", "password": "<CATALOG_DB_PASSWORD>", "database": "catalog"},
+      postgresql_optuna={"endpoint": "postgres:5432", "username": "optuna_user", "password": "<OPTUNA_DB_PASSWORD>", "database": "optuna"},
   ).save("Jason", overwrite=True)                   # "Jason" = the single block name
   ```
 
@@ -674,7 +674,7 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
   # Use — load ONE block by its name, read its sections (no DSN parsing).
   c = Credentials.load("Jason")                     # one name -> all credentials
   minio = c.minio.get_secret_value()                # {"endpoint": ..., "access_key": ..., "secret_key": ...}
-  db    = c.catalog.get_secret_value()              # {"endpoint": ..., "username": ..., "password": ..., "database": ...}
+  db    = c.postgresql_catalog.get_secret_value()   # {"endpoint": ..., "username": ..., "password": ..., "database": ...}
   ```
 
   `pipeline.py` 는 `Jason` 의 `minio` 섹션만, `catalog.py` 는 세 섹션을 모두 씁니다.
@@ -800,7 +800,7 @@ Flow Runs
 - **API** = Application Programming Interface
 - **UI** = User Interface (여기서는 Prefect 웹 대시보드)
 - **DB** = Database
-- **DSN** = Data Source Name — DB 접속에 필요한 정보 (드라이버·계정·호스트·포트·DB 이름) 를 한 줄로 엮은 접속 문자열입니다 (예: `postgresql://user:pass@host:5432/catalog`). 이 스택은 DSN 을 통째로 저장하지 않고 `Jason` 블록의 `catalog`·`optuna` 섹션 필드 (`endpoint`·`username`·`password`·`database`) 로 `catalog.py` 가 이 문자열을 조립합니다.
+- **DSN** = Data Source Name — DB 접속에 필요한 정보 (드라이버·계정·호스트·포트·DB 이름) 를 한 줄로 엮은 접속 문자열입니다 (예: `postgresql://user:pass@host:5432/catalog`). 이 스택은 DSN 을 통째로 저장하지 않고 `Jason` 블록의 `postgresql_catalog`·`postgresql_optuna` 섹션 필드 (`endpoint`·`username`·`password`·`database`) 로 `catalog.py` 가 이 문자열을 조립합니다.
 - **CPU / GPU** = Central / Graphics Processing Unit
 
 ## Appendix B. Prefect CLI

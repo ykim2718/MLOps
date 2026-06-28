@@ -1,5 +1,7 @@
 # Statement of Work (작업 명세서)
 
+<sub>rev. 10</sub>
+
 | Field | Content |
 |---|---|
 | Project | 다중 사용자 AI/ML modeling·실험 이력관리 플랫폼 구축 |

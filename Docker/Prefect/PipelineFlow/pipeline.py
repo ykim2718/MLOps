@@ -8,13 +8,13 @@ from prefect import flow, get_run_logger
 from prefect.blocks.core import Block
 from prefect.blocks.fields import SecretDict
 
-__version__ = "0.0.13"  # Semantic Versioning:  Version = Major.Minor.Patch
+__version__ = "0.0.14"  # Semantic Versioning:  Version = Major.Minor.Patch
 
 
 class Credentials(Block):                          # ONE block holds everything as nested dicts; values hidden
     minio: SecretDict                              # endpoint, access_key, secret_key
-    catalog: SecretDict                            # endpoint, username, password, database
-    optuna: SecretDict                             # endpoint, username, password, database
+    postgresql_catalog: SecretDict                 # endpoint, username, password, database
+    postgresql_optuna: SecretDict                  # endpoint, username, password, database
 
 
 @flow(name="pipeline", flow_run_name="{member}@{git_commit_hash}")                                          # run name shows whose run (e.g. alice@a1b2c3d)
