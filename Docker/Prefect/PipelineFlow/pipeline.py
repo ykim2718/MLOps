@@ -8,7 +8,7 @@ from prefect import flow, get_run_logger
 from prefect.blocks.core import Block
 from prefect.blocks.fields import SecretDict
 
-__version__ = "0.0.14"  # Semantic Versioning:  Version = Major.Minor.Patch
+__version__ = "0.0.15"  # Semantic Versioning:  Version = Major.Minor.Patch
 
 
 class Credentials(Block):                          # ONE block holds everything as nested dicts; values hidden
@@ -32,7 +32,7 @@ def pipeline(git_repo: str, git_commit_hash: str, minio_key: str, minio_bucket: 
         subprocess.run(["git", "-C", repo, "worktree", "add", "--detach", script, git_commit_hash], check=True)  # expand the commit into script/ (clean worktree)
 
         os.makedirs(data, exist_ok=True)                                                              # git didn't create data/
-        minio = Credentials.load("Jason").minio.get_secret_value()                                    # one block -> minio section (§6)
+        minio = Credentials.load(member).minio.get_secret_value()                                     # this run's member -> their block, minio section (§6)
         s3 = boto3.client("s3", endpoint_url=minio["endpoint"],
                           aws_access_key_id=minio["access_key"],
                           aws_secret_access_key=minio["secret_key"])

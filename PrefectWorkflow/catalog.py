@@ -34,15 +34,15 @@ PostgreSQL `catalog` DB 의 `datasets` 테이블을 다룬다.
        python catalog.py objects  sydney_202605           # MinIO 에 실제 있는 객체 나열
 
 자격증명·연결 주소는 Prefect 프로필(`prefect config set PREFECT_API_URL=...`)로 연결된 Prefect
-서버의 **블록 1개**(`Jason`)에서 가져온다 → _section() 참고. 이 블록은 minio·postgresql_catalog·
-postgresql_optuna 세 섹션(nested dict)을 담고, 비밀 값은 SecretDict 로 가려진다. catalog.py 는 컨테이너 밖에서 도는
-도구라 docker-compose.env(Docker/Prefect/ 에 있어 찾을 수 없음)도, 프로세스 환경변수도 쓰지
-않는다. 서버 미연결/블록 없음이면 default(localhost)로 떨어진다(관리자가 Credentials(...).save("Jason")
-으로 등록해 둔 경우 인증되어 동작).
+서버의 **팀원 블록**(블록 이름 = 팀원 이름, 예 `Jason`)에서 가져온다 → _section() 참고. 각 팀원 블록은
+minio(자기 키) + postgresql_catalog·postgresql_optuna(공용 DB, 모든 팀원 블록에 같은 값) 세 섹션
+(nested dict)을 담고, 비밀 값은 SecretDict 로 가려진다. catalog.py 는 컨테이너 밖에서 도는 도구라
+docker-compose.env(Docker/Prefect/ 에 있어 찾을 수 없음)도, 프로세스 환경변수도 쓰지 않는다. member 가
+없거나 서버 미연결/블록 없음이면 default(localhost)로 떨어진다(관리자가 팀원마다
+`python credentials.py <member>.json` 으로 등록해 둔 경우 인증되어 동작). Credentials 클래스는 credentials.py 에 있다.
 
-MinIO 키는 사용자별로 쓸 수 있다: `-m <member>` 를 주면 블록 `Jason-<member>` 를 먼저 찾아 그
-사용자의 minio 섹션 키(버킷 policy)로 접속하고, 없으면 공유 블록 `Jason` 으로 떨어진다(catalog·
-optuna 섹션은 항상 공유) → _section().
+**DB·MinIO 모두 팀원 블록에서 온다**: `-m <member>`(라이브러리에선 set_member())로 어느 팀원 블록을
+읽을지 정한다 — 모든 명령에 -m 가 있다. catalog·optuna 는 공용 DB 라 어느 팀원 블록이든 같은 값 → _section().
 """
 import argparse
 import json
@@ -54,20 +54,15 @@ import textwrap
 import psycopg2
 from psycopg2.extras import Json, RealDictCursor
 
-__version__ = "0.0.18"  # Semantic Versioning:  Version = Major.Minor.Patch
+__version__ = "0.0.20"  # Semantic Versioning:  Version = Major.Minor.Patch
 
-BLOCK_NAME = "Jason"   # the one credential block (per-member: "Jason-<member>")
+_MEMBER = None   # block name = team member's name; set by CLI -m or set_member(), used to read creds
 
-# Prefect is optional: import lazily so catalog.py still runs (on _DEFAULTS) without prefect installed.
+# The Credentials block class lives in credentials.py (Prefect/ folder). Import is optional so catalog.py
+# still runs (on _DEFAULTS) without prefect/credentials available.
 try:
-    from prefect.blocks.core import Block
-    from prefect.blocks.fields import SecretDict
-
-    class Credentials(Block):              # must match pipeline.py exactly (class name + fields)
-        minio: SecretDict                  # endpoint, access_key, secret_key
-        postgresql_catalog: SecretDict     # endpoint, username, password, database
-        postgresql_optuna: SecretDict      # endpoint, username, password, database
-except Exception:                          # prefect missing -> _section() falls back to _DEFAULTS
+    from credentials import Credentials    # shared block class (defined in Prefect/credentials.py)
+except Exception:                          # prefect/credentials missing -> _section() falls back to _DEFAULTS
     Credentials = None
 
 _DEFAULTS = {
@@ -77,27 +72,33 @@ _DEFAULTS = {
 }
 
 
-def _section(section, member=None):
-    """한 섹션(dict)을 (값, 출처) 로 해석한다: 블록 1개("Jason") 를 불러 그 섹션을 돌려준다.
+def set_member(member):
+    """라이브러리 사용 시 자격증명을 읽을 팀원 블록 이름을 지정한다 (CLI 는 -m 가 설정)."""
+    global _MEMBER
+    _MEMBER = member
 
-    'minio' 는 member 블록("Jason-<member>") 을 먼저 찾아 그 사용자의 MinIO 권한(버킷 policy)으로
-    접속하고, 없으면 공유 블록("Jason") → _DEFAULTS 로 떨어진다. 'postgresql_catalog'/'postgresql_optuna' 는
-    공용 DB 라 항상 공유 블록을 쓴다. catalog.py 는 컨테이너 밖에서 도는 도구라 docker-compose.env 도, 프로세스
-    환경변수도 쓰지 않는다 (블록만). 출처는 'prefect-block (...)' | 'default'.
+
+def _section(section, member=None):
+    """한 섹션(dict)을 (값, 출처) 로 해석한다 — 블록 이름 = 팀원 이름.
+
+    member(없으면 전역 _MEMBER)의 블록 `Credentials.load(member)` 에서 그 섹션을 돌려준다. 각 팀원 블록은
+    minio(자기 키) + postgresql_catalog·postgresql_optuna(공용 DB, 모든 팀원 블록에 같은 값) 세 섹션을 담는다.
+    catalog.py 는 컨테이너 밖에서 도는 도구라 docker-compose.env 도, 프로세스 환경변수도 쓰지 않는다 (블록만).
+    member 가 없거나 prefect 미설치/서버 미연결/블록 없음이면 _DEFAULTS(localhost) 로 떨어진다. 출처는
+    'prefect-block (member=...)' | 'default'.
     """
-    if Credentials is not None:
-        names = ([f"{BLOCK_NAME}-{member}"] if (member and section == "minio") else []) + [BLOCK_NAME]
-        for name in names:
-            try:
-                d = getattr(Credentials.load(name), section).get_secret_value()   # SecretDict -> plain dict
-                return d, (f"prefect-block (member={member})" if name != BLOCK_NAME else "prefect-block (shared)")
-            except Exception:                                                      # block missing / server down
-                continue
+    member = member or _MEMBER
+    if Credentials is not None and member:
+        try:
+            d = getattr(Credentials.load(member), section).get_secret_value()      # SecretDict -> plain dict
+            return d, f"prefect-block (member={member})"
+        except Exception:                                                          # block missing / server down
+            pass
     return _DEFAULTS[section], "default"
 
 
 def _dsn():
-    """공유 블록의 'postgresql_catalog' 섹션 필드로 DSN 을 조립한다 (DSN 문자열을 통째로 저장하지 않음)."""
+    """팀원 블록의 'postgresql_catalog' 섹션 필드로 DSN 을 조립한다 (DSN 문자열을 통째로 저장하지 않음)."""
     cfg, _ = _section("postgresql_catalog")
     host, _, port = cfg["endpoint"].partition(":")           # "postgres:5432"
     return f"postgresql://{cfg['username']}:{cfg['password']}@{host}:{port or '5432'}/{cfg['database']}"
@@ -403,8 +404,8 @@ def tree():
 def _s3(member=None):
     """MinIO(S3 호환) 클라이언트. 블록의 'minio' 섹션(endpoint·access·secret)을 그대로 쓴다.
 
-    member 를 주면 그 사용자의 블록("Jason-<member>")의 minio 키로 접속해 버킷 권한이 사용자별로
-    적용된다. 없으면 공유 블록("Jason") → _DEFAULTS 로 떨어진다.
+    member(없으면 전역 _MEMBER)의 블록 minio 키로 접속해 버킷 권한이 팀원별로 적용된다. member 가
+    없거나 블록이 없으면 _DEFAULTS 로 떨어진다.
     """
     import boto3
     m, _ = _section("minio", member)                  # endpoint/access_key/secret_key (per-user, fallback shared)
@@ -473,9 +474,9 @@ def _cmd_tree(dataset_id=None, with_files=False, member=None):
 
 
 def _add_member(sp):
-    """MinIO 를 건드리는 명령에 -m/--member 를 붙인다 (그 사용자의 MinIO 키로 접속)."""
+    """모든 명령에 -m/--member 를 붙인다 (블록 이름 = 팀원 이름; 그 팀원 블록에서 DB·MinIO 자격증명을 읽음)."""
     sp.add_argument("-m", "--member", type=str, default=None,
-                    help="use this member's MinIO keys (minio-*-<member>), else the shared key")
+                    help="team member name = credential block name; read DB/MinIO creds from that block")
 
 
 def _build_parser():
@@ -489,7 +490,7 @@ def _build_parser():
           python catalog.py download sydney_202605 v2 ./out   # version omitted -> latest; dest -> ./<id>
           python catalog.py remove sydney_202605 v2 --yes     # version omitted -> whole dataset
           python catalog.py objects sydney_202605             # raw MinIO objects (not the catalog)
-          python catalog.py download sydney_202605 v2 -m alice  # MinIO ops as member 'alice' (-m)
+          python catalog.py list -m alice                     # read alice's block for DB/MinIO creds (-m, any command)
 
         upload spec.json:
           {"dataset_id": "sydney_202605", "version": "v2", "path": "./out",
@@ -502,13 +503,13 @@ def _build_parser():
           list/versions/find = PostgreSQL    objects = MinIO
           upload/download/remove = both      tree = PostgreSQL (+MinIO with --files)
 
-        credentials — from ONE Prefect block "Jason" (via the Prefect profile's PREFECT_API_URL),
-        else default. catalog.py runs outside the container: no env vars, no docker-compose.env.
-          block "Jason" sections (nested dict, hidden via SecretDict):
+        credentials — from the team member's Prefect block (block name = member; via the
+        profile's PREFECT_API_URL), else default. no env vars, no docker-compose.env.
+          block "<member>" sections (nested dict, hidden via SecretDict):
             minio = {endpoint, access_key, secret_key}
             postgresql_catalog/postgresql_optuna = {endpoint, username, password, database}
-          per-user MinIO (-m <member>): block "Jason-<member>" first, else shared "Jason"
-                          (each member's bucket policy applies; catalog/optuna stay shared).
+          -m <member> picks the block (DB + MinIO). catalog/optuna are the shared DB,
+                          duplicated identically in every member block (any member's works).
         """)
     p = argparse.ArgumentParser(
         prog="catalog.py",
@@ -519,10 +520,12 @@ def _build_parser():
     sub = p.add_subparsers(dest="cmd", required=True,    # exactly one command (mutually exclusive)
                            metavar="<command>")
 
-    sub.add_parser("list", help="[PostgreSQL] list datasets (latest-version summary)")
+    sp = sub.add_parser("list", help="[PostgreSQL] list datasets (latest-version summary)")
+    _add_member(sp)
 
     sp = sub.add_parser("versions", help="[PostgreSQL] show one dataset's version history")
     sp.add_argument("dataset_id", type=str)
+    _add_member(sp)
 
     sp = sub.add_parser("tree", help="[PostgreSQL; --files also MinIO] dataset > version tree")
     sp.add_argument("dataset_id", type=str, nargs="?", default=None,
@@ -535,6 +538,7 @@ def _build_parser():
     sp.add_argument("dataset_id", type=str)
     sp.add_argument("filters", type=str, nargs="*", default=[], metavar="key=value",
                     help="metadata filters")
+    _add_member(sp)
 
     sp = sub.add_parser("upload", help="[MinIO + PostgreSQL] upload files + register, from a JSON spec")
     sp.add_argument("spec", type=str, metavar="spec.json")
@@ -591,6 +595,7 @@ def _main(argv):
     a = parser.parse_args(argv)
     cmd = a.cmd                                             # exactly one command (required)
     member = getattr(a, "member", None)
+    set_member(member)                                     # DB ops (_dsn) read creds from this member's block
     _print_targets(cmd, with_files=getattr(a, "files", False), member=member)
 
     if cmd == "list":
