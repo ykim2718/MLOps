@@ -1,6 +1,6 @@
 # Prefect Pipeline Orchestration on Docker
 
-<sub>rev. 506</sub>
+<sub>rev. 507</sub>
 
 > 공식 사이트: [https://www.prefect.io/](https://www.prefect.io/)
 
@@ -115,8 +115,10 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
               git_repo · git_commit_hash · minio_key · minio_bucket · member · payload
        │
        └─ Credential blocks (admin, once)         # one block per team member on server; needed before first run
+          files  : credentials.py · <member>.json (e.g. Jason.json)
+          run    : python credentials.py Jason.json   # register one block; file stem = member name
           config → run-code credentials (one block per member, nested)
-                   <member> { minio · postgresql_catalog · postgresql_optuna }   # block name = member (e.g. Jason)
+                   <member> { minio · postgresql_catalog · postgresql_optuna }   # block name = member
 
   shared : docker-compose.env                      # at Docker/Prefect/ root; server & dispatcher read ../docker-compose.env
   ```
@@ -125,7 +127,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
 
 ### Setup Files
 
-  설치 파일은 세 구성요소 + 공유 env 로 나뉩니다. 각 구성요소의 파일과 실행 명령을 함께 적습니다.
+  설치 파일은 세 구성요소 + 자격증명 + 공유 env 로 나뉩니다. 각 묶음의 파일과 실행 명령을 함께 적습니다.
 
   1) **[PREFECT SERVER](#3-prefect-server-container)** — 제어 노드 1대 · 공식 이미지라 빌드 없음
 
@@ -179,6 +181,19 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
      ```powershell
      docker build -f Dockerfile.pipeline_flow -t pipeline-flow:latest .   # build the image once
      prefect deploy --prefect-file pipelineflow-high.yml --name pipelineflow-high --no-prompt   # register a deployment (host shell, once; repeat for -low)
+     ```
+
+  4) **[Credentials](#6-credentials)** — 팀원별 자격증명 블록 (admin · 팀원마다 1회) · `Docker/Prefect/` 루트
+
+     ```
+     credentials.py                    Credentials block class + JSON register CLI ([Appendix G](#appendix-g-credentialspy))
+     <member>.json                     per-member credential JSON (e.g. Jason.json)
+     ```
+
+     Run (from `Docker/Prefect/`, `PREFECT_API_URL` → server):
+
+     ```powershell
+     python credentials.py Jason.json     # save a Credentials block named "Jason" (the file stem)
      ```
 
   - **공유** — `Docker/Prefect/` 루트에 두고 server·dispatcher compose 가 `../docker-compose.env` 로 읽음
