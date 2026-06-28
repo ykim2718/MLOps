@@ -1,19 +1,19 @@
 {
   "minio": {
     "endpoint": "http://minio:9000",
-    "access_key": "<MINIO_ACCESS_KEY>",
-    "secret_key": "<MINIO_SECRET_KEY>"
+    "access_key": "CHANGE_ME",
+    "secret_key": "CHANGE_ME"
   },
   "postgresql_catalog": {
     "endpoint": "postgres:5432",
-    "username": "<CATALOG_USER>",
-    "password": "<CATALOG_DB_PASSWORD>",
+    "username": "CHANGE_ME",
+    "password": "CHANGE_ME",
     "database": "catalog"
   },
   "postgresql_optuna": {
     "endpoint": "postgres:5432",
-    "username": "<OPTUNA_USER>",
-    "password": "<OPTUNA_DB_PASSWORD>",
+    "username": "CHANGE_ME",
+    "password": "CHANGE_ME",
     "database": "optuna"
   }
 }
