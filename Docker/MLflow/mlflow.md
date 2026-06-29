@@ -1,6 +1,6 @@
 # MLflow — Experiment Tracking & Model Registry
 
-<sub>rev. 100</sub>
+<sub>rev. 101</sub>
 
 MLflow 는 실험의 **파라미터·지표를 추적** 하고, 학습된 **모델을 레지스트리로 관리·배포·서빙** 하는 도구입니다. 이 스택에서는 저장소를 두 곳으로 나눠, 가벼운 메타데이터는 메타데이터 DB 에, 실제 산출물은 오브젝트 스토리지에 둡니다.
 
@@ -55,7 +55,8 @@ services:
       bash -c "pip install --quiet psycopg2-binary boto3 &&
                mlflow server --host 0.0.0.0 --port 5000
                --backend-store-uri postgresql://$$POSTGRES_USER:$$POSTGRES_PASSWORD@postgres:5432/mlflow
-               --artifacts-destination s3://mlflow"
+               --artifacts-destination s3://mlflow
+               --allowed-hosts '*' --cors-allowed-origins '*'"
     env_file:
       - docker-compose.env          # POSTGRES_USER/PASSWORD, AWS_ACCESS_KEY_ID/SECRET, MLFLOW_S3_ENDPOINT_URL
     ports:
@@ -72,6 +73,7 @@ networks:
 - `name: mlflow` 는 프로젝트명을 파일에 굳혀 둡니다. 이 값이 컨테이너·볼륨 이름의 앞가지가 되어, `-p` 를 붙이지 않아도 (다른 폴더에서 띄워도) 늘 같은 프로젝트·같은 볼륨에 붙으므로 쌓아 둔 데이터가 어긋나지 않습니다.
 - `image: ghcr.io/mlflow/mlflow:latest` 는 MLflow 공식 이미지를 씁니다.
 - `command` 는 컨테이너가 뜰 때 PostgreSQL/S3 드라이버를 설치한 뒤 MLflow server 를 띄웁니다. backend 는 `postgres` 서비스명으로 `mlflow` DB 에, artifact 는 `s3://mlflow` 에 연결합니다.
+- `--allowed-hosts '*' --cors-allowed-origins '*'` 는 MLflow 3.x 의 localhost-only 보안 미들웨어를 풀어 줍니다. 이게 없으면 Docker 포트 매핑을 거친 (= loopback 이 아닌) 접속을 미들웨어가 연결째 끊어 host 의 `:5000` health·UI 접속이 막힙니다 (신뢰된 내부망·스터디 전제라 `*` 로 전체 허용; 더 좁히려면 호스트 목록을 나열).
 - `env_file` 은 backend 계정 (`POSTGRES_USER`/`POSTGRES_PASSWORD`) 과 artifact 접속 키 (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`), 그리고 MinIO endpoint (`MLFLOW_S3_ENDPOINT_URL`) 를 주입합니다.
 - `networks: mlops` 로 같은 호스트의 `postgres` · `minio` 와 서비스명으로 통신합니다. 그 둘은 별도 compose 라 `depends_on` 을 걸 수 없으므로, `restart: unless-stopped` 로 준비될 때까지 자동 재시도합니다.
 

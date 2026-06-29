@@ -9,7 +9,8 @@ services:
       bash -c "pip install --quiet psycopg2-binary boto3 &&
                mlflow server --host 0.0.0.0 --port 5000
                --backend-store-uri postgresql://$$POSTGRES_USER:$$POSTGRES_PASSWORD@postgres:5432/mlflow
-               --artifacts-destination s3://mlflow"
+               --artifacts-destination s3://mlflow
+               --allowed-hosts '*' --cors-allowed-origins '*'"
     env_file:
       - docker-compose.env          # POSTGRES_USER/PASSWORD, AWS_ACCESS_KEY_ID/SECRET, MLFLOW_S3_ENDPOINT_URL
     ports:
