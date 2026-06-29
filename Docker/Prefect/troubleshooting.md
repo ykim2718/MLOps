@@ -1,6 +1,6 @@
 # Troubleshooting
 
-<sub>rev. 11</sub>
+<sub>rev. 12</sub>
 
 운영 중 마주친 문제를 증상·원인·진단·해결 순으로 모읍니다. 새 이슈는 H2 항목으로 덧붙입니다.
 
@@ -58,3 +58,47 @@
   prefect deploy --prefect-file pipelineflow-high.yml --name pipelineflow-high --no-prompt
   ```
 - **확인** — `./healthcheck.sh` 의 두 deployment 줄이 `[ OK ]` 로 바뀝니다. pool tier 와 deployment suffix 가 맞아야 (`low_performance`↔`pipelineflow-low`, `high_performance`↔`pipelineflow-high`) 통과합니다.
+
+## Stale OFFLINE workers never pruned (old server yaml without worker_pruner sidecar)
+
+- **증상** — healthcheck 의 `dispatchers (server records)` 줄에 `N offline(stale)` 이 하루가 지나도 사라지지 않고 계속 쌓입니다.
+- **원인** — Prefect server 는 죽은 worker 를 OFFLINE 으로 표시만 하고 지우지 않습니다. 청소는 server stack 의 `worker_pruner` 사이드카 (`prune_loop.sh`, 1시간 주기) 가 맡습니다. 예전 `docker-compose.server.yml` 로 띄운 stack 에는 이 사이드카가 없어 stale 이 영영 남습니다. server 결함이 아니라 **사이드카 부재**입니다.
+- **진단** — 사이드카 컨테이너 유무를 봅니다.
+
+  ```bash
+  docker ps -a --filter name=worker_pruner
+  # 아무것도 안 나오면 예전 yaml 확정 (사이드카 미기동)
+  ```
+- **해결** — `prefect_server` 는 그대로 두고 사이드카만 더해 올립니다 (server 무중단). server 의 `~/prefect/PrefectServer/` 에 ① `prune_loop.sh` (repo 의 PrefectServer 파일) 를 `docker-compose.server.yml` 과 같은 폴더에 두고, ② compose 의 `services:` 아래에 사이드카 블록을 더합니다.
+
+  ```yaml
+  worker_pruner:
+    image: alpine:3                     # tiny; installs curl + jq at start (no python image)
+    depends_on:
+      - prefect_server
+    environment:
+      - PREFECT_API_URL=http://prefect_server:4200/api   # internal server API the sidecar prunes via
+      - PRUNE_INTERVAL_SECONDS=3600                       # prune cadence (hourly)
+    volumes:
+      - ./prune_loop.sh:/prune_loop.sh:ro
+    command: ["sh", "-c", "tr -d '\\r' < /prune_loop.sh | sh"]   # strip CR (Windows EOL) then run
+    networks:
+      - mlops
+    restart: unless-stopped
+  ```
+
+  그 서비스만 지정해 올리면 이미 떠 있는 `prefect_server` 는 정의가 같아 건드리지 않습니다.
+
+  ```bash
+  cd ~/prefect/PrefectServer
+  docker compose -f docker-compose.server.yml up -d worker_pruner
+  ```
+- **확인** — 사이드카가 뜨고 곧 stale 을 비웁니다.
+
+  ```bash
+  docker logs --tail 20 prefect-server-worker_pruner-1
+  #   -> "worker_pruner: pruning OFFLINE workers every 3600s ..." 시작 줄
+  #   -> 곧 "worker_pruner: pruned offline <pool>/DockerWorker ..." 로 정리
+  ```
+
+  이후 `./healthcheck.sh` 의 `offline(stale)` 수가 0 으로 줄어듭니다. 지금 쌓인 것을 기다리지 않고 비우려면 한 사이클을 손으로 돌립니다 (pool 별 worker filter → OFFLINE 이름 → `curl -X DELETE`).
