@@ -1,6 +1,6 @@
 # Troubleshooting
 
-<sub>rev. 10</sub>
+<sub>rev. 11</sub>
 
 운영 중 마주친 문제를 증상·원인·진단·해결 순으로 모읍니다. 새 이슈는 H2 항목으로 덧붙입니다.
 
@@ -37,3 +37,24 @@
                                 (**) denotes a paused pool
   ```
 - **추가 점검** — 빈 응답이 계속되면 4200 을 다른 프로세스가 잡고 있는지 봅니다. `netstat -ano | findstr :4200` 의 PID 가 Docker Desktop (`com.docker.backend`) 이 아니면 그 프로세스가 가로채는 것이니, 끄거나 server 게시 포트를 바꿉니다.
+
+## Deployment shows "(not registered)" in healthcheck after a successful prefect deploy
+
+- **증상** — `prefect deploy` 가 `Deployment '...' successfully created` 로 끝났는데도 `./healthcheck.sh` 가 `deployment pipeline/pipelineflow-<tier> (not registered - prefect deploy) [FAIL]` 를 냅니다.
+- **원인** — healthcheck 는 deployment 이름을 **pool 이름에서 유도**합니다 — `tier="${name%%_*}"`, `dep="pipeline/pipelineflow-$tier"`. 즉 pool `low_performance` 는 `pipelineflow-low`, `high_performance` 는 `pipelineflow-high` 를 기대합니다. `prefect deploy --name` 에 다른 이름 (예: `pipeline-low`·`pipeline-flow`) 을 주면 deployment 는 정상 생성되지만 규칙과 어긋나 healthcheck 가 못 찾습니다. 실패가 아니라 **이름 불일치**입니다.
+- **진단** — 실제 이름을 기대값과 견줍니다.
+
+  ```bash
+  prefect deployment ls
+  # name이 pipelineflow-low / pipelineflow-high 가 아니라 pipeline-low / pipeline-flow 면 불일치 확정
+  ```
+- **해결** — 잘못된 이름을 지우고 규칙대로 재배포합니다 (`--name` 은 `pipelineflow-<tier>`).
+
+  ```bash
+  cd ~/prefect/PipelineFlow
+  prefect deployment delete 'pipeline/pipeline-low'
+  prefect deployment delete 'pipeline/pipeline-flow'
+  prefect deploy --prefect-file pipelineflow-low.yml  --name pipelineflow-low  --no-prompt
+  prefect deploy --prefect-file pipelineflow-high.yml --name pipelineflow-high --no-prompt
+  ```
+- **확인** — `./healthcheck.sh` 의 두 deployment 줄이 `[ OK ]` 로 바뀝니다. pool tier 와 deployment suffix 가 맞아야 (`low_performance`↔`pipelineflow-low`, `high_performance`↔`pipelineflow-high`) 통과합니다.
