@@ -1,0 +1,5 @@
+# downloaded data set (re-fetch with: python download_data.py)
+data/
+# run artifacts (model, parquet, predictions)
+work/
+__pycache__/
