@@ -1,6 +1,6 @@
 # AI/ML Workflow Automation — Prefect + MinIO + MLflow + Optuna + PostgreSQL
 
-<sub>rev. 20</sub>
+<sub>rev. 21</sub>
 
 Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환경입니다. 이 문서는 **전체 워크플로우의 인덱스 (개요)** 이고, 도구별 상세는 컴포넌트 문서로 잇습니다.
 
@@ -56,7 +56,7 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
   /tmp/run-<rand>/                 # per-run temp dir (base; removed after the run)
   ├─ repo/                         # git init + fetch --depth 1 origin <git_commit_hash> (shallow git db)
   ├─ script/                       # git worktree add --detach script <git_commit_hash> (clean worktree at the commit)
-  │  ├─ my_flow.py                 # payload — the team's entry (run: python my_flow.py --data ../data ...)
+  │  ├─ my_flow.py                 # payload — the team's entry (run: python my_flow.py --data_folder ../data ...)
   │  └─ ...                        # the rest of the team repo at <git_commit_hash>
   └─ data/                         # MinIO download target (bucket/key → here)
      └─ <object>                   # e.g. Bennelong Point
@@ -155,7 +155,7 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
 
 ```text
 script/                          # team repo, git-delivered into a per-run worktree (§6)
-├─ my_flow.py                    # payload entry — @flow wires the stages (run: python my_flow.py --data ...)
+├─ my_flow.py                    # payload entry — @flow wires the stages (run: python my_flow.py --data_folder ...)
 ├─ train_dp.py · train_fe.py · train.py · train_eval.py   # train branch: dp → fe → train → eval
 ├─ test_dp.py  · test_fe.py  · test.py  · test_eval.py    # test branch:  dp → fe → test  → eval
 ├─ optuna.json                   # tuning config (n_trials · direction · fe)
@@ -226,7 +226,7 @@ study.optimize(objective, n_trials=20)
 
 ### ML Payload Sample
 
-  git 으로 전달되어 컨테이너 안에서 `python my_flow.py` 로 실행되는 **실제 ML 코드** 예시입니다. 단계 (dp·fe·train·test) 를 **Prefect `@task`** 로 감싸 `@flow` 로 묶으면, 컨테이너 env 의 `PREFECT_API_URL` 덕분에 이 payload 가 **자기 flow run 과 task** 를 server 에 보고해 **대시보드에서 단계별로** 보입니다 (orchestrator run 과는 별개 flow run). `flow_run_name` 을 `member`·커밋으로 지으면 **누구의 run 인지** 도 갈립니다. orchestrator ([prefect.md](../Docker/Prefect/prefect.md) §4.3) 가 이 코드를 하위 프로세스로 부릅니다 — 바뀌는 부분은 이 payload, `git_commit_hash` 으로 돌릴 버전을 지정합니다. orchestrator 가 데이터를 `data/` 로 미리 받아 두고 실행 정보 (`--git_repo`·`--git_commit_hash`·`--member`) 와 그 경로 (`--data`) 를 CLI 인자로 넘기므로, payload 는 `argparse` 로 받아 씁니다.
+  git 으로 전달되어 컨테이너 안에서 `python my_flow.py` 로 실행되는 **실제 ML 코드** 예시입니다. 단계 (dp·fe·train·test) 를 **Prefect `@task`** 로 감싸 `@flow` 로 묶으면, 컨테이너 env 의 `PREFECT_API_URL` 덕분에 이 payload 가 **자기 flow run 과 task** 를 server 에 보고해 **대시보드에서 단계별로** 보입니다 (orchestrator run 과는 별개 flow run). `flow_run_name` 을 `member`·커밋으로 지으면 **누구의 run 인지** 도 갈립니다. orchestrator ([prefect.md](../Docker/Prefect/prefect.md) §4.3) 가 이 코드를 하위 프로세스로 부릅니다 — 바뀌는 부분은 이 payload, `git_commit_hash` 으로 돌릴 버전을 지정합니다. orchestrator 가 데이터를 `data/` 로 미리 받아 두고 실행 정보 (`--git_repo`·`--git_commit_hash`·`--member`) 와 그 경로 (`--data_folder`) 를 CLI 인자로 넘기므로, payload 는 `argparse` 로 받아 씁니다.
 
   ```python
   # my_flow.py — git-delivered ML payload; Prefect @task makes each step show in the UI (illustrative)
@@ -237,7 +237,7 @@ study.optimize(objective, n_trials=20)
   from sklearn.metrics import accuracy_score
 
   @task
-  def data_prep(data_dir):                                 # dp — read the files pipeline.py downloaded into --data (Step B)
+  def data_prep(data_dir):                                 # dp — read the files pipeline.py downloaded into --data_folder (Step B)
       return load_dataset(data_dir)
 
   @task
@@ -266,10 +266,10 @@ study.optimize(objective, n_trials=20)
 
   if __name__ == "__main__":
       p = argparse.ArgumentParser()                        # pipeline.py passes these as CLI args (§4.3)
-      p.add_argument("--data"); p.add_argument("--member", default=""); p.add_argument("--git_commit_hash", default="")
+      p.add_argument("--data_folder"); p.add_argument("--member", default=""); p.add_argument("--git_commit_hash", default="")
       p.add_argument("--git_repo", default="")             # accepted for completeness; unused here
       a = p.parse_args()
-      my_flow(a.data, a.member, a.git_commit_hash)
+      my_flow(a.data_folder, a.member, a.git_commit_hash)
   ```
 
   > 데이터 다운로드용 `MINIO_*` 는 orchestrator (`pipeline.py`) 가 쓰고, payload 가 직접 쓰는 자격증명 (`catalog`·`optuna`·MLflow 아티팩트용) 은 [prefect.md](../Docker/Prefect/prefect.md) §5 처럼 `Secret.load(...)` 로 받습니다. MLflow 는 git repo 안에서 돌면 git 커밋을 자동 태그하므로 모델 ↔ 코드가 연결됩니다 (§7).

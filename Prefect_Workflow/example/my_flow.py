@@ -2,7 +2,7 @@
 
 This is the team payload that pipeline.py (the orchestrator, prefect.md §4.3) runs as:
 
-    python my_flow.py --git_repo <r> --git_commit_hash <c> --member <m> --data <dir>
+    python my_flow.py --git_repo <r> --git_commit_hash <c> --member <m> --data_folder <dir>
 
 It wires every example/ stage (train_dp/fe/train/eval + test_dp/fe/test/eval) and
 optuna.json into one Prefect flow, running a small but real LightGBM sample so the
@@ -108,7 +108,7 @@ def my_flow(data_dir: str, member: str = "local", git_commit_hash: str = "dryrun
     concurrently (e.g. test_dp alongside train_fe) while preserving dependencies.
     """
     log = get_run_logger()
-    work = os.path.join(data_dir, "work")                        # all stage I/O lives under --data (cleaned with the run)
+    work = os.path.join(data_dir, "work")                        # all stage I/O lives under --data_folder (cleaned with the run)
     os.makedirs(work, exist_ok=True)
     log.info(f"dry-run start: member={member} commit={git_commit_hash} repo={git_repo or '-'} work={work}")
 
@@ -161,9 +161,9 @@ def _publish_artifacts(summary: dict, train_meta: dict):
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()                               # pipeline.py passes these as CLI args (§4.3)
-    p.add_argument("--data", required=True)
+    p.add_argument("--data_folder", required=True)
     p.add_argument("--member", default="local")
     p.add_argument("--git_commit_hash", default="dryrun")
     p.add_argument("--git_repo", default="")                    # accepted for completeness; unused here
     a = p.parse_args()
-    my_flow(a.data, member=a.member, git_commit_hash=a.git_commit_hash, git_repo=a.git_repo)
+    my_flow(a.data_folder, member=a.member, git_commit_hash=a.git_commit_hash, git_repo=a.git_repo)
