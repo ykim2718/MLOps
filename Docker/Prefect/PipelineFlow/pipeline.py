@@ -9,7 +9,7 @@ from prefect import flow, get_run_logger
 from prefect.blocks.core import Block
 from prefect.blocks.fields import SecretDict
 
-__version__ = "0.0.18"  # Semantic Versioning:  Version = Major.Minor.Patch
+__version__ = "0.0.19"  # Semantic Versioning:  Version = Major.Minor.Patch
 
 
 class Credentials(Block):              # ONE block holds everything as nested dicts; values hidden
@@ -45,9 +45,9 @@ def pipeline(git_repo: str, git_commit_hash: str, minio_key: str, minio_bucket: 
         s3.download_file(minio_bucket, minio_key, str(local))
 
         # run the team's payload in script/; run identity passed as CLI args; output streams to this run's logs.
-        subprocess.run(["python", payload,
+        subprocess.run(["python", payload, "--member", member,
                         "--git_repo", git_repo, "--git_commit_hash", git_commit_hash,
-                        "--member", member, "--data_folder", data], cwd=script, check=True)
+                        "--data_folder", data], cwd=script, check=True)
     except subprocess.CalledProcessError as e:     # payload exited non-zero (crashed)
         # tag the failure with whose run + message; re-raise -> run marked Failed, logs kept in the UI.
         log.error(f"payload {payload} crashed (exit {e.returncode}) for {member}@{git_commit_hash}: {e}")
