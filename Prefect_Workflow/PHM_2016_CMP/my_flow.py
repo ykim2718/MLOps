@@ -6,12 +6,15 @@ thickness / etch-rate prediction. Run as the team payload that pipeline.py drive
 
     python my_flow.py --git_repo <r> --git_commit_hash <c> --member <m> --data_folder ./data
 
-Pipeline (a small DAG): load_config -> prepare -> train -> (evaluate || predict).
-prepare reads CMP-training-*.csv (25 columns x1..x25, no header) and the
-CMP-training-removalrate.csv target, aggregates each (WAFER_ID, STAGE) trajectory
-into per-wafer statistics, and carves a validation split. train runs Optuna over
-LGBMRegressor; evaluate scores RMSE/MAE/R2 on the held-out wafers; predict (if a
-test set is present) writes the challenge-format CMP-test-removalrate.csv.
+Pipeline (a small DAG): load_config -> train_prepare -> train_featurize -> train ->
+(validate || test); parity_plot AND publish_artifacts both fire right after each of
+train / validate / test. train_prepare reads CMP-training-*.csv (25 columns x1..x25) + the
+CMP-training-removalrate.csv target and sub-samples wafers; train_featurize scales each sensor
+to 0-1 (saved as scaler.json), folds each (WAFER_ID, STAGE) trajectory into 155 features, and
+carves a validation split. train runs Optuna over LGBMRegressor and reports the CV-RMSE +
+train-set RMSE/MAE/R2; validate scores RMSE/MAE/R2 on the held-out validation wafers; the test path
+(test_prepare -> test_featurize -> test) builds the official test features with the training
+scaler and writes/scores the challenge-format CMP-test-removalrate.csv.
 
 Prefect features exercised: @flow + @task, flow_run_name / task_run_name templating,
 tags, retries, log_prints, get_run_logger, ThreadPoolTaskRunner with .submit()
@@ -36,6 +39,9 @@ try:
     from credentials import Credentials
 except Exception:
     Credentials = None
+
+
+__version__ = "0.0.23"
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OPTUNA_CFG = os.path.join(HERE, "optuna.json")
@@ -135,8 +141,22 @@ def _read_trajectories(paths: list) -> pd.DataFrame:
     return out
 
 
-def _featurize(traj: pd.DataFrame) -> pd.DataFrame:
-    """Aggregate each (WAFER_ID, STAGE) trajectory into one feature row."""
+def _scale(traj: pd.DataFrame, scaler: dict = None) -> tuple:
+    """Per-sensor 0-1 (min-max) scaling core. Fit when `scaler` is None (training) and return
+    the {sensor: [min, max]} map; otherwise apply the supplied map (test) so train and test
+    share one scale. Only the 19 sensor columns are touched - TIMESTAMP / STAGE stay raw."""
+    traj = traj.copy()
+    if scaler is None:
+        scaler = {v: [float(traj[v].min()), float(traj[v].max())] for v in PROCESS_VARS}
+    for v in PROCESS_VARS:
+        lo, hi = scaler[v]
+        rng = hi - lo
+        traj[v] = (traj[v] - lo) / rng if rng else 0.0
+    return traj, scaler
+
+
+def _aggregate(traj: pd.DataFrame) -> pd.DataFrame:
+    """Fold each (WAFER_ID, STAGE) trajectory (already 0-1 scaled) into one 155-feature row."""
     traj = traj.sort_values(KEY + ["TIMESTAMP"])
     aggs = ["mean", "std", "min", "max", "median"]
     feat = traj.groupby(KEY)[PROCESS_VARS].agg(aggs)
@@ -157,10 +177,10 @@ def _featurize(traj: pd.DataFrame) -> pd.DataFrame:
     return feat.reset_index()
 
 
-@task(name="prepare", task_run_name="prepare", tags=["cmp", "dp", "fe"],
+@task(name="train_prepare", task_run_name="train_prepare", tags=["cmp", "dp"],
       retries=2, retry_delay_seconds=2, log_prints=True)
-def prepare(data_dir: str, work: str, cfg: dict) -> dict:
-    """Read training trajectories + target, build per-wafer features, split train/val."""
+def train_prepare(data_dir: str, work: str, cfg: dict) -> dict:
+    """Read training trajectories + target and sub-sample wafers; hand the raw rows downstream."""
     train_files = sorted([os.path.join(data_dir, f) for f in os.listdir(data_dir)
                           if f.startswith("CMP-training-") and f[13:14].isdigit()])
     rate_path = os.path.join(data_dir, "CMP-training-removalrate.csv")
@@ -175,11 +195,11 @@ def prepare(data_dir: str, work: str, cfg: dict) -> dict:
     rate.columns = [c.strip().upper() for c in rate.columns]
     rate = rate.rename(columns={"AVG_REMOVAL_RATE": "y"})
     rate["STAGE"] = rate["STAGE"].astype(str).str.strip()
-    rate["y"] = pd.to_numeric(rate["y"], errors="coerce")    # '?' placeholders -> NaN, dropped below
+    rate["y"] = pd.to_numeric(rate["y"], errors="coerce")    # '?' placeholders -> NaN, dropped later
 
     # optional sub-sample of wafers to keep a dry run fast (sample_wafers: null = all)
-    n = cfg.get("sample_wafers")
     rng = np.random.RandomState(cfg.get("random_state", 42))
+    n = cfg.get("sample_wafers")
     wafers = rate["WAFER_ID"].unique()
     if n and n < len(wafers):
         keep = rng.choice(wafers, size=int(n), replace=False)
@@ -187,20 +207,45 @@ def prepare(data_dir: str, work: str, cfg: dict) -> dict:
         traj = traj[traj["WAFER_ID"].isin(keep)]
         print(f"sampled {n} of {len(wafers)} wafers for a quick run")
 
-    feat = _featurize(traj)
+    # decide the train/val wafer split here, with the same rng sequence as a single-pass run
+    # (sample-choice then shuffle), so the by-wafer split is stable across the task boundary
+    uniq = np.sort(rate.dropna(subset=["y"])["WAFER_ID"].unique())
+    rng.shuffle(uniq)
+    cut = int(len(uniq) * (1 - cfg.get("val_fraction", 0.2)))
+    split = {"train": uniq[:cut].tolist(), "val": uniq[cut:].tolist()}
+
+    os.makedirs(work, exist_ok=True)
+    traj.to_parquet(os.path.join(work, "traj_raw.parquet"))
+    rate.to_parquet(os.path.join(work, "rate.parquet"))
+    with open(os.path.join(work, "split.json"), "w", encoding="utf-8") as f:
+        json.dump(split, f)
+    print(f"prepared {len(traj)} raw rows; split {len(split['train'])}/{len(split['val'])} wafers (train/val)")
+    return {"work": work}
+
+
+@task(name="train_featurize", task_run_name="train_featurize", tags=["cmp", "dp", "fe"],
+      retries=2, retry_delay_seconds=2, log_prints=True)
+def train_featurize(prep: dict, cfg: dict) -> dict:
+    """Preprocess + feature engineering: fit per-sensor 0-1 scaling (saved as scaler.json, which
+    test reuses), fold each (WAFER_ID, STAGE) trajectory into 155 features, merge the target,
+    and split train/val by wafer."""
+    work = prep["work"]
+    traj = pd.read_parquet(os.path.join(work, "traj_raw.parquet"))
+    rate = pd.read_parquet(os.path.join(work, "rate.parquet"))
+    with open(os.path.join(work, "split.json"), encoding="utf-8") as f:
+        split = json.load(f)                                 # the by-wafer train/val split from train_prepare
+    traj, scaler = _scale(traj)                              # preprocessing: per-sensor 0-1 scaling (fit)
+    with open(os.path.join(work, "scaler.json"), "w", encoding="utf-8") as f:
+        json.dump(scaler, f)                                 # reused at test time by test
+    feat = _aggregate(traj)
     data = feat.merge(rate[KEY + ["y"]], on=KEY, how="inner").dropna(subset=["y"])
     print(f"built {data.shape[0]} wafer-stage rows x {data.shape[1] - len(KEY) - 1} features")
 
-    # split by wafer so a wafer's A/B rows never straddle train and val
-    uniq = data["WAFER_ID"].unique()
-    rng.shuffle(uniq)
-    cut = int(len(uniq) * (1 - cfg.get("val_fraction", 0.2)))
-    train_w, val_w = set(uniq[:cut]), set(uniq[cut:])
-    tr = data[data["WAFER_ID"].isin(train_w)]
-    va = data[data["WAFER_ID"].isin(val_w)]
+    # apply the by-wafer split so a wafer's A/B rows never straddle train and val
+    tr = data[data["WAFER_ID"].isin(split["train"])]
+    va = data[data["WAFER_ID"].isin(split["val"])]
 
     feat_cols = [c for c in data.columns if c not in KEY + ["y"]]
-    os.makedirs(work, exist_ok=True)
     tr.to_parquet(os.path.join(work, "train.parquet"))
     va.to_parquet(os.path.join(work, "val.parquet"))
     with open(os.path.join(work, "features.json"), "w", encoding="utf-8") as f:
@@ -275,19 +320,31 @@ def train(prep: dict, cfg: dict, storage: str,
     best.booster_.save_model(model_path)
     imp = sorted(zip(feat_cols, best.booster_.feature_importance(importance_type="gain")),
                  key=lambda t: t[1], reverse=True)
+    # train-set predictions -> train metrics (so train returns the model AND its metrics)
+    from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+    train_pred = best.predict(x)
+    yt = y.to_numpy()
+    train_rmse = float(np.sqrt(mean_squared_error(yt, train_pred)))
+    train_mae = float(mean_absolute_error(yt, train_pred))
+    train_r2 = float(r2_score(yt, train_pred))
+    print(f"train RMSE={train_rmse:.4f} MAE={train_mae:.4f} R2={train_r2:.4f} "
+          f"(best CV RMSE={study.best_value:.4f})")
     if mlf:                                                  # final best params/score, then close the run
         mlf.log_params(study.best_params)
         mlf.log_metric("final_cv_rmse", float(study.best_value))
+        mlf.log_metric("train_rmse", train_rmse)
         mlf.end_run()
     return {"work": work, "model_path": model_path,
             "best_params": study.best_params, "best_cv_rmse": float(study.best_value),
-            "top_features": [{"feature": f, "gain": float(g)} for f, g in imp[:15]]}
+            "train_rmse": train_rmse, "train_mae": train_mae, "train_r2": train_r2,
+            "top_features": [{"feature": f, "gain": float(g)} for f, g in imp[:15]],
+            "train_true": y.tolist(), "train_pred": [float(p) for p in train_pred]}
 
 
-@task(name="evaluate", task_run_name="evaluate", tags=["cmp", "eval"],
+@task(name="validate", task_run_name="validate", tags=["cmp", "eval"],
       retries=2, retry_delay_seconds=2, log_prints=True)
-def evaluate(trained: dict, prep: dict) -> dict:
-    """Score the held-out validation wafers: RMSE, MAE, R2."""
+def validate(trained: dict, prep: dict) -> dict:
+    """Score the held-out validation wafers (val.parquet): RMSE, MAE, R2."""
     from lightgbm import Booster
     from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
@@ -302,34 +359,70 @@ def evaluate(trained: dict, prep: dict) -> dict:
     mae = float(mean_absolute_error(y, pred))
     r2 = float(r2_score(y, pred))
     print(f"val RMSE={rmse:.4f} MAE={mae:.4f} R2={r2:.4f}")
-    return {"val_rmse": rmse, "val_mae": mae, "val_r2": r2}
+    return {"val_rmse": rmse, "val_mae": mae, "val_r2": r2,
+            "val_true": y.tolist(), "val_pred": [float(p) for p in pred]}
 
 
-@task(name="predict_test", task_run_name="predict_test", tags=["cmp", "infer"],
-      retries=1, retry_delay_seconds=2, log_prints=True)
-def predict_test(trained: dict, data_dir: str) -> dict:
-    """If a test set is present, write challenge-format CMP-test-removalrate.csv."""
-    from lightgbm import Booster
-
+@task(name="test_prepare", task_run_name="test_prepare", tags=["cmp", "dp"],
+      retries=2, retry_delay_seconds=2, log_prints=True)
+def test_prepare(data_dir: str, work: str) -> dict:
+    """Test-side prepare: read the official test trajectories (CMP-test-*.csv) and save them raw.
+    The test counterpart of train_prepare (no target, no sampling, no split - test is fixed)."""
     test_files = sorted([os.path.join(data_dir, f) for f in os.listdir(data_dir)
                          if f.startswith("CMP-test-") and f[9:10].isdigit()])
     if not test_files:
-        print("no CMP-test-*.csv found - skipping test prediction")
-        return {"test_predicted": 0, "submission": None}
+        print("no CMP-test-*.csv found - skipping the test path")
+        return {"work": work, "has_test": False}
+    traj = _read_trajectories(test_files)
+    os.makedirs(work, exist_ok=True)
+    traj.to_parquet(os.path.join(work, "test_traj_raw.parquet"))
+    print(f"prepared {len(traj)} raw test rows from {len(test_files)} files")
+    return {"work": work, "has_test": True}
 
-    work = trained["work"]
+
+@task(name="test_featurize", task_run_name="test_featurize", tags=["cmp", "dp", "fe"],
+      retries=2, retry_delay_seconds=2, log_prints=True)
+def test_featurize(tprep: dict) -> dict:
+    """Test-side featurize: apply the training scaler.json + features.json schema to the test
+    trajectories (no fit, no split) and save test.parquet. Mirrors train_featurize for test."""
+    work = tprep["work"]
+    if not tprep.get("has_test"):
+        return {"work": work, "has_test": False}
+    with open(os.path.join(work, "scaler.json"), encoding="utf-8") as f:
+        scaler = json.load(f)                                # the training scaler (per-sensor 0-1 min/max)
     with open(os.path.join(work, "features.json"), encoding="utf-8") as f:
         feat_cols = json.load(f)
-    traj = _read_trajectories(test_files)
-    feat = _featurize(traj)
-    for c in feat_cols:                                       # align columns to training schema
+    traj = pd.read_parquet(os.path.join(work, "test_traj_raw.parquet"))
+    traj, _ = _scale(traj, scaler)                           # preprocessing: apply the training scale
+    feat = _aggregate(traj)                                  # feature engineering
+    for c in feat_cols:                                       # align to the training feature schema
         if c not in feat.columns:
             feat[c] = np.nan
+    feat[KEY + feat_cols].to_parquet(os.path.join(work, "test.parquet"))
+    print(f"built {len(feat)} test wafer-stage rows x {len(feat_cols)} features")
+    return {"work": work, "has_test": True}
+
+
+@task(name="test", task_run_name="test", tags=["cmp", "infer"],
+      retries=1, retry_delay_seconds=2, log_prints=True)
+def test(trained: dict, tfz: dict, data_dir: str) -> dict:
+    """Predict the prepared test features, write the challenge-format submission, and score
+    against CMP-test-answers.csv if present."""
+    from lightgbm import Booster
+
+    work = trained["work"]
+    if not tfz.get("has_test"):
+        print("no test set - skipping test prediction")
+        return {"test_predicted": 0, "submission": None,
+                "test_rmse": None, "test_mae": None, "test_r2": None}
+    with open(os.path.join(work, "features.json"), encoding="utf-8") as f:
+        feat_cols = json.load(f)
+    feat = pd.read_parquet(os.path.join(work, "test.parquet"))
     booster = Booster(model_file=trained["model_path"])
     feat["AVG_REMOVAL_RATE"] = booster.predict(feat[feat_cols])
     out = feat[KEY + ["AVG_REMOVAL_RATE"]]
     # write to a distinct file so the original '?' submission template is left intact
-    sub = os.path.join(trained["work"], "CMP-test-removalrate-pred.csv")
+    sub = os.path.join(work, "CMP-test-removalrate-pred.csv")
     out.to_csv(sub, index=False)
     print(f"wrote {len(out)} predictions -> {sub}")
 
@@ -351,16 +444,58 @@ def predict_test(trained: dict, data_dir: str) -> dict:
             result["test_r2"] = float(r2_score(yt, yp))
             print(f"test (n={len(m)}) RMSE={result['test_rmse']:.4f} "
                   f"MAE={result['test_mae']:.4f} R2={result['test_r2']:.4f}")
+            result["test_true"] = [float(v) for v in yt]
+            result["test_pred"] = [float(v) for v in yp]
     else:
         print("no CMP-test-answers.csv - skipping official test scoring")
     return result
+
+
+@task(name="parity_plot", task_run_name="parity_plot ({stage})", tags=["cmp", "viz"], log_prints=True)
+def parity_plot(y_true: list, y_pred: list, stage: str, work: str) -> dict:
+    """Save a y_true vs y_pred 1:1 parity chart for `stage` (train / validation / test); the
+    stage is the chart title. Uses the thread-safe Figure API (no pyplot global state) so the
+    three per-stage plots run concurrently. Best-effort: also attaches it to the Prefect UI."""
+    if not y_true or not y_pred:
+        print(f"parity_plot[{stage}]: no data - skipped")
+        return {"stage": stage, "path": None}
+    from matplotlib.figure import Figure
+    from sklearn.metrics import r2_score
+
+    yt = np.asarray(y_true, dtype=float)
+    yp = np.asarray(y_pred, dtype=float)
+    r2 = float(r2_score(yt, yp))
+    lo, hi = float(min(yt.min(), yp.min())), float(max(yt.max(), yp.max()))
+    fig = Figure(figsize=(5, 5))
+    ax = fig.subplots()
+    ax.scatter(yt, yp, s=14, alpha=0.5, edgecolor="none")
+    ax.plot([lo, hi], [lo, hi], "r--", lw=1, label="y = x")
+    ax.set(xlabel="y_true (AVG_REMOVAL_RATE)", ylabel="y_pred",
+           title=f"{stage} - parity  (n={len(yt)}, R2={r2:.3f})")
+    ax.set_aspect("equal", "box")
+    ax.legend(loc="upper left", fontsize=8)
+    fig.tight_layout()
+    out = os.path.join(work, f"parity_{stage}.png")
+    fig.savefig(out, dpi=110)
+    print(f"parity_plot[{stage}] -> {out}  (R2={r2:.3f})")
+    try:                                                     # best-effort: embed in the Prefect UI
+        import base64
+        b64 = base64.b64encode(open(out, "rb").read()).decode()
+        create_markdown_artifact(
+            key=f"cmp-vm-parity-{stage}",
+            markdown=f"### {stage} - parity (R2={r2:.3f})\n\n![parity](data:image/png;base64,{b64})",
+            description=f"y_true vs y_pred parity plot ({stage})")
+    except Exception as e:
+        print(f"parity artifact skipped: {e}")
+    return {"stage": stage, "path": out, "r2": r2}
 
 
 @flow(name="cmp_vm", flow_run_name="{member}@{git_commit_hash}", log_prints=True,
       task_runner=ThreadPoolTaskRunner(max_workers=4))
 def my_flow(data_dir: str, member: str = "local", git_commit_hash: str = "dryrun",
             git_repo: str = ""):
-    """PHM 2016 CMP virtual metrology: prepare -> train -> (evaluate || predict_test)."""
+    """PHM 2016 CMP virtual metrology: train_prepare -> train_featurize -> train ->
+    (validate || test), parity after each."""
     log = get_run_logger()
     work = os.path.join(HERE, "work")
     os.makedirs(work, exist_ok=True)
@@ -376,56 +511,78 @@ def my_flow(data_dir: str, member: str = "local", git_commit_hash: str = "dryrun
     run_name = f"{member}@{git_commit_hash}"
     log.info(f"mlflow uri: {mlflow_uri}")
 
-    prep = prepare.submit(data_dir, work, cfg)
-    tr = train.submit(prep, cfg, storage, mlflow_uri, run_name, wait_for=[prep])
-    ev = evaluate.submit(tr, prep, wait_for=[tr])           # eval and test-predict run
-    pr = predict_test.submit(tr, data_dir, wait_for=[tr])   # in parallel after train
+    prep = train_prepare.submit(data_dir, work, cfg)
+    fz = train_featurize.submit(prep, cfg, wait_for=[prep])   # preprocess (0-1 scaling) + 155 features + split
+    tr = train.submit(fz, cfg, storage, mlflow_uri, run_name, wait_for=[fz])
 
-    prep_meta, train_meta = prep.result(), tr.result()
-    metrics, pred_meta = ev.result(), pr.result()
+    # test lane: its own test_prepare + test_featurize, mirroring the training lane - concurrent
+    tprep = test_prepare.submit(data_dir, work)
+    tfz = test_featurize.submit(tprep, wait_for=[tprep, fz])   # reuses scaler.json + features.json
+
+    va = validate.submit(tr, fz, wait_for=[tr])             # held-out validation scoring
+    te = test.submit(tr, tfz, data_dir, wait_for=[tr, tfz])
+
+    # right after each stage (mirrors each other): parity_plot draws its chart and
+    # publish_artifacts attaches that stage's metrics to the Prefect UI
+    prep_meta = fz.result()
+    train_meta = tr.result()
+    p_train = parity_plot.submit(train_meta["train_true"], train_meta["train_pred"],
+                                 "train", work, wait_for=[tr])
+    a_train = publish_artifacts.submit(
+        "train", {"best_cv_rmse": train_meta["best_cv_rmse"], "train_rmse": train_meta["train_rmse"],
+                  "train_mae": train_meta["train_mae"], "train_r2": train_meta["train_r2"]},
+        run_name, train_meta["top_features"], wait_for=[tr])
+    metrics = va.result()
+    p_val = parity_plot.submit(metrics["val_true"], metrics["val_pred"],
+                               "validation", work, wait_for=[va])
+    a_val = publish_artifacts.submit(
+        "validation", {"val_rmse": metrics["val_rmse"], "val_mae": metrics["val_mae"],
+                       "val_r2": metrics["val_r2"]}, run_name, wait_for=[va])
+    pred_meta = te.result()
+    p_test = parity_plot.submit(pred_meta.get("test_true", []), pred_meta.get("test_pred", []),
+                                "test", work, wait_for=[te])
+    a_test = publish_artifacts.submit(
+        "test", {"test_predicted": pred_meta["test_predicted"], "test_rmse": pred_meta["test_rmse"],
+                 "test_mae": pred_meta["test_mae"], "test_r2": pred_meta["test_r2"]},
+        run_name, wait_for=[te])
+    for f in (p_train, p_val, p_test, a_train, a_val, a_test):
+        f.result()
 
     summary = {"member": member, "git_commit_hash": git_commit_hash,
                "n_train": prep_meta["n_train"], "n_val": prep_meta["n_val"],
                "n_features": prep_meta["n_features"],
-               "best_cv_rmse": train_meta["best_cv_rmse"], **metrics,
+               "best_cv_rmse": train_meta["best_cv_rmse"],
+               "train_rmse": train_meta["train_rmse"], "train_mae": train_meta["train_mae"],
+               "train_r2": train_meta["train_r2"],
+               "val_rmse": metrics["val_rmse"], "val_mae": metrics["val_mae"],
+               "val_r2": metrics["val_r2"],                  # scalars only - not the parity arrays
                "test_predicted": pred_meta["test_predicted"],
                "test_rmse": pred_meta["test_rmse"], "test_mae": pred_meta["test_mae"],
                "test_r2": pred_meta["test_r2"]}
     log.info(f"done: {summary}")
-
-    _publish_artifacts(summary, train_meta)
     return summary
 
 
-def _publish_artifacts(summary: dict, train_meta: dict):
-    """Surface results in the Prefect UI; best-effort so a pure-local run never fails on it."""
+@task(name="publish_artifacts", task_run_name="publish_artifacts ({stage})", tags=["cmp"], log_prints=True)
+def publish_artifacts(stage: str, metrics: dict, run_label: str, top_features: list = None):
+    """Attach this stage's metrics to the Prefect UI right after the stage finishes - one set per
+    stage, mirroring parity_plot. For train, also publish the top-feature table. Best-effort: a
+    pure-local run with no API backend just skips."""
     try:
-        metric_rows = [{"metric": k, "value": round(v, 4) if isinstance(v, float) else v}
-                       for k, v in summary.items()
-                       if k in ("best_cv_rmse", "val_rmse", "val_mae", "val_r2",
-                                "test_rmse", "test_mae", "test_r2",
-                                "n_train", "n_val", "n_features", "test_predicted")
-                       and v is not None]
-        create_table_artifact(key="cmp-vm-metrics", table=metric_rows,
-                              description="PHM 2016 CMP virtual-metrology metrics")
-        create_table_artifact(key="cmp-vm-top-features", table=train_meta["top_features"],
-                              description="LightGBM top features by gain")
-        md = (f"# CMP VM run - `{summary['member']}@{summary['git_commit_hash']}`\n\n"
-              f"- flow run: `{flow_run.name}` (`{flow_run.id}`)\n"
-              f"- rows: train **{summary['n_train']}** / val **{summary['n_val']}**, "
-              f"features **{summary['n_features']}**\n"
-              f"- best CV RMSE: **{summary['best_cv_rmse']:.4f}**\n"
-              f"- val RMSE / MAE / R2: **{summary['val_rmse']:.4f}** / "
-              f"{summary['val_mae']:.4f} / **{summary['val_r2']:.4f}**\n"
-              + (f"- test RMSE / MAE / R2: **{summary['test_rmse']:.4f}** / "
-                 f"{summary['test_mae']:.4f} / **{summary['test_r2']:.4f}** "
-                 f"(official answers)\n" if summary.get("test_rmse") is not None else "")
-              + f"- best params: `{train_meta['best_params']}`\n"
-              f"- test wafers predicted: {summary['test_predicted']}\n")
-        create_markdown_artifact(key="cmp-vm-summary", markdown=md,
-                                 description="CMP VM run summary")
+        rows = [{"metric": k, "value": round(v, 4) if isinstance(v, float) else v}
+                for k, v in metrics.items() if v is not None]
+        create_table_artifact(key=f"cmp-vm-metrics-{stage}", table=rows,
+                              description=f"PHM 2016 CMP {stage} metrics - {run_label}")
+        if top_features:
+            create_table_artifact(key="cmp-vm-top-features", table=top_features,
+                                  description=f"LightGBM top features by gain - {run_label}")
+        md = (f"### CMP VM - {stage}  (`{run_label}`, run `{flow_run.id}`)\n\n"
+              + "\n".join(f"- {r['metric']}: **{r['value']}**" for r in rows))
+        create_markdown_artifact(key=f"cmp-vm-summary-{stage}", markdown=md,
+                                 description=f"CMP VM {stage} summary")
+        print(f"published {stage} artifacts: {len(rows)} metrics")
     except Exception as e:                                   # no API backend (pure local) -> skip artifacts
-        get_run_logger().warning(f"artifact publish skipped: {e}")
+        get_run_logger().warning(f"artifact publish skipped ({stage}): {e}")
 
 
 if __name__ == "__main__":
