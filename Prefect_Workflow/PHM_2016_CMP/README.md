@@ -1,6 +1,6 @@
 # PHM 2016 CMP - Virtual Metrology (LightGBM)
 
-<sub>rev. 28</sub>
+<sub>rev. 30</sub>
 
 Predicts wafer **AVG_REMOVAL_RATE** (a continuous target - the same Virtual Metrology
 shape as film-thickness / etch-rate prediction) from CMP tool sensor trajectories,
@@ -267,49 +267,110 @@ the hand-off: `train_featurize` passes the fitted `scaler.json` + `features.json
         each stage emits both: parity_plot -> work/parity_<stage>.png ; publish_artifacts -> Prefect UI
 ```
 
-**`parity_plot` and `publish_artifacts` both fire right after each stage** - after `train`,
-after `validate`, and after `test` (so 3 runs each, mirroring one another). `parity_plot` saves
-a `y_true` vs `y_pred` chart for that stage; `publish_artifacts` attaches that stage's metrics
-table + markdown to the Prefect UI (keyed `cmp-vm-metrics-<stage>`). The flow still returns the
-combined `summary` dict (train + val + test metrics) for `pipeline.py`.
+The boxes run concurrently where the DAG allows (`.submit()` + `wait_for`): the test lane runs
+alongside training, joining only where it needs the training `scaler.json` / `features.json`
+(`test_featurize` waits for `train_featurize`) and `model.txt` (`test` waits for `train`). The
+flow returns the combined `summary` dict (train + val + test metrics) for `pipeline.py`. Each
+diagram function, in pipeline order:
 
-The training lane (`train_prepare -> train_featurize -> train -> validate`) and the test lane
-(`test_prepare -> test_featurize -> test`) run concurrently (`.submit()` + `wait_for`);
-`test_featurize` waits for `train_featurize` (it needs `scaler.json` + `features.json`) and `test`
-waits for `train` (it needs `model.txt`). A `parity_plot` fires after each of `train`,
-`validate`, and `test`.
+### load_config
 
-- **train_prepare** - reads all training trajectories + target, sub-samples wafers, and fixes
-  the by-wafer train/val split (saved as `split.json` so the split is stable across the later
-  task boundary).
-- **train_featurize** - preprocess + feature engineering in one task: scales each of the 19 sensors
-  to 0-1 (min-max, fit on training and saved as `scaler.json`, reused for test), folds each
-  `(WAFER_ID, STAGE)` trajectory into 155 features (mean/std/min/max/median + last/delta/slope
-  over `x7..x25`, plus `n_samples`/`duration`/`stage_is_B`), then applies the split into
-  `train.parquet` / `val.parquet`. (LightGBM is scale-invariant, so the 0-1 scaling is
-  structural, not a score change.)
-- **train** - Optuna over `LGBMRegressor` (5-fold CV-RMSE), refits the best params, and
-  reports the model's metrics - best CV-RMSE **and** train-set RMSE / MAE / R2 - so `train`
-  returns both the model (`model.txt`) and its metrics.
-- **validate** - RMSE / MAE / R2 on the held-out **validation** wafers (`val.parquet`), which
-  the model never trained on - not the training data. This is a single by-wafer hold-out, **not
-  k-fold and not temporal**; the 5-fold CV (plain `KFold`) lives inside `train`'s Optuna tuning.
-- **test_prepare** - test-side `train_prepare`: reads the official test trajectories
-  (`CMP-test-*.csv`) into `test_traj_raw.parquet` (no target, no sampling, no split - the test
-  set is fixed).
-- **test_featurize** - test-side `train_featurize`: applies the **training** `scaler.json` +
-  `features.json` schema to the test trajectories (no fit, no split) -> `test.parquet`.
-- **test** - predicts `test.parquet` with `model.txt`, writes
-  `work/CMP-test-removalrate-pred.csv` (the `?` template is left intact), and - if
-  `CMP-test-answers.csv` is present - scores the test set (RMSE / MAE / R2).
-- **publish_artifacts** - runs **right after each stage** (like `parity_plot`): attaches that
-  stage's metrics table + markdown to the Prefect UI, keyed `cmp-vm-metrics-<stage>` (the train
-  call also publishes the top-feature table). Best-effort - a pure-local run with no API backend
-  just skips.
-- **parity_plot** - draws the `y_true` vs `y_pred` 1:1 chart (with the `y = x` line and R2)
-  for one stage; the chart title is the stage. Runs right after **train** (train fit),
-  **validate** (validation), and **test** (test), saving `work/parity_<stage>.png`
-  and embedding it in the Prefect UI.
+1. Re-read `optuna.json` **fresh on every run** (so edits take effect without a restart).
+2. Return the `cfg` dict: `n_trials`, `cv_folds`, `val_fraction`, `sample_wafers`, `random_state`,
+   `storage`, `mlflow_uri`, `study_name`, `lgbm_fixed`.
+
+### train_prepare
+
+1. Read the 185 `CMP-training-*.csv` trajectory files.
+2. Read `CMP-training-removalrate.csv` (the target); rename `AVG_REMOVAL_RATE` -> `y`; coerce `?`
+   placeholders -> NaN.
+3. Optionally sub-sample wafers (`sample_wafers`, default 300) with `RandomState(random_state)`.
+4. Fix the by-wafer train/val split (80/20 via `val_fraction`) by shuffling the sorted unique
+   wafers with that same RNG.
+5. Write `traj_raw.parquet`, `rate.parquet`, `split.json` - raw rows + the split decision (no
+   scaling, no features yet).
+
+### train_featurize
+
+1. Read `traj_raw.parquet`, `rate.parquet`, `split.json`.
+2. **Normalization - per-sensor 0-1 min-max scaling, *fit* on training.** For each of the 19
+   process sensors `x7..x25`, take `lo = min` and `hi = max` over **all** training rows and
+   rescale every value
+
+   ```
+   x_scaled = (x - lo) / (hi - lo)        # per sensor; a constant sensor (hi == lo) -> 0
+   ```
+
+   so each sensor lands in `[0, 1]`. Only the 19 sensors are scaled - `TIMESTAMP` and `STAGE`
+   stay raw.
+3. Save the `{sensor: [lo, hi]}` map as **`scaler.json`** (the test lane reuses it).
+4. **Feature engineering** - aggregate each (now-scaled) `(WAFER_ID, STAGE)` trajectory into 155
+   features (mean/std/min/max/median + last/delta/slope over the 19 sensors, plus
+   `n_samples`/`duration`/`stage_is_B`).
+5. Merge the target and drop rows with no `y`.
+6. Apply `split.json` -> write `train.parquet`, `val.parquet`, `features.json`.
+
+> LightGBM is scale-invariant (it splits on order, not magnitude), so this 0-1 scaling does
+> **not** move the score - it is a structural preprocessing stage that keeps train and test on
+> one scale.
+
+### train
+
+1. Read `train.parquet` + `features.json`.
+2. Run **Optuna** (TPE sampler, `random_state`) over the `LGBMRegressor` hyper-parameters
+   (`n_estimators` 200–1200, `learning_rate`, `num_leaves`, `max_depth`, `min_child_samples`,
+   `subsample`, `colsample_bytree`, `reg_alpha`, `reg_lambda`), scoring each trial by **5-fold
+   CV-RMSE** (plain `KFold` `cross_val_score`).
+3. Log every trial to the `optuna DB` and, best-effort, to MLflow.
+4. Refit the best params on the full training set; save `model.txt`.
+5. Compute the train-set RMSE / MAE / R2 and the top-15 features by gain.
+6. Return the model **and** its metrics (best CV-RMSE + train metrics + top features).
+
+### validate
+
+1. Read `val.parquet` + `model.txt`.
+2. Predict the held-out validation wafers.
+3. Score RMSE / MAE / R2 - a single **by-wafer hold-out** (the 20% carved by `train_prepare`),
+   **not k-fold and not temporal** (the 5-fold CV lives inside `train`).
+
+### test_prepare
+
+1. Read the official `CMP-test-*.csv` trajectories.
+2. Write `test_traj_raw.parquet` - no target, no sampling, no split (the test set is fixed).
+
+### test_featurize
+
+1. Read `test_traj_raw.parquet`, the training `scaler.json`, and `features.json`.
+2. **Normalization - *apply* mode.** Rescale the test sensors with the **same**
+   `(x - lo) / (hi - lo)` using the *training* `lo`/`hi` - **no re-fit** - so train and test share
+   one scale (a test value outside the training range lands outside `[0, 1]`).
+3. Aggregate into the 155 features.
+4. Align them to the training `features.json` schema (fill any missing column with NaN).
+5. Write `test.parquet` (no split).
+
+### test
+
+1. Read `test.parquet` + `model.txt`.
+2. Predict, and write `work/CMP-test-removalrate-pred.csv` (the `?` template is left intact).
+3. If `CMP-test-answers.csv` is present, score the test set (RMSE / MAE / R2).
+
+### parity_plot
+
+1. Take a stage's `y_true` / `y_pred`.
+2. Draw the 1:1 chart (with the `y = x` line and R2), titled by the stage (thread-safe `Figure`
+   API).
+3. Save `work/parity_<stage>.png` and embed it in the Prefect UI.
+
+> Fires right after **train**, **validate**, and **test** (3 runs).
+
+### publish_artifacts
+
+1. Take a stage's metrics.
+2. Build a metrics table + markdown, keyed `cmp-vm-metrics-<stage>` (the train call also publishes
+   the top-feature table).
+3. Attach them to the Prefect UI - best-effort, so a pure-local run with no API backend just skips.
+
+> Fires right after each stage too, mirroring `parity_plot`.
 
 Prefect features used: `@flow`/`@task`, `flow_run_name`/`task_run_name`, tags,
 retries, `ThreadPoolTaskRunner` + `.submit()`/`wait_for` DAG, `get_run_logger`, and
