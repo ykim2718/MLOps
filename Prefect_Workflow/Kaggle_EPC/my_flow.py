@@ -3,7 +3,7 @@
 Predicts a Tetouan-city power-consumption zone (a continuous / regression target) from
 weather + calendar features with LightGBM. Run as the team payload that pipeline.py drives:
 
-    python my_flow.py --git_repo <r> --git_commit_hash <c> --member <m> --data_folder ./data
+    python my_flow.py --git_repo <r> --git_commit_hash <c> --member <m> --data_folder ./data --run-on server
 
 Pipeline (a small DAG): load_config -> train_prepare -> train_featurize -> train ->
 (validate || test); parity_plot AND publish_artifacts both fire right after each of
@@ -42,7 +42,7 @@ except Exception:
     Credentials = None
 
 
-__version__ = "0.0.8"
+__version__ = "0.0.11"
 
 HERE: Path = Path(__file__).resolve().parent
 OPTUNA_CFG: Path = HERE / "optuna.json"
@@ -65,9 +65,9 @@ _ALIASES = {
     "zone 3 power consumption": "PowerConsumption_Zone3", "datetime": "Datetime",
 }
 
-# LGBMRegressor hyperparameter search space (source of truth for type/step/log). optuna.json
-# carries per-slot overrides: 'range' replaces [LO, HI] (or a categorical universe list); 'init'
-# sets the warm-start value enqueued as the study's first trial. A slot may override either.
+# Fallback defaults; the authoritative values live in optuna.json `search_space` (per slot,
+# type/range/step/log/init) and `environment` (run-level). optuna.json overrides these, so the
+# flow still runs if a key is missing there. SEARCH_SPACE is the source of type/step/log.
 SEARCH_SPACE = {
     "n_estimators":      {"type": "int",   "range": [200, 1200], "step": 100},
     "learning_rate":     {"type": "float", "range": [0.01, 0.2], "log": True},
@@ -80,7 +80,7 @@ SEARCH_SPACE = {
     "reg_lambda":        {"type": "float", "range": [1e-3, 10.0], "log": True},
 }
 
-# Run-level defaults. Any scalar top-level key in optuna.json overrides the matching entry here.
+# Run-level fallback defaults; optuna.json `environment` overrides each matching key.
 RUN_DEFAULTS = {
     "n_trials": 20, "direction": "minimize", "metric": "rmse", "cv_folds": 5,
     "val_fraction": 0.2, "test_fraction": 0.2, "sample_rows": None, "target_zone": "Zone1",
@@ -92,31 +92,26 @@ RUN_DEFAULTS = {
 # config: read fresh each run so edits to optuna.json always take effect
 @task(name="load_config", task_run_name="load_config", log_prints=True)
 def load_config(optuna_cfg: Union[str, Path]) -> dict:
-    """Merge optuna.json over the code defaults.
+    """Merge optuna.json over the code fallbacks.
 
-    optuna.json is an override-slot file: a key whose value is a `{"range"/"init"}` dict overrides
-    that SEARCH_SPACE slot (range and/or warm-start init); a scalar key overrides a RUN_DEFAULTS
-    setting; `_`-prefixed keys and `__version__` are documentation. A slot for a name not in
-    SEARCH_SPACE is reported and ignored. Returns the run config flattened to the top level, plus
-    `search_space` (effective ranges) and `warm_start` (init values enqueued as trial 0).
+    optuna.json has three keys: `__version__` (doc), `environment` (run-level config that
+    overrides RUN_DEFAULTS), and `search_space` (per-slot {type, range, step, log, init} that
+    overrides SEARCH_SPACE; `init` becomes the warm-start anchor enqueued as trial 0). A slot for
+    a name not in SEARCH_SPACE is reported and ignored. Returns the run config flattened to the
+    top level, plus `search_space` (effective slots) and `warm_start` (the init values).
     """
     raw = json.loads(Path(optuna_cfg).read_text(encoding="utf-8"))
-    space = copy.deepcopy(SEARCH_SPACE)
     run = copy.deepcopy(RUN_DEFAULTS)
+    run.update(raw.get("environment", {}))                   # environment overrides run defaults
+    space = copy.deepcopy(SEARCH_SPACE)
     warm_start = {}
-    for k, v in raw.items():
-        if k.startswith("_"):                                # _comment / __version__ -> docs, skip
+    for name, slot in (raw.get("search_space") or {}).items():
+        if name not in space:                                # slot for an unknown hyperparameter
+            print(f"config: search_space slot '{name}' not in SEARCH_SPACE - reported and ignored")
             continue
-        if isinstance(v, dict) and ("range" in v or "init" in v):
-            if k not in space:                               # slot for an unknown hyperparameter
-                print(f"config: slot '{k}' not in SEARCH_SPACE - reported and ignored")
-                continue
-            if "range" in v:
-                space[k]["range"] = v["range"]               # override the search range
-            if "init" in v:
-                warm_start[k] = v["init"]                    # warm-start anchor (enqueued as trial 0)
-        else:
-            run[k] = v                                       # run-level override (n_trials, storage, ...)
+        space[name].update({k: v for k, v in slot.items() if k != "init"})   # type/range/step/log
+        if "init" in slot:
+            warm_start[name] = slot["init"]                  # warm-start anchor (enqueued as trial 0)
     out = dict(run)
     out["search_space"] = space
     out["warm_start"] = warm_start
@@ -534,7 +529,8 @@ def parity_plot(y_true: list, y_pred: list, stage: str, work: Union[str, Path],
 
 
 @task(name="publish_artifacts", task_run_name="publish_artifacts ({stage})", tags=["epc"], log_prints=True)
-def publish_artifacts(stage: str, metrics: dict, run_label: str, top_features: list = None) -> None:
+def publish_artifacts(stage: str, metrics: dict, run_label: str,
+                      top_features: Optional[list] = None) -> None:
     """Attach this stage's metrics to the Prefect UI right after the stage finishes - one set per
     stage, mirroring parity_plot. For train, also publish the top-feature table. Best-effort: a
     pure-local run with no API backend just skips."""
@@ -558,7 +554,7 @@ def publish_artifacts(stage: str, metrics: dict, run_label: str, top_features: l
 @flow(name="epc_power", flow_run_name="{member}@{git_commit_hash}", log_prints=True,
       task_runner=ThreadPoolTaskRunner(max_workers=4))
 def my_flow(data_dir: Union[str, Path], member: str = "local", git_commit_hash: str = "dryrun",
-            git_repo: str = "", sample_rows: int = None) -> dict:
+            git_repo: str = "", sample_rows: Optional[int] = None) -> dict:
     """Electric Power Consumption regression: train_prepare -> train_featurize -> train ->
     (validate || test), parity after each. `sample_rows` (when given) overrides the config -
     a fast smoke test on the most-recent N rows; leave it None to use optuna.json."""
@@ -643,7 +639,7 @@ def parse_args(argv: list = None) -> argparse.Namespace:
     p.add_argument("--sample_rows", type=int, default=None,
                    help="fast smoke test: use only the most-recent N rows (overrides optuna.json)")
     p.add_argument("--run-on", choices=["local", "server"], required=True,
-                   help="local: run ephemerally with no server (default); "
+                   help="local: run ephemerally with no server; "
                         "server: record the run on the Prefect server (PREFECT_API_URL)")
     return p.parse_args(argv)
 

@@ -1,17 +1,31 @@
 {
-  "__version__": "0.0.0",
-  "storage": null,
+  "__version__": "0.0.1",
 
-  "_comment": "Override slots for SEARCH_SPACE in my_flow.py (EPC LightGBM regressor). Each top-level key matches a SEARCH_SPACE entry name. 'range' overrides the [LO, HI] search range (or the universe list for a categorical slot); 'init' overrides the warm-start value enqueued as the study's first trial. Keys absent from SEARCH_SPACE are reported and ignored. A slot that omits 'range' or 'init' keeps the SEARCH_SPACE default for that field. Scalar top-level keys (e.g. n_trials, cv_folds, val_fraction, test_fraction, sample_rows, target_zone, random_state, storage, mlflow_uri, study_name, lgbm_fixed) override the run-level defaults baked into my_flow.py RUN_DEFAULTS; '_'-prefixed keys and '__version__' are documentation only.",
+  "environment": {
+    "n_trials": 20,
+    "direction": "minimize",
+    "metric": "rmse",
+    "cv_folds": 5,
+    "val_fraction": 0.2,
+    "test_fraction": 0.2,
+    "sample_rows": null,
+    "target_zone": "Zone1",
+    "random_state": 42,
+    "storage": null,
+    "mlflow_uri": null,
+    "study_name": "epc_power",
+    "lgbm_fixed": {"objective": "regression", "metric": "rmse", "verbosity": -1, "n_jobs": -1}
+  },
 
-  "_comment_warmstart": "init values are a deterministic warm-start anchor: train enqueues them as the study's first trial (trial 0) so it reproduces a known-good config, then TPE micro-explores around it across the remaining n_trials. The range slots are unchanged by init, so TPE still scans the full envelope; only the warm-start anchor moves. Drop an 'init' to let TPE cold-start that param; drop the whole slot to keep the SEARCH_SPACE default range.",
-  "n_estimators":      {"range": [200, 1200],  "init": 500},
-  "learning_rate":     {"range": [0.01, 0.2],  "init": 0.05},
-  "num_leaves":        {"range": [15, 255],     "init": 63},
-  "max_depth":         {"range": [3, 12],       "init": 6},
-  "min_child_samples": {"range": [5, 80],       "init": 20},
-  "subsample":         {"range": [0.6, 1.0],    "init": 0.8},
-  "colsample_bytree":  {"range": [0.6, 1.0],    "init": 0.8},
-  "reg_alpha":         {"range": [1e-3, 10.0],  "init": 0.1},
-  "reg_lambda":        {"range": [1e-3, 10.0],  "init": 0.1}
+  "search_space": {
+    "n_estimators":      {"type": "int",   "range": [200, 1200],  "step": 100, "init": 500},
+    "learning_rate":     {"type": "float", "range": [0.01, 0.2],  "log": true, "init": 0.05},
+    "num_leaves":        {"type": "int",   "range": [15, 255],    "init": 63},
+    "max_depth":         {"type": "int",   "range": [3, 12],      "init": 6},
+    "min_child_samples": {"type": "int",   "range": [5, 80],      "init": 20},
+    "subsample":         {"type": "float", "range": [0.6, 1.0],   "init": 0.8},
+    "colsample_bytree":  {"type": "float", "range": [0.6, 1.0],   "init": 0.8},
+    "reg_alpha":         {"type": "float", "range": [1e-3, 10.0], "log": true, "init": 0.1},
+    "reg_lambda":        {"type": "float", "range": [1e-3, 10.0], "log": true, "init": 0.1}
+  }
 }

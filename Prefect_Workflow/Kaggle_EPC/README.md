@@ -1,6 +1,6 @@
 # Kaggle Electric Power Consumption - Power Forecasting (LightGBM)
 
-<sub>rev. 7</sub>
+<sub>rev. 9</sub>
 
 Predicts a Tetouan-city power-consumption zone (**PowerConsumption_Zone1** by default - a
 continuous regression target) from weather and calendar features, using LightGBM.
@@ -164,25 +164,27 @@ PowerConsumption_Zone1 - daily shape (mean by hour, all of 2017)
 
 ## 5. Run the flow
 
+`--run-on` is **required** (no default - the caller must choose where the run is recorded):
+
 ```bash
-python my_flow.py --data_folder ./data                  # default: full year, run-on local (ephemeral)
-python my_flow.py --data_folder ./data --sample_rows 8000  # fast smoke test (most-recent N rows)
-python my_flow.py --data_folder ./data --run-on server  # record the run on the Prefect server
+python my_flow.py --data_folder ./data --run-on local       # ephemeral, no server (full year)
+python my_flow.py --data_folder ./data --run-on local --sample_rows 8000  # fast smoke test
+python my_flow.py --data_folder ./data --run-on server      # record the run on the Prefect server
 # full pipeline.py-style invocation (records on the team server):
 python my_flow.py --git_repo <r> --git_commit_hash <c> --member <m> --data_folder ./data --run-on server
 ```
 
-`optuna.json` -> `sample_rows` is `null` by default, so a run uses all 52,416 rows. The
+`optuna.json -> environment -> sample_rows` is `null` by default, so a run uses all 52,416 rows. The
 `--sample_rows N` CLI flag overrides it (no config edit) to take only the most-recent N rows -
 a fast smoke test that checks the DAG end to end. `target_zone` (`Zone1` / `Zone2` / `Zone3`)
 picks the target.
 
-`--run-on` chooses where the run is recorded: **`local`** (default) clears `PREFECT_API_URL` for
-the run so Prefect executes it ephemerally (a throwaway in-process server) - nothing reaches the
-team server; **`server`** sends the flow run, tasks, and artifacts to the configured Prefect
-server (`PREFECT_API_URL`), the way `pipeline.py` runs this payload inside the compose network
-(so `pipeline.py` and any team-server run must pass `--run-on server`). A `local` run that should
-also avoid the team Optuna DB needs `optuna.json -> storage` set to a local DSN (e.g.
+`--run-on` chooses where the run is recorded: **`local`** clears `PREFECT_API_URL` for the run so
+Prefect executes it ephemerally (a throwaway in-process server) - nothing reaches the team server;
+**`server`** sends the flow run, tasks, and artifacts to the configured Prefect server
+(`PREFECT_API_URL`), the way `pipeline.py` runs this payload inside the compose network (so
+`pipeline.py` and any team-server run pass `--run-on server`). A `local` run that should also
+avoid the team Optuna DB needs `optuna.json -> environment -> storage` set to a local DSN (e.g.
 `sqlite:///optuna.db`); otherwise `train` still dials the Postgres in the member's block.
 
 Environment: this repo's deps (prefect, lightgbm, optuna, scikit-learn, pandas,
@@ -397,7 +399,7 @@ The dashboard shows optimization history, parallel-coordinate and
 hyperparameter-importance plots, and every trial's params and CV-RMSE. Re-runs append
 to the same `study_name` (`epc_power`).
 
-`optuna.json -> storage` is an **override**: leave it `null` to use the
+`optuna.json -> environment -> storage` is an **override**: leave it `null` to use the
 `postgresql_optuna` block (default), or set a full DSN (e.g. a local
 `sqlite:///optuna.db` or a test Postgres) to point elsewhere.
 
@@ -424,7 +426,7 @@ View it on the stack's MLflow server:
 # Experiments -> epc_power -> run <member>@<commit> -> Metrics -> cv_rmse  (x = trial, y = RMSE)
 ```
 
-`optuna.json -> mlflow_uri` is an **override**: leave it `null` to use `http://mlflow:5000`
+`optuna.json -> environment -> mlflow_uri` is an **override**: leave it `null` to use `http://mlflow:5000`
 (the compose service, how `pipeline.py` runs this payload), or set `http://localhost:5000`
 when you run `my_flow.py` directly on the host. The tracking URI is a plain service address,
 not a secret, so it stays in config - unlike the DB / MinIO creds, which come from the
