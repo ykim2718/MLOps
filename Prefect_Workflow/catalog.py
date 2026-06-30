@@ -58,7 +58,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import psycopg2
 from psycopg2.extras import Json, RealDictCursor
 
-__version__ = "0.0.31"  # Semantic Versioning:  Version = Major.Minor.Patch
+__version__ = "0.0.32"  # Semantic Versioning:  Version = Major.Minor.Patch
 
 _MEMBER = None       # block name = team member's name; set by CLI -m or set_member(), used to read creds
 _PG_HOST = None      # CLI --pg-host: override the postgresql endpoint host only (creds unchanged)
@@ -307,6 +307,7 @@ def upload(spec: dict, member: Optional[str] = None, spec_dir: Optional[Path] = 
     s3 = _s3(member)
     prefix = f"{dataset_id}/{version}/"
     minio_path = f"s3://{bucket}/{prefix}"
+    ensure_schema()                                # create the catalog table if missing, before the dup check
     if get(dataset_id, version) or s3.list_objects_v2(
             Bucket=bucket, Prefix=prefix, MaxKeys=1).get("KeyCount", 0):
         raise FileExistsError(f"version already exists: {minio_path} (bump the version)")
@@ -318,7 +319,6 @@ def upload(spec: dict, member: Optional[str] = None, spec_dir: Optional[Path] = 
         n_files += 1
         size_bytes += fp.stat().st_size
 
-    ensure_schema()
     register(dataset_id, version, minio_path,
              created_by=spec.get("created_by"),
              n_files=n_files, size_bytes=size_bytes,
