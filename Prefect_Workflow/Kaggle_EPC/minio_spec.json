@@ -1,6 +1,6 @@
 {
   "dataset_id": "electric_power_consumption",
-  "version": "v1",
+  "version": "v0",
   "path": "Kaggle_EPC/data/powerconsumption.csv",
   "bucket": "datasets",
   "created_by": "ykim",
