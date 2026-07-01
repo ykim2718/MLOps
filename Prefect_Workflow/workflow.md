@@ -1,6 +1,6 @@
 # AI/ML Workflow Automation
 
-<sub>rev. 40</sub>
+<sub>rev. 46</sub>
 
 Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환경입니다. 이 문서는 **전체 워크플로우의 인덱스 (개요)** 이고, 도구별 상세는 컴포넌트 문서로 잇습니다.
 
@@ -89,7 +89,7 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
   데이터가 실제로 오가는 두 지점의 endpoint · parameter 입니다 — **upload 은 host 의 `catalog.py` 가 `spec.json` 으로**, **download 은 컨테이너 안 `pipeline.py` 가 Prefect Secret 블록으로** 합니다.
 
   ```text
-  UPLOAD — host: catalog.py upload spec.json  (-m <member> [--pg-host/--minio-host localhost])
+  UPLOAD — host: catalog.py upload spec.json  (-b <block> [--pg-host/--minio-host localhost])
     input: spec.json { dataset_id, version, path, bucket, metadata, created_by }
     creds: Credentials block (member) — minio + postgresql_catalog sections
   ┌────────────┐                        ┌─────────────┐
@@ -109,7 +109,7 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
 
 ### Upload
 
-  `catalog.py upload <spec.json>` 은 spec 의 `path` 가 가리키는 파일을 MinIO 에 올리고 `catalog` 에 버전 레코드를 등록합니다. host 에서는 `-m <member>` 로 자격증명 블록을 고르고 컨테이너용 endpoint 를 `--pg-host/--minio-host localhost` 로 덮어씁니다.
+  `catalog.py upload <spec.json>` 은 spec 의 `path` 가 가리키는 파일을 MinIO 에 올리고 `catalog` 에 버전 레코드를 등록합니다. host 에서는 `-b <block>` 로 자격증명 블록을 고르고 컨테이너용 endpoint 를 `--pg-host/--minio-host localhost` 로 덮어씁니다.
 
   ```python
   # catalog.py  upload(spec, member) — key steps (dataset_id/version/path/bucket come from spec)
@@ -125,7 +125,7 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
 
   ```powershell
   python catalog.py spec spec.json                                                    # scaffold an empty spec
-  python catalog.py upload spec.json -m <member> --pg-host localhost --minio-host localhost
+  python catalog.py upload spec.json -b <block> --pg-host localhost --minio-host localhost
   ```
 
   올릴 대상은 spec 의 **`path` 하나**로 정하고, 파일 한 개·여러 개·와일드카드는 그 `path` 값으로 구별됩니다 (별도 목록 필드 없음).
@@ -157,7 +157,7 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
   ```
 
   ```powershell
-  python catalog.py download <id> <version> ./out -m <member> --pg-host localhost --minio-host localhost
+  python catalog.py download <id> <version> ./out -b <block> --pg-host localhost --minio-host localhost
   ```
 
   > flow 실행 중의 자동 download 는 CLI 가 아니라 컨테이너 안 `pipeline.py` 가 Prefect Secret 블록으로 합니다 (위 [Flow](#flow) 다이어그램).
@@ -169,10 +169,10 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
   `catalog` 은 `catalog` DB 안의 테이블 하나 (`datasets`) 이며, MinIO 의 실제 데이터를 가리키는 **메타데이터 장부** 입니다. 이 장부를 다루는 **catalog 접근 계층** (테이블 생성·버전 등록·검색) 이 워크플로우에서 데이터의 위치·버전·계보를 기록합니다. 전체 명령은 [Appendix A. catalog.py CLI](#appendix-a-catalogpy-cli) 를 참고합니다.
 
   ```powershell
-  python catalog.py list -m <member> --pg-host localhost                                 # datasets summary (latest)
-  python catalog.py versions <id> -m <member> --pg-host localhost                        # version history
-  python catalog.py tree --files -m <member> --pg-host localhost --minio-host localhost  # id > version tree (+ counts)
-  python catalog.py find <id> fab=fab2 -m <member> --pg-host localhost                   # search by metadata key=value
+  python catalog.py list -b <block> --pg-host localhost                                 # datasets summary (latest)
+  python catalog.py versions <id> -b <block> --pg-host localhost                        # version history
+  python catalog.py tree --files -b <block> --pg-host localhost --minio-host localhost  # id > version tree (+ counts)
+  python catalog.py find <id> fab=fab2 -b <block> --pg-host localhost                   # search by metadata key=value
   ```
 
 #### MinIO Key
@@ -412,13 +412,20 @@ def inference_flow():
 | `remove <id> [version] [--yes]` | MinIO + PostgreSQL | MinIO + catalog 에서 영구 삭제 (version 생략 시 데이터셋 전체) |
 | `objects [id]` | MinIO | MinIO 에 실제로 있는 객체 나열 (catalog 무관) |
 
-MinIO·PostgreSQL 에 접속하는 명령에는 `-m <member>` (자격증명 블록 선택) 와 `--pg-host`/`--minio-host` (endpoint host 만 덮어쓰기, creds 불변) 를 붙일 수 있습니다 — 컨테이너용 블록을 host 에서 쓸 때 유용합니다 (`spec` 은 로컬 파일 생성이라 해당 없음). 자세한 것은 아래 [Credentials](#credentials-prefect-block).
+MinIO·PostgreSQL 에 접속하는 명령에는 `-b <block>` (자격증명 블록 선택) 와 `--pg-host`/`--minio-host` (endpoint host 만 덮어쓰기, creds 불변) 를 붙일 수 있습니다 — 컨테이너용 블록을 host 에서 쓸 때 유용합니다 (`spec` 은 로컬 파일 생성이라 해당 없음). 자세한 것은 아래 [Credentials](#credentials-prefect-block).
 
 catalog.py 는 자격증명 블록 클래스 (`credentials.py`, `../Docker/Prefect`) 를 import 하므로, host 에서 실행 전 그 폴더를 `PYTHONPATH` 에 1회 넣습니다 (경로는 repo 위치에 맞춰 `Resolve-Path` 로 풉니다).
 
 ```powershell
-# put credentials.py (Credentials block class, ../Docker/Prefect) on PYTHONPATH; once per session
-$env:PYTHONPATH = (Resolve-Path ..\Docker\Prefect).Path
+# catalog_cli.ps1
+# Add-PyPath: prepend a .py file's folder to PYTHONPATH (dedup, keep existing) so its module can be imported.
+function Add-PyPath([string]$file) {
+    $dir = Split-Path (Resolve-Path $file) -Parent
+    $rest = $env:PYTHONPATH -split ';' | Where-Object { $_ -and $_ -ne $dir }
+    $env:PYTHONPATH = (@($dir) + $rest) -join ';'
+}
+Add-PyPath ..\Docker\Prefect\credentials.py   # catalog.py imports credentials.py from this folder
+$env:PYTHONPATH
 
 python catalog.py list                              # dataset summary (latest version)
 python catalog.py versions sydney_202605            # one dataset's version history
@@ -441,11 +448,11 @@ python catalog.py objects sydney_202605             # raw MinIO objects (not the
 
 > 버전은 불변 (immutable) 입니다 — 같은 `dataset_id`/`version` 이 MinIO 나 catalog 에 이미 있으면 `upload` 는 덮어쓰지 않고 중단합니다 (버전을 올려 다시 시도). `remove` 는 MinIO 객체 (모든 버전·삭제마커) 와 catalog 행을 영구 삭제하므로 `--yes` 없이는 `DELETE` 입력을 요구합니다.
 
-host 에서 컨테이너용 블록 (endpoint 가 `postgres`·`minio` 서비스명) 으로 접속할 때는 `-m <member>` 로 블록을 고르고 `--pg-host`/`--minio-host` 로 host 만 `localhost` 로 바꿉니다.
+host 에서 컨테이너용 블록 (endpoint 가 `postgres`·`minio` 서비스명) 으로 접속할 때는 `-b <block>` 로 블록을 고르고 `--pg-host`/`--minio-host` 로 host 만 `localhost` 로 바꿉니다.
 
 ```powershell
-python catalog.py upload spec.json -m <member> --pg-host localhost --minio-host localhost
-python catalog.py remove <id> <version> -m <member> --pg-host localhost --minio-host localhost
+python catalog.py upload spec.json -b <block> --pg-host localhost --minio-host localhost
+python catalog.py remove <id> <version> -b <block> --pg-host localhost --minio-host localhost
 ```
 
 ### Credentials (Prefect block)
@@ -458,7 +465,7 @@ python catalog.py remove <id> <version> -m <member> --pg-host localhost --minio-
   | `postgresql_catalog` | `endpoint` · `username` · `password` · `database` | PostgreSQL (`catalog` DB) |
   | `postgresql_optuna` | `endpoint` · `username` · `password` · `database` | PostgreSQL (`optuna` DB, flow·Optuna 용) |
 
-  - **`-m <member>`** 가 어느 팀원 블록을 읽을지 정합니다. catalog.py 는 그중 `minio` + `postgresql_catalog` 두 섹션만 씁니다 (`postgresql_optuna` 는 flow 용). 블록이 없거나 서버 미연결이면 default (localhost) 로 떨어지고, 배너에 `[creds: prefect-block (member=…)]` 또는 `[creds: default]` 로 출처가 표시됩니다.
+  - **`-b <block>`** 가 어느 팀원 블록을 읽을지 정합니다. catalog.py 는 그중 `minio` + `postgresql_catalog` 두 섹션만 씁니다 (`postgresql_optuna` 는 flow 용). 블록이 없거나 서버 미연결이면 default (localhost) 로 떨어지고, 배너에 `[creds: prefect-block (member=…)]` 또는 `[creds: default]` 로 출처가 표시됩니다.
   - **`--pg-host` / `--minio-host`** 는 블록 endpoint 의 host 만 덮어씁니다 (creds·port 불변). 컨테이너용 블록 (endpoint 가 `postgres`·`minio` 서비스명) 을 host 에서 쓸 때 `--pg-host localhost --minio-host localhost` 로 붙입니다.
   - `PREFECT_API_URL` (Prefect 프로필) 은 이 블록을 받기 위한 **접속점** 일 뿐 catalog 데이터가 아닙니다. 프로세스 환경변수·`docker-compose.env` 는 쓰지 않습니다.
 
