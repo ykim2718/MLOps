@@ -1,6 +1,6 @@
 # MinIO — Object Storage
 
-<sub>rev. 101</sub>
+<sub>rev. 104</sub>
 
 **MinIO**는 **AWS S3 (Amazon Simple Storage Service) 와 100% 호환되는 오픈소스 오브젝트 스토리지**입니다. 클라우드 (AWS) 없이 사내 server 나 로컬 도커에 띄워 "내 S3"처럼 쓸 수 있어, 데이터셋·모델·MLflow artifact 등 **실제 대용량 데이터의 보관 위치**로 사용합니다.
 
@@ -335,8 +335,10 @@ MINIO_ROOT_PASSWORD=CHANGE_ME
 
 ## Appendix A. Terminology
 
-- **mc** — MinIO Client. MinIO·S3 호환 스토리지를 다루는 CLI 도구이며, `minio/minio` 이미지에 함께 들어 있습니다.
+- **alias** — `mc` 에서 server 접속 정보 (url·access key·secret key) 에 붙인 짧은 이름 (별명) 입니다.
 - **bucket** — 오브젝트를 담는 최상위 컨테이너 (S3 의 최상위 저장 공간).
+- **mc** — MinIO Client. MinIO·S3 호환 스토리지를 다루는 CLI 도구이며, `minio/minio` 이미지에 함께 들어 있습니다.
+- **object** — 오브젝트 스토리지의 저장 단위. 파일 하나가 키 (경로) 로 버킷 안에 담긴 것.
 
 ## Appendix B. MinIO Client CLI
 
