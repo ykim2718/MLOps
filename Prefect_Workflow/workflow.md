@@ -1,6 +1,6 @@
 # AI/ML Workflow Automation
 
-<sub>rev. 29</sub>
+<sub>rev. 37</sub>
 
 Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환경입니다. 이 문서는 **전체 워크플로우의 인덱스 (개요)** 이고, 도구별 상세는 컴포넌트 문서로 잇습니다.
 
@@ -39,27 +39,26 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
 ### Pipeline
 
 ```text
-                          TRAINING LANE                              TEST LANE
-                   data/*.parquet                             data/*.parquet
-                   (rows before the test cut)                 (most-recent test_fraction)
-                                   │                                  │
-                                   ▼                                  ▼
- ┌─────────────┐           ┌────────────────┐               ┌────────────────┐
- │ load_config │──cfg─────▶│  train_prepare │               │  test_prepare  │
- └─────────────┘           └───────┬────────┘               └───────┬────────┘
-                                   │ trainval_raw, split.json        │ test_raw
-                                   ▼                                  ▼
-                           ┌────────────────┐ scaler.json + ┌────────────────┐
-                           │ train_featurize│─features.json▶│ test_featurize │
-                           └───────┬────────┘               └───────┬────────┘
-                                   │ train/val.parquet               │ test.parquet
-                                   ▼                                  ▼
-   ┌───────────┐           ┌────────────────┐   model.txt   ┌────────────────┐
-   │ optuna DB │◀──trials──│      train     │──────────────▶│      test      │
-   └───────────┘           └───────┬────────┘               └───────┬────────┘
-       parity_plot (train) ◀───────┤                                ├──▶ parity_plot (test)
-   publish_artifacts (train) ◀─────┤ model + metrics       metrics  └──▶ publish_artifacts (test)
-                                   ▼                      + pred.csv
+                             TRAINING LANE                                        TEST LANE
+                             data/*.parquet                                     data/*.parquet
+                                   │                                                  │
+                                   ▼                                                  ▼
+                           ┌────────────────┐                                 ┌────────────────┐
+          prepare.json ───▶│  train_prepare │                 prepare.json ──▶│  test_prepare  │
+                           └───────┬────────┘                                 └───────┬────────┘
+                                   │ trainval_raw + val_start                         │ test_raw
+                                   ▼                                                  ▼
+                           ┌────────────────┐                                 ┌────────────────┐
+                           │ train_featurize│── scaler.json + features.json ─▶│ test_featurize │
+                           └───────┬────────┘                                 └───────┬────────┘
+                                   │ train/val.parquet                                │ test.parquet
+                                   ▼                                                  ▼
+                           ┌────────────────┐                                 ┌────────────────┐
+       optuna.json ───────▶│      train     │────────── model.txt ───────────▶│      test      │
+                           └───────┬────────┘                                 └───────┬────────┘
+       parity_plot (train) ◀───────┤                                                  ├──▶ parity_plot (test)
+   publish_artifacts (train) ◀─────┤ model + metrics                         metrics  └──▶ publish_artifacts (test)
+                                   ▼                                         + pred.csv
                            ┌────────────────┐
                            │    validate    │
                            └───────┬────────┘
@@ -87,34 +86,25 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
 
 ### Flow
 
-  ```
-  [ Member ]
-     ├─ submit/trigger python flow ─▶ [ Prefect Server + Dispatcher  :4200 ]  (orchestration)
-     ├─ data catalog search ───────▶ [ PostgreSQL  :5432 ]
-     └─ data download/upload ──────▶ [ MinIO  API :9000 / console :9001 ]
-
-  [ Prefect Server + Dispatcher ]
-     ├─ run stages ─────▶ [ MLflow  :5000 ]   ├─ params·metrics ─▶ [ PostgreSQL ]
-     ├─ tuning ─────────▶ [ Optuna study ]    └─ artifact ───────▶ [ MinIO ]
-     ├─ run state/logs ─▶ [ PostgreSQL ]
-     └─ data/models ────▶ [ MinIO ]
-  ```
-
-  > 공통 원칙: **DB = 작은 구조화 메타데이터, 대용량 바이너리 = MinIO + 경로 (URI) 참조.** 모델 가중치·데이터셋·plot 같은 실제 데이터는 DB 에 넣지 않고 MinIO 에 두며, DB 에는 그 경로·버전ID·해시만 기록합니다.
-
   데이터가 실제로 오가는 두 지점의 endpoint · parameter 입니다 — **upload 은 host 의 `catalog.py` 가 `spec.json` 으로**, **download 은 컨테이너 안 `pipeline.py` 가 Prefect Secret 블록으로** 합니다.
 
   ```text
-  UPLOAD  — host: catalog.py upload spec.json  (-m <member> [--pg-host/--minio-host localhost])
-    input  spec.json { dataset_id, version, path, bucket, metadata, created_by }
-    creds  Credentials block (member) — minio + postgresql_catalog sections
-       ├─ boto3 upload_file  ─▶ [ MinIO  S3 API :9000 ]          s3://<bucket>/<dataset_id>/<version>/<files>
-       └─ register row       ─▶ [ PostgreSQL  catalog DB :5432 ]  datasets(minio_path, n_files, size, metadata)
+  UPLOAD — host: catalog.py upload spec.json  (-m <member> [--pg-host/--minio-host localhost])
+    input: spec.json { dataset_id, version, path, bucket, metadata, created_by }
+    creds: Credentials block (member) — minio + postgresql_catalog sections
+  ┌────────────┐                        ┌─────────────┐
+  │ catalog.py │─ upload file ────────▶ │ MinIO :9000 │  → s3://<bucket>/<id>/<version>/<files>
+  └──────┬─────┘                        └─────────────┘
+         │                              ┌──────────────────┐
+         └─ register row ─────────────▶ │ PostgreSQL :5432 │  → datasets(minio_path, n_files, size, metadata)
+                                        └──────────────────┘
 
-  DOWNLOAD  — in-container: pipeline.py
-    input  pipeline( minio_bucket="datasets", minio_key, member )
-    creds  Credentials.load(member).minio — Prefect Secret block (minio section)
-       └─ boto3 download_file ─▶ [ MinIO  S3 API minio:9000 ]     bucket/key ─▶ ./data/<key name>
+  DOWNLOAD — in-container: pipeline.py
+    input: pipeline( minio_bucket="datasets", minio_key, member )
+    creds: Credentials.load(member).minio — Prefect Secret block (minio section)
+  ┌─────────────┐                       ┌──────────────────┐
+  │ pipeline.py │─ download file ─────▶ │ MinIO minio:9000 │  → bucket/key → ./data/<key name>
+  └─────────────┘                       └──────────────────┘
   ```
 
 ### Upload

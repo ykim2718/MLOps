@@ -42,10 +42,11 @@ except Exception:
     Credentials = None
 
 
-__version__ = "0.0.11"
+__version__ = "0.0.14"
 
 HERE: Path = Path(__file__).resolve().parent
-OPTUNA_CFG: Path = HERE / "optuna.json"
+OPTUNA_JSON: Path = HERE / "optuna.json"
+PREPARE_JSON: Path = HERE / "prepare.json"
 CSV_NAME: str = "powerconsumption.csv"
 
 # Dev-only fallback; the real DSN comes from the member's postgresql_optuna block.
@@ -83,22 +84,27 @@ SEARCH_SPACE = {
 # Run-level fallback defaults; optuna.json `environment` overrides each matching key.
 RUN_DEFAULTS = {
     "n_trials": 20, "direction": "minimize", "metric": "rmse", "cv_folds": 5,
-    "val_fraction": 0.2, "test_fraction": 0.2, "sample_rows": None, "target_zone": "Zone1",
-    "random_state": 42, "storage": None, "mlflow_uri": None, "study_name": "epc_power",
+    "target_zone": "Zone1", "random_state": 42, "storage": None, "mlflow_uri": None,
+    "study_name": "epc_power",
     "lgbm_fixed": {"objective": "regression", "metric": "rmse", "verbosity": -1, "n_jobs": -1},
 }
 
+# Data-prepare fallback defaults; prepare.json overrides each key. These drive the temporal
+# split in train_prepare / test_prepare (how much data, where the test / validation cuts fall).
+PREPARE_DEFAULTS = {"sample_rows": None, "test_fraction": 0.2, "val_fraction": 0.2}
 
-# config: read fresh each run so edits to optuna.json always take effect
+
+# config: read fresh each run so edits to optuna.json / prepare.json always take effect
 @task(name="load_config", task_run_name="load_config", log_prints=True)
-def load_config(optuna_cfg: Union[str, Path]) -> dict:
-    """Merge optuna.json over the code fallbacks.
+def load_config_json(optuna_cfg: Union[str, Path], prepare_cfg: Union[str, Path]) -> dict:
+    """Merge optuna.json + prepare.json over the code fallbacks into one `cfg` dict.
 
     optuna.json has three keys: `__version__` (doc), `environment` (run-level config that
     overrides RUN_DEFAULTS), and `search_space` (per-slot {type, range, step, log, init} that
     overrides SEARCH_SPACE; `init` becomes the warm-start anchor enqueued as trial 0). A slot for
-    a name not in SEARCH_SPACE is reported and ignored. Returns the run config flattened to the
-    top level, plus `search_space` (effective slots) and `warm_start` (the init values).
+    a name not in SEARCH_SPACE is reported and ignored. prepare.json holds the data-split settings
+    (`sample_rows`, `test_fraction`, `val_fraction`) that override PREPARE_DEFAULTS. Returns the
+    merged run config flattened to the top level, plus `search_space` and `warm_start`.
     """
     raw = json.loads(Path(optuna_cfg).read_text(encoding="utf-8"))
     run = copy.deepcopy(RUN_DEFAULTS)
@@ -112,12 +118,20 @@ def load_config(optuna_cfg: Union[str, Path]) -> dict:
         space[name].update({k: v for k, v in slot.items() if k != "init"})   # type/range/step/log
         if "init" in slot:
             warm_start[name] = slot["init"]                  # warm-start anchor (enqueued as trial 0)
+
+    prep_raw = json.loads(Path(prepare_cfg).read_text(encoding="utf-8"))
+    prep = copy.deepcopy(PREPARE_DEFAULTS)
+    prep.update({k: v for k, v in prep_raw.items() if not k.startswith("_")})   # skip __version__
+
     out = dict(run)
+    out.update(prep)                                         # sample_rows / test_fraction / val_fraction
     out["search_space"] = space
     out["warm_start"] = warm_start
-    print(f"optuna config v{raw.get('__version__', '?')}: {len(space)} search slots, "
+    print(f"optuna config v{raw.get('__version__', '?')} + prepare config "
+          f"v{prep_raw.get('__version__', '?')}: {len(space)} search slots, "
           f"{len(warm_start)} warm-start init(s); n_trials={out['n_trials']}, "
-          f"target={out['target_zone']}, sample_rows={out['sample_rows']}")
+          f"target={out['target_zone']}, sample_rows={out['sample_rows']}, "
+          f"test_fraction={out['test_fraction']}, val_fraction={out['val_fraction']}")
     return out
 
 
@@ -213,15 +227,13 @@ def train_prepare(data_dir: Union[str, Path], work: Union[str, Path], cfg: dict)
     # validation = the contiguous tail of train+val (so it sits right before the test span)
     val_cut = int(len(trainval) * (1 - cfg.get("val_fraction", 0.2)))
     val_start = trainval["Datetime"].iloc[val_cut]
-    split = {"val_start": val_start.isoformat()}
 
     work_dir = Path(work)
     work_dir.mkdir(parents=True, exist_ok=True)
     trainval.to_parquet(work_dir / "trainval_raw.parquet")
-    (work_dir / "split.json").write_text(json.dumps(split), encoding="utf-8")
     n_tr, n_va = val_cut, len(trainval) - val_cut
     print(f"prepared {len(trainval)} rows; split {n_tr}/{n_va} (train/val), val starts {val_start}")
-    return {"work": str(work)}
+    return {"work": str(work), "val_start": val_start.isoformat()}   # cut passed to train_featurize
 
 
 def _scale(df: pd.DataFrame, scaler: dict = None) -> Tuple[pd.DataFrame, dict]:
@@ -271,7 +283,7 @@ def train_featurize(prep: dict, cfg: dict) -> dict:
     split train/val on the temporal cut from train_prepare."""
     work_dir = Path(prep["work"])
     df = pd.read_parquet(work_dir / "trainval_raw.parquet")
-    val_start = pd.Timestamp(json.loads((work_dir / "split.json").read_text(encoding="utf-8"))["val_start"])
+    val_start = pd.Timestamp(prep["val_start"])                  # the train/val cut from train_prepare
     target = ZONE_COL[cfg.get("target_zone", "Zone1")]
 
     is_train = df["Datetime"] < val_start
@@ -563,7 +575,7 @@ def my_flow(data_dir: Union[str, Path], member: str = "local", git_commit_hash: 
     Path(work).mkdir(parents=True, exist_ok=True)
     log.info(f"start: member={member} commit={git_commit_hash} repo={git_repo or '-'} data={data_dir}")
 
-    cfg = load_config(OPTUNA_CFG)                            # read fresh each run
+    cfg = load_config_json(OPTUNA_JSON, PREPARE_JSON)        # read fresh each run
     if sample_rows is not None:                             # CLI override for a fast smoke test
         cfg["sample_rows"] = sample_rows
         log.info(f"sample_rows overridden from CLI: {sample_rows} (most-recent rows)")

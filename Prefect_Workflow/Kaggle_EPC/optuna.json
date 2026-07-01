@@ -1,14 +1,11 @@
 {
-  "__version__": "0.0.1",
+  "__version__": "0.0.2",
 
   "environment": {
     "n_trials": 20,
     "direction": "minimize",
     "metric": "rmse",
     "cv_folds": 5,
-    "val_fraction": 0.2,
-    "test_fraction": 0.2,
-    "sample_rows": null,
     "target_zone": "Zone1",
     "random_state": 42,
     "storage": null,

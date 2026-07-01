@@ -1,6 +1,6 @@
 # Kaggle Electric Power Consumption - Power Forecasting (LightGBM)
 
-<sub>rev. 9</sub>
+<sub>rev. 17</sub>
 
 Predicts a Tetouan-city power-consumption zone (**PowerConsumption_Zone1** by default - a
 continuous regression target) from weather and calendar features, using LightGBM.
@@ -11,7 +11,8 @@ continuous regression target) from weather and calendar features, using LightGBM
 | File | Role |
 |---|---|
 | `my_flow.py` | Prefect flow entrypoint: train_prepare -> train_featurize -> train -> validate; test lane test_prepare -> test_featurize -> test; parity_plot per stage |
-| `optuna.json` | Tuning + run config (trials, CV folds, split fractions, target zone, sample size) |
+| `optuna.json` | Tuning + run config (`environment`: trials, CV folds, target zone; `search_space`: LGBM slots) |
+| `prepare.json` | Data-split config: `sample_rows`, `test_fraction`, `val_fraction` (used by train/test_prepare) |
 | `minio_spec.json` | Dataset metadata spec - the catalog uploads it to MinIO (`dataset_id` / `version` / `metadata`) |
 | `data/` | `powerconsumption.csv` lives here (downloaded from Kaggle; git-ignored) |
 
@@ -97,6 +98,7 @@ ever leaks into training.
 | validation | next 16% (held-out tail, just before test) | 8,387 rows | 1,280 rows |
 | test | most recent 20% (`test_fraction`) | 10,484 rows | 1,600 rows |
 
+The three split knobs (`sample_rows`, `test_fraction`, `val_fraction`) live in `prepare.json`.
 `sample_rows` is `null` by default, so a run uses the full 52,416 rows; the `--sample_rows N` CLI
 flag takes only the most-recent N rows - a fast smoke test that checks the DAG end to end. The
 full year is a genuine seasonal-extrapolation problem; a small recent window (e.g. 8,000, approx
@@ -174,10 +176,11 @@ python my_flow.py --data_folder ./data --run-on server      # record the run on 
 python my_flow.py --git_repo <r> --git_commit_hash <c> --member <m> --data_folder ./data --run-on server
 ```
 
-`optuna.json -> environment -> sample_rows` is `null` by default, so a run uses all 52,416 rows. The
+`prepare.json -> sample_rows` is `null` by default, so a run uses all 52,416 rows. The
 `--sample_rows N` CLI flag overrides it (no config edit) to take only the most-recent N rows -
-a fast smoke test that checks the DAG end to end. `target_zone` (`Zone1` / `Zone2` / `Zone3`)
-picks the target.
+a fast smoke test that checks the DAG end to end. The other split knobs (`test_fraction`,
+`val_fraction`) also live in `prepare.json`; `optuna.json -> environment -> target_zone`
+(`Zone1` / `Zone2` / `Zone3`) picks the target.
 
 `--run-on` chooses where the run is recorded: **`local`** clears `PREFECT_API_URL` for the run so
 Prefect executes it ephemerally (a throwaway in-process server) - nothing reaches the team server;
@@ -201,48 +204,43 @@ about **val R2 = 0.96** / **test R2 = 0.96** - useful for checking the DAG, not 
 
 ## 6. Pipeline
 
-```text
-training:  load_config -> train_prepare -> train_featurize -> train -> validate
-test:      test_prepare  -> test_featurize  -> test     (reuses scaler / features / model)
-after each: parity_plot + publish_artifacts fire after each of train / validate / test
-```
-
 The data is **one CSV**, so both lanes read the same `powerconsumption.csv` and slice it by time
 from the same config: the training lane takes everything before the test cut (`train_prepare` /
 `train_featurize`), the test lane takes the most-recent slice (`test_prepare` /
 `test_featurize`). The test lane reuses the training `scaler.json` + `features.json` (from
 `train_featurize`) and `model.txt` (from `train`). The only split the code makes inside the
-training span is **train vs validation**, fixed in `train_prepare` (by time, via `split.json`).
+training span is **train vs validation**, fixed in `train_prepare` (by time) and passed to
+`train_featurize` as the `val_start` cut in the task result.
 
 Data flows top to bottom; **every box is a `@task`**. The label on every arrow is the data
-passed along (`data/` = input CSV, `work/` = run artifacts):
+passed along (`data/` = input CSV, `work/` = run artifacts). Config files feed their stages directly — `prepare.json` -> `train_prepare` / `test_prepare`, `optuna.json` -> `train`:
 
 Left column = **training lane**, right column = **test lane**. The two horizontal arrows are
 the hand-off: `train_featurize` passes the fitted `scaler.json` + `features.json` to
 `test_featurize`, and **`train` passes the fitted `model.txt` to `test`**.
 
 ```text
-                          TRAINING LANE                              TEST LANE
-                   data/powerconsumption.csv                  data/powerconsumption.csv
-                   (rows before the test cut)                 (most-recent test_fraction)
-                                   │                                  │
-                                   ▼                                  ▼
- ┌─────────────┐           ┌────────────────┐               ┌────────────────┐
- │ load_config │──cfg─────▶│  train_prepare │               │  test_prepare  │
- └─────────────┘           └───────┬────────┘               └───────┬────────┘
-                                   │ trainval_raw, split.json        │ test_raw
-                                   ▼                                  ▼
-                           ┌────────────────┐ scaler.json + ┌────────────────┐
-                           │ train_featurize│─features.json▶│ test_featurize │
-                           └───────┬────────┘               └───────┬────────┘
-                                   │ train/val.parquet               │ test.parquet
-                                   ▼                                  ▼
-   ┌───────────┐           ┌────────────────┐   model.txt   ┌────────────────┐
-   │ optuna DB │◀──trials──│      train     │──────────────▶│      test      │
-   └───────────┘           └───────┬────────┘               └───────┬────────┘
-       parity_plot (train) ◀───────┤                                ├──▶ parity_plot (test)
-   publish_artifacts (train) ◀─────┤ model + metrics       metrics  └──▶ publish_artifacts (test)
-                                   ▼                      + pred.csv
+                          TRAINING LANE                                           TEST LANE
+                   data/powerconsumption.csv                              data/powerconsumption.csv
+                   (earliest rows, before the cut)                   (newest rows = last test_fraction)
+                                   │                                                  │
+                                   ▼                                                  ▼
+                           ┌────────────────┐                                 ┌────────────────┐
+          prepare.json ───▶│  train_prepare │                 prepare.json ──▶│  test_prepare  │
+                           └───────┬────────┘                                 └───────┬────────┘
+                                   │ trainval_raw + val_start                         │ test_raw
+                                   ▼                                                  ▼
+                           ┌────────────────┐                                 ┌────────────────┐
+                           │ train_featurize│── scaler.json + features.json ─▶│ test_featurize │
+                           └───────┬────────┘                                 └───────┬────────┘
+                                   │ train/val.parquet                                │ test.parquet
+                                   ▼                                                  ▼
+                           ┌────────────────┐                                 ┌────────────────┐
+       optuna.json ───────▶│      train     │────────── model.txt ───────────▶│      test      │
+                           └───────┬────────┘                                 └───────┬────────┘
+       parity_plot (train) ◀───────┤                                                  ├──▶ parity_plot (test)
+   publish_artifacts (train) ◀─────┤ model + metrics                         metrics  └──▶ publish_artifacts (test)
+                                   ▼                                         + pred.csv
                            ┌────────────────┐
                            │    validate    │
                            └───────┬────────┘
@@ -260,9 +258,13 @@ diagram function, in pipeline order:
 
 ### load_config
 
-1. Re-read `optuna.json` **fresh on every run** (so edits take effect without a restart).
-2. Return the `cfg` dict: `n_trials`, `cv_folds`, `val_fraction`, `test_fraction`, `sample_rows`,
-   `target_zone`, `random_state`, `storage`, `mlflow_uri`, `study_name`, `lgbm_fixed`.
+1. Re-read `optuna.json` **and** `prepare.json` **fresh on every run** (so edits take effect
+   without a restart).
+2. Return the `cfg` dict - the two files parsed and merged over the code fallback defaults. It
+   carries `optuna.json -> environment` (`n_trials`, `cv_folds`, `target_zone`, `random_state`,
+   `storage`, `mlflow_uri`, `study_name`, `lgbm_fixed`), the effective `search_space` +
+   `warm_start` init values, and `prepare.json` (`sample_rows`, `test_fraction`, `val_fraction`).
+   Every downstream `@task` receives it - the `cfg` arrow in the diagram.
 
 ### train_prepare
 
@@ -272,12 +274,12 @@ diagram function, in pipeline order:
 3. Compute the test cut (`1 - test_fraction`) and keep everything before it as the train+val span.
 4. Fix the by-time train/val split (`1 - val_fraction`) as a contiguous tail of that span - so
    validation sits right before the test slice.
-5. Write `trainval_raw.parquet`, `split.json` (the `val_start` timestamp) - raw rows + the split
-   decision (no scaling, no features yet).
+5. Write `trainval_raw.parquet` (raw rows, no scaling / features yet) and return the `val_start`
+   timestamp in the task result - the train/val split decision handed to `train_featurize`.
 
 ### train_featurize
 
-1. Read `trainval_raw.parquet`, `split.json`.
+1. Read `trainval_raw.parquet`; take the `val_start` cut from the `train_prepare` result.
 2. **Normalization - per-feature 0-1 min-max scaling, *fit* on training rows only.** For each of
    the 5 weather features, take `lo = min` and `hi = max` over the **train** rows (before
    `val_start`) and rescale
@@ -292,7 +294,7 @@ diagram function, in pipeline order:
 4. **Feature engineering** - derive the 9 calendar features (`hour`, `dayofweek`, `is_weekend` +
    cyclical sin/cos of `hour` / `dayofweek` / `month`) for every row, and attach the selected
    `target_zone` as `y`.
-5. Apply `split.json` -> write `train.parquet`, `val.parquet`, `features.json`.
+5. Apply the `val_start` cut -> write `train.parquet`, `val.parquet`, `features.json`.
 
 > LightGBM is scale-invariant (it splits on order, not magnitude), so this 0-1 scaling does
 > **not** move the score - it is a structural preprocessing stage that keeps train and test on
