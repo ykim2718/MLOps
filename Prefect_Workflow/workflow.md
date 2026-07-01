@@ -1,6 +1,6 @@
-# AI/ML Workflow Automation — Prefect + MinIO + MLflow + Optuna + PostgreSQL
+# AI/ML Workflow Automation
 
-<sub>rev. 23</sub>
+<sub>rev. 29</sub>
 
 Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환경입니다. 이 문서는 **전체 워크플로우의 인덱스 (개요)** 이고, 도구별 상세는 컴포넌트 문서로 잇습니다.
 
@@ -17,8 +17,8 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
 3) **Persistence & Versioning** — 모델·데이터를 catalog 로 버전 보존하고 검색·선택 다운로드합니다 (메타 → PostgreSQL `catalog`, 실데이터 → MinIO).
 4) **Monitoring** — Prefect / MLflow / MinIO 대시보드로 현황을 한눈에 봅니다.
 5) **Reusability** — 워크플로우·피처를 다른 프로젝트에서 다시 씁니다.
-6) **Resource Management** — work pool·`--limit` 으로 공유 GPU/CPU 를 분배합니다.
-7) **Scheduled Automation** — cron/interval 스케줄로 무인 실행합니다.
+6) **Scheduled Automation** — cron/interval 스케줄로 무인 실행합니다.
+7) **Resource Management** — work pool·`--limit` 으로 공유 GPU/CPU 를 분배합니다.
 
 ---
 
@@ -32,23 +32,42 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
 | **MinIO** | `minio` | 대용량 데이터/모델/아티팩트 저장 (S3 호환). 버킷은 `datasets`·`models`·`mlflow` 입니다. | http://localhost:9001 | [minio.md](../Docker/MinIO/minio.md) |
 | **MLflow** | `mlflow` | 실험 (params·metrics) 추적, 모델 레지스트리. backend=`postgres`, artifact=`minio`. | http://localhost:5000 | [mlflow.md](../Docker/MLflow/mlflow.md) |
 | **PostgreSQL** | `postgres` · `pgadmin` | 모든 도구의 메타데이터 DB. `prefect`·`mlflow`·`optuna`·`catalog` 4개 논리 DB 를 운영합니다. | http://localhost:5050 (pgAdmin · DB :5432) | [postgresql.md](../Docker/PostgreSQL/postgresql.md) |
-| **Optuna** | (라이브러리) | 하이퍼파라미터 튜닝 (trial 탐색). study storage 로 `postgres` 의 `optuna` DB 를 씁니다. | — | [§5](#5-optuna) |
+| **Optuna** | python script | 하이퍼파라미터 튜닝 (trial 탐색). study storage 로 `postgres` 의 `optuna` DB 를 씁니다. | http://localhost:8080 (필요 시 기동) | [§5](#5-optuna) |
 
 > 이 스택은 한 호스트에 `postgres`·`minio`·`mlflow`·`prefect_server`·`prefect_dispatcher` (dispatcher) 를 모아 띄우고, dispatcher 가 job 마다 **Pipeline Flow 컨테이너** 를 일시적으로 띄우는 **Docker work pool** 구조입니다. 각 컨테이너는 받은 `git_repo`·`git_commit_hash` 을 shallow `git fetch` (`--depth 1`) + `git worktree` 로 펼쳐 실행하고 끝나면 스스로 파괴됩니다 (상세는 [prefect.md](../Docker/Prefect/prefect.md)).
 
 ### Pipeline
 
-  `data preparation(dp) → feature engineering(fe) → training(train) → test` 순으로, 각 단계 산출물이 다음 단계 입력이 됩니다. 각 단계는 Prefect `@task` 로 감싸고 `@flow` 가 순서를 강제합니다 (앞 단계 산출물이 있어야 다음이 실행). 팀 payload (`my_flow.py`) 로 작성해 Prefect orchestrator 가 실행합니다 (아래 [§6. Python Execution](#6-python-execution), [prefect.md](../Docker/Prefect/prefect.md) §4.3).
-
-  ```
-  [train raw] → train_dp → [transformed] → train_fe → [feature + fe_train.json]
-             → train → [model/ + train.json] → train_eval → [train_eval.json]
-
-  [test raw]  → test_dp  → [transformed] → test_fe(reuse fe_train.json) → [feature]
-             → test(load model/) → [test.json] → test_eval → [test_eval.json]
-  ```
-
-  > **train ↔ test 연결의 핵심**: test 는 train 에서 두 가지를 그대로 가져옵니다 — ① `model/` (학습된 모델), ② `fe_train.json` (train 에 fit 된 변환기). 변환을 test 에 새로 fit 하면 train/test skew 가 생기므로, fe 는 train 에서 fit 하고 test 에는 그 결과를 적용합니다.
+```text
+                          TRAINING LANE                              TEST LANE
+                   data/*.parquet                             data/*.parquet
+                   (rows before the test cut)                 (most-recent test_fraction)
+                                   │                                  │
+                                   ▼                                  ▼
+ ┌─────────────┐           ┌────────────────┐               ┌────────────────┐
+ │ load_config │──cfg─────▶│  train_prepare │               │  test_prepare  │
+ └─────────────┘           └───────┬────────┘               └───────┬────────┘
+                                   │ trainval_raw, split.json        │ test_raw
+                                   ▼                                  ▼
+                           ┌────────────────┐ scaler.json + ┌────────────────┐
+                           │ train_featurize│─features.json▶│ test_featurize │
+                           └───────┬────────┘               └───────┬────────┘
+                                   │ train/val.parquet               │ test.parquet
+                                   ▼                                  ▼
+   ┌───────────┐           ┌────────────────┐   model.txt   ┌────────────────┐
+   │ optuna DB │◀──trials──│      train     │──────────────▶│      test      │
+   └───────────┘           └───────┬────────┘               └───────┬────────┘
+       parity_plot (train) ◀───────┤                                ├──▶ parity_plot (test)
+   publish_artifacts (train) ◀─────┤ model + metrics       metrics  └──▶ publish_artifacts (test)
+                                   ▼                      + pred.csv
+                           ┌────────────────┐
+                           │    validate    │
+                           └───────┬────────┘
+        parity_plot (validation) ◀─┤
+   publish_artifacts (validation) ◀┤ val metrics
+                                   ▼
+        each stage emits both: parity_plot -> work/parity_<stage>.png ; publish_artifacts -> Prefect UI
+```
 
   `pipeline.py` 가 `pipeline_flow` 컨테이너 안에서 run 마다 만드는 폴더 구조입니다.
 
@@ -61,14 +80,6 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
   └─ data/                         # MinIO download target (bucket/key → here)
      └─ <object>                   # e.g. Bennelong Point
   ```
-
-#### Every Stage Uses MinIO, MLflow, Optuna
-
-  모든 단계 (`dp`·`fe`·`train`·`test`·`eval`) 를 세 도구로 똑같이 감쌉니다.
-
-  - **MinIO** — 단계 입력을 버킷에서 내려받고 (download), 출력을 올리며 (upload), `catalog` 에 버전·계보를 남깁니다.
-  - **MLflow** — 단계 파라미터·지표·산출물을 같은 run 아래 로깅합니다.
-  - **Optuna** — 단계의 튜닝 설정 (`optuna.json`) 을 탐색합니다 (test 는 학습에서 고른 best 설정 재사용).
 
 ---
 
@@ -91,11 +102,88 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
 
   > 공통 원칙: **DB = 작은 구조화 메타데이터, 대용량 바이너리 = MinIO + 경로 (URI) 참조.** 모델 가중치·데이터셋·plot 같은 실제 데이터는 DB 에 넣지 않고 MinIO 에 두며, DB 에는 그 경로·버전ID·해시만 기록합니다.
 
-### Data Catalog
+  데이터가 실제로 오가는 두 지점의 endpoint · parameter 입니다 — **upload 은 host 의 `catalog.py` 가 `spec.json` 으로**, **download 은 컨테이너 안 `pipeline.py` 가 Prefect Secret 블록으로** 합니다.
+
+  ```text
+  UPLOAD  — host: catalog.py upload spec.json  (-m <member> [--pg-host/--minio-host localhost])
+    input  spec.json { dataset_id, version, path, bucket, metadata, created_by }
+    creds  Credentials block (member) — minio + postgresql_catalog sections
+       ├─ boto3 upload_file  ─▶ [ MinIO  S3 API :9000 ]          s3://<bucket>/<dataset_id>/<version>/<files>
+       └─ register row       ─▶ [ PostgreSQL  catalog DB :5432 ]  datasets(minio_path, n_files, size, metadata)
+
+  DOWNLOAD  — in-container: pipeline.py
+    input  pipeline( minio_bucket="datasets", minio_key, member )
+    creds  Credentials.load(member).minio — Prefect Secret block (minio section)
+       └─ boto3 download_file ─▶ [ MinIO  S3 API minio:9000 ]     bucket/key ─▶ ./data/<key name>
+  ```
+
+### Upload
+
+  `catalog.py upload <spec.json>` 은 spec 의 `path` 가 가리키는 파일을 MinIO 에 올리고 `catalog` 에 버전 레코드를 등록합니다. host 에서는 `-m <member>` 로 자격증명 블록을 고르고 컨테이너용 endpoint 를 `--pg-host/--minio-host localhost` 로 덮어씁니다.
+
+  ```python
+  # catalog.py  upload(spec, member) — key steps (dataset_id/version/path/bucket come from spec)
+  files = _resolve_sources(spec["path"])       # file | folder (recursive) | glob (dir/*.csv, **)
+  ensure_schema()                              # create the datasets table if missing
+  if get(dataset_id, version):                 # versions are immutable -> stop if it exists
+      raise FileExistsError("version already exists")
+  for fp, rel in files:                        # upload each file -> s3://<bucket>/<id>/<version>/<rel>
+      s3.upload_file(str(fp), bucket, prefix + rel)
+  register(dataset_id, version, minio_path,    # register the catalog row (path + counts + metadata)
+           n_files=n_files, size_bytes=size_bytes, metadata=spec.get("metadata"))
+  ```
+
+  ```powershell
+  python catalog.py spec spec.json                                                    # scaffold an empty spec
+  python catalog.py upload spec.json -m <member> --pg-host localhost --minio-host localhost
+  ```
+
+  올릴 대상은 spec 의 **`path` 하나**로 정하고, 파일 한 개·여러 개·와일드카드는 그 `path` 값으로 구별됩니다 (별도 목록 필드 없음).
+
+  | path | files | MinIO key |
+  |---|---|---|
+  | single file `data/powerconsumption.csv` | 그 파일 1개 | `<id>/<version>/powerconsumption.csv` |
+  | folder `data` | 폴더 아래 전부 (재귀) | `<id>/<version>/<상대경로>` |
+  | wildcard `data/*.parquet` | 매치 파일 (비재귀) | `<id>/<version>/<파일명>` |
+  | recursive wildcard `data/**/*.parquet` | 하위까지 매치 | `<id>/<version>/<상대경로>` |
+
+  ```json
+  {"dataset_id": "epc", "version": "v1", "path": "data/powerconsumption.csv",
+   "bucket": "datasets", "created_by": "ykim", "metadata": {"source": "kaggle"}}
+  ```
+
+  > `path` 만 바꿔 위 네 경우를 씁니다 (`"path": "data"` · `"path": "data/*.parquet"` · `"path": "data/**/*.parquet"`). 매치가 0건이면 `FileNotFoundError` 로 중단하고, 같은 `dataset_id`/`version` 이 이미 있으면 덮지 않고 중단합니다.
+
+### Download
+
+  `catalog.py download <id> [version] [dest]` 은 catalog 에서 `minio_path` 를 찾아 (version 생략 시 최신) 그 아래 객체를 `dest` (기본 `./<id>`) 로 내려받습니다.
+
+  ```python
+  # catalog.py  download(dataset_id, version, dest, member) — key steps
+  row = get(dataset_id, version)               # version omitted -> latest row
+  bucket, prefix = split(row["minio_path"])    # s3://bucket/<id>/<version>/
+  for obj in list_objects(bucket, prefix):     # every object under the prefix
+      s3.download_file(bucket, obj["Key"], dest_path)   # -> dest/<relative key>
+  ```
+
+  ```powershell
+  python catalog.py download <id> <version> ./out -m <member> --pg-host localhost --minio-host localhost
+  ```
+
+  > flow 실행 중의 자동 download 는 CLI 가 아니라 컨테이너 안 `pipeline.py` 가 Prefect Secret 블록으로 합니다 (위 [Flow](#flow) 다이어그램).
+
+### List
 
   여러 데이터셋·모델을 만들고 비교·재현하려면 산출물을 **버전 관리** 하고 무엇이 어디 있는지 **검색** 할 수 있어야 합니다. 이 스택은 실제 데이터를 MinIO 에, 가벼운 메타데이터·버전 이력·계보를 PostgreSQL `catalog` DB 에 둡니다.
 
-  `catalog` 은 `catalog` DB 안의 테이블 하나 (`datasets`) 이며, MinIO 의 실제 데이터를 가리키는 **메타데이터 장부** 입니다. 이 장부를 다루는 **catalog 접근 계층** (테이블 생성·버전 등록·검색) 이 워크플로우에서 데이터의 위치·버전·계보를 기록합니다. CLI 둘러보기·업로드·다운로드·삭제는 [Appendix A. catalog.py CLI](#appendix-a-catalogpy-cli) 를 참고합니다.
+  `catalog` 은 `catalog` DB 안의 테이블 하나 (`datasets`) 이며, MinIO 의 실제 데이터를 가리키는 **메타데이터 장부** 입니다. 이 장부를 다루는 **catalog 접근 계층** (테이블 생성·버전 등록·검색) 이 워크플로우에서 데이터의 위치·버전·계보를 기록합니다. 전체 명령은 [Appendix A. catalog.py CLI](#appendix-a-catalogpy-cli) 를 참고합니다.
+
+  ```powershell
+  python catalog.py list -m <member> --pg-host localhost                                 # datasets summary (latest)
+  python catalog.py versions <id> -m <member> --pg-host localhost                        # version history
+  python catalog.py tree --files -m <member> --pg-host localhost --minio-host localhost  # id > version tree (+ counts)
+  python catalog.py find <id> fab=fab2 -m <member> --pg-host localhost                   # search by metadata key=value
+  ```
 
 #### Versioning
 
@@ -195,6 +283,7 @@ study.optimize(objective, n_trials=20)
 - **공유 DB (기본)** — `POSTGRESQL_OPTUNA_DSN` (`postgresql://.../optuna`). 여러 worker·여러 PC 가 하나의 study 를 분산 병렬로 탐색하거나 기록을 중앙에 보존할 때 유리합니다.
 - **로컬 파일 (대안)** — `sqlite:///optuna.db`. 단일 PC 에서 가볍게 쓸 때 적합합니다.
 - Optuna 가 DB 에 넣는 것은 trial 메타데이터 (파라미터·점수) 뿐이고, 모델 가중치 같은 실제 산출물은 MinIO 에 저장합니다.
+- **Dashboard** — 상시 서비스가 아니라 필요할 때 띄웁니다: `optuna-dashboard postgresql://<user>:<pw>@localhost:5432/optuna` → `http://localhost:8080`. 위 `optuna` DB 의 trial 기록 (파라미터·점수·수렴 곡선) 을 브라우저로 봅니다.
 
 ---
 
@@ -343,9 +432,9 @@ def inference_flow():
 
 ## Appendix A. catalog.py CLI
 
-`catalog.py` 는 데이터 카탈로그 (PostgreSQL `catalog` DB 장부) 와 MinIO 객체를 함께 다루는 접근 계층이자 CLI 입니다. flow 에서 라이브러리로 import 해 쓰거나 ([§3 Data Catalog](#3-data)), 아래 CLI 로 직접 둘러보기·업로드·다운로드·삭제합니다. **catalog.py 는 컨테이너 밖에서 실행** 되므로 자격증명은 Prefect 프로필 ([§6 Server Connection](#6-python-execution) 의 `prefect config set PREFECT_API_URL=...`) 로 연결된 **Prefect Secret 블록** 에서 가져옵니다 (필요한 4개 블록은 아래 [Credentials](#credentials-prefect-secret-blocks), 없으면 default). 프로세스 환경변수나 `docker-compose.env` 파일은 쓰지 않습니다 (그 파일은 컨테이너 스택용이라 host 의 catalog.py 가 찾을 수 없음). 업로드·다운로드·삭제는 boto3 로 처리하므로 `mc` 가 필요 없습니다.
+`catalog.py` 는 데이터 카탈로그 (PostgreSQL `catalog` DB 장부) 와 MinIO 객체를 함께 다루는 접근 계층이자 CLI 입니다. flow 에서 라이브러리로 import 해 쓰거나 ([§3 Data Catalog](#3-data)), 아래 CLI 로 직접 둘러보기·업로드·다운로드·삭제합니다. **catalog.py 는 컨테이너 밖에서 실행** 되므로 자격증명은 Prefect 프로필 ([§6 Server Connection](#6-python-execution) 의 `prefect config set PREFECT_API_URL=...`) 로 연결된 **Prefect Secret 블록** 에서 가져옵니다 (멤버별 `Credentials` 블록은 아래 [Credentials](#credentials-prefect-block), 없으면 default). 프로세스 환경변수나 `docker-compose.env` 파일은 쓰지 않습니다 (그 파일은 컨테이너 스택용이라 host 의 catalog.py 가 찾을 수 없음). 업로드·다운로드·삭제는 boto3 로 처리하므로 `mc` 가 필요 없습니다.
 
-**Target** 은 명령이 접속하는 곳입니다 (**PostgreSQL** = catalog DB 장부, **MinIO** = 객체 저장소). 각 명령은 실행 시작 시 접속 대상 (PostgreSQL DSN — 비밀번호 가림 · MinIO endpoint) 과 **자격증명 출처** (`[creds: prefect-block | default]`) 를 stderr 로 먼저 출력해 "어디로 접속해 도는지, 자격증명을 어디서 가져왔는지" 를 알립니다. Prefect 서버 블록에서 가져오면 `prefect-block`, 서버 미연결·블록 없음이면 `default` 로 표시됩니다. `--version`/`-V` 로 버전을 확인합니다.
+**Target** 은 명령이 접속하는 곳입니다 (**PostgreSQL** = catalog DB 장부, **MinIO** = 객체 저장소). 각 명령은 실행 시작 시 접속 대상 (PostgreSQL DSN — 비밀번호 가림 · MinIO endpoint) 과 **자격증명 출처** (`[creds: prefect-block (member=…) | default]`) 를 stderr 로 먼저 출력해 "어디로 접속해 도는지, 자격증명을 어디서 가져왔는지" 를 알립니다. Prefect 서버 블록에서 가져오면 `prefect-block`, 서버 미연결·블록 없음이면 `default` 로 표시됩니다. `--version`/`-V` 로 버전을 확인합니다.
 
 | Command | Target | Purpose |
 |---|---|---|
@@ -353,10 +442,13 @@ def inference_flow():
 | `versions <id>` | PostgreSQL | 한 데이터셋의 버전 이력 |
 | `tree [id] [--files]` | PostgreSQL (+MinIO `--files`) | 데이터셋 > 버전 트리 (`--files` 면 MinIO 파일 종류별 개수) |
 | `find <id> [key=value ...]` | PostgreSQL | metadata 키=값 검색 |
+| `spec [out.json]` | (local) | 빈 upload spec.json 뼈대 생성 (채워서 `upload` 에 사용; 기본 `spec.json`) |
 | `upload <spec.json>` | MinIO + PostgreSQL | MinIO 적재 + catalog 등록 (JSON spec) |
 | `download <id> [version] [dest]` | PostgreSQL + MinIO | 버전 객체 다운로드 (version 생략 시 최신, dest 기본 `./<id>`) |
 | `remove <id> [version] [--yes]` | MinIO + PostgreSQL | MinIO + catalog 에서 영구 삭제 (version 생략 시 데이터셋 전체) |
 | `objects [id]` | MinIO | MinIO 에 실제로 있는 객체 나열 (catalog 무관) |
+
+MinIO·PostgreSQL 에 접속하는 명령에는 `-m <member>` (자격증명 블록 선택) 와 `--pg-host`/`--minio-host` (endpoint host 만 덮어쓰기, creds 불변) 를 붙일 수 있습니다 — 컨테이너용 블록을 host 에서 쓸 때 유용합니다 (`spec` 은 로컬 파일 생성이라 해당 없음). 자세한 것은 아래 [Credentials](#credentials-prefect-block).
 
 catalog.py 는 자격증명 블록 클래스 (`credentials.py`, `../Docker/Prefect`) 를 import 하므로, host 에서 실행 전 그 폴더를 `PYTHONPATH` 에 1회 넣습니다 (경로는 repo 위치에 맞춰 `Resolve-Path` 로 풉니다).
 
@@ -368,6 +460,7 @@ python catalog.py list                              # dataset summary (latest ve
 python catalog.py versions sydney_202605            # one dataset's version history
 python catalog.py tree --files                      # dataset > version tree (+ file-type counts)
 python catalog.py find sydney_202605 fab=fab2       # search by metadata key=value
+python catalog.py spec spec.json                    # write an empty upload spec template
 python catalog.py upload spec.json                  # upload to MinIO + register (JSON spec)
 python catalog.py download sydney_202605 v2 ./out   # version omitted -> latest; dest -> ./<id>
 python catalog.py remove sydney_202605 v2 --yes     # version omitted -> whole dataset
@@ -384,19 +477,25 @@ python catalog.py objects sydney_202605             # raw MinIO objects (not the
 
 > 버전은 불변 (immutable) 입니다 — 같은 `dataset_id`/`version` 이 MinIO 나 catalog 에 이미 있으면 `upload` 는 덮어쓰지 않고 중단합니다 (버전을 올려 다시 시도). `remove` 는 MinIO 객체 (모든 버전·삭제마커) 와 catalog 행을 영구 삭제하므로 `--yes` 없이는 `DELETE` 입력을 요구합니다.
 
-### Credentials (Prefect Secret blocks)
+host 에서 컨테이너용 블록 (endpoint 가 `postgres`·`minio` 서비스명) 으로 접속할 때는 `-m <member>` 로 블록을 고르고 `--pg-host`/`--minio-host` 로 host 만 `localhost` 로 바꿉니다.
 
-  catalog.py 가 필요로 하는 값은 **딱 4개** 이고, 모두 Prefect 서버의 **Secret 블록** 으로 가져옵니다 (관리자가 1회 등록 — [prefect.md](../Docker/Prefect/prefect.md) §5 Credentials).
+```powershell
+python catalog.py upload spec.json -m <member> --pg-host localhost --minio-host localhost
+python catalog.py remove <id> <version> -m <member> --pg-host localhost --minio-host localhost
+```
 
-  | Block | Role | Target |
+### Credentials (Prefect block)
+
+  catalog.py 가 읽는 자격증명은 **팀원마다 하나인 `Credentials` 블록** (블록 이름 = 팀원 이름, 소문자·숫자·대시) 에 담겨 있고, 관리자가 `credentials.py` 로 1회 등록합니다 (`python credentials.py --json-path <member>.json --block-name <member>` — [prefect.md](../Docker/Prefect/prefect.md) §5 Credentials). 한 블록 안에 세 섹션 (nested dict, `SecretDict` 로 가림) 이 들어 있습니다.
+
+  | Section | Fields | Target |
   |---|---|---|
-  | `catalog-dsn` | `catalog` DB 접속 DSN (user·pass·host·port·db 를 한 문자열에 포함) | PostgreSQL |
-  | `minio-endpoint` | MinIO 주소 (`http://<host>:9000`) | MinIO |
-  | `minio-access-key` | MinIO 접속 키 | MinIO |
-  | `minio-secret-key` | MinIO 비밀 키 | MinIO |
+  | `minio` | `endpoint` · `access_key` · `secret_key` | MinIO |
+  | `postgresql_catalog` | `endpoint` · `username` · `password` · `database` | PostgreSQL (`catalog` DB) |
+  | `postgresql_optuna` | `endpoint` · `username` · `password` · `database` | PostgreSQL (`optuna` DB, flow·Optuna 용) |
 
-  `PREFECT_API_URL` (Prefect 프로필) 은 위 블록을 받기 위한 **접속점일 뿐** catalog 데이터가 아닙니다. catalog.py 는 `mlflow`·`optuna`·`prefect` DB 를 직접 접속하지 않으므로 그 자격증명은 필요 없습니다.
+  - **`-m <member>`** 가 어느 팀원 블록을 읽을지 정합니다. catalog.py 는 그중 `minio` + `postgresql_catalog` 두 섹션만 씁니다 (`postgresql_optuna` 는 flow 용). 블록이 없거나 서버 미연결이면 default (localhost) 로 떨어지고, 배너에 `[creds: prefect-block (member=…)]` 또는 `[creds: default]` 로 출처가 표시됩니다.
+  - **`--pg-host` / `--minio-host`** 는 블록 endpoint 의 host 만 덮어씁니다 (creds·port 불변). 컨테이너용 블록 (endpoint 가 `postgres`·`minio` 서비스명) 을 host 에서 쓸 때 `--pg-host localhost --minio-host localhost` 로 붙입니다.
+  - `PREFECT_API_URL` (Prefect 프로필) 은 이 블록을 받기 위한 **접속점** 일 뿐 catalog 데이터가 아닙니다. 프로세스 환경변수·`docker-compose.env` 는 쓰지 않습니다.
 
-  **사용자별 MinIO 키 (`-m <member>`)** — MinIO 를 건드리는 명령 (`upload`·`download`·`remove`·`objects`·`tree --files`) 에 `-m <member>` 를 주면 `minio-access-key-<member>`·`minio-secret-key-<member>` 블록을 먼저 써서 **그 사용자의 버킷 권한 (policy) 으로** 접속합니다. 그 블록이 없으면 공유 `minio-access-key`·`minio-secret-key` 로 떨어집니다 (`minio-endpoint` 는 한 MinIO 라 공유). 실행 배너의 `[creds: …]` 에 누구 키로 도는지 (`prefect-block (member=alice)` / `prefect-block (shared)` / `default`) 표시됩니다. `catalog-dsn` 은 현재 공유이며, 같은 방식으로 `catalog-dsn-<member>` 로 확장할 수 있습니다.
-
-  > **권한 차단은 MinIO policy 로** — 공유 키만 등록하면 모두 같은 신원으로 동작하고 (이 경우 격리는 경로 규칙 `s3://.../{member}/...`, [§3 Output Placement](#3-data)), Prefect 블록 자체엔 사용자별 접근제어가 없습니다. 진짜 사용자별 차단은 사용자별 키 블록을 등록하고 `-m` 로 실행하되, **그 키들이 MinIO 에서 버킷 policy 로 제한** 되어 있어야 실제로 막힙니다.
+  > **권한 차단은 MinIO policy 로** — 팀원 블록의 `minio` 키가 곧 그 팀원의 MinIO 신원입니다. 진짜 사용자별 차단은 **그 키가 MinIO 에서 버킷 policy 로 제한** 되어 있어야 실제로 막히고, 그렇지 않으면 격리는 경로 규칙 `s3://.../{member}/...` ([§3 Output Placement](#3-data)) 에 의존합니다. Prefect 블록 자체엔 사용자별 접근제어가 없습니다.
