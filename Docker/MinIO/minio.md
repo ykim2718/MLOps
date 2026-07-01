@@ -1,6 +1,6 @@
 # MinIO — Object Storage
 
-<sub>rev. 100</sub>
+<sub>rev. 101</sub>
 
 **MinIO**는 **AWS S3 (Amazon Simple Storage Service) 와 100% 호환되는 오픈소스 오브젝트 스토리지**입니다. 클라우드 (AWS) 없이 사내 server 나 로컬 도커에 띄워 "내 S3"처럼 쓸 수 있어, 데이터셋·모델·MLflow artifact 등 **실제 대용량 데이터의 보관 위치**로 사용합니다.
 
@@ -345,6 +345,7 @@ MINIO_ROOT_PASSWORD=CHANGE_ME
 ### Alias
 
   - `mc alias set <alias> <url> <ACCESS_KEY> <SECRET_KEY>` — server 를 alias 로 등록합니다 (이후 `local` 등으로 참조).
+  - `mc alias list [<alias>]` — 등록된 alias 목록·접속 정보를 봅니다 (alias 를 주면 그 항목만).
 
 ### Object
 
