@@ -1,6 +1,6 @@
 # AI/ML Workflow Automation
 
-<sub>rev. 37</sub>
+<sub>rev. 40</sub>
 
 Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환경입니다. 이 문서는 **전체 워크플로우의 인덱스 (개요)** 이고, 도구별 상세는 컴포넌트 문서로 잇습니다.
 
@@ -44,26 +44,26 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
                                    │                                                  │
                                    ▼                                                  ▼
                            ┌────────────────┐                                 ┌────────────────┐
-          prepare.json ───▶│  train_prepare │                 prepare.json ──▶│  test_prepare  │
+          prepare.json ───>│  train_prepare │                 prepare.json ──>│  test_prepare  │
                            └───────┬────────┘                                 └───────┬────────┘
                                    │ trainval_raw + val_start                         │ test_raw
                                    ▼                                                  ▼
                            ┌────────────────┐                                 ┌────────────────┐
-                           │ train_featurize│── scaler.json + features.json ─▶│ test_featurize │
+                           │ train_featurize│── scaler.json + features.json ─>│ test_featurize │
                            └───────┬────────┘                                 └───────┬────────┘
                                    │ train/val.parquet                                │ test.parquet
                                    ▼                                                  ▼
                            ┌────────────────┐                                 ┌────────────────┐
-       optuna.json ───────▶│      train     │────────── model.txt ───────────▶│      test      │
+       optuna.json ───────>│      train     │────────── model.txt ───────────>│      test      │
                            └───────┬────────┘                                 └───────┬────────┘
-       parity_plot (train) ◀───────┤                                                  ├──▶ parity_plot (test)
-   publish_artifacts (train) ◀─────┤ model + metrics                         metrics  └──▶ publish_artifacts (test)
+       parity_plot (train) <───────┤                                                  ├──> parity_plot (test)
+   publish_artifacts (train) <─────┤ model + metrics                         metrics  └──> publish_artifacts (test)
                                    ▼                                         + pred.csv
                            ┌────────────────┐
                            │    validate    │
                            └───────┬────────┘
-        parity_plot (validation) ◀─┤
-   publish_artifacts (validation) ◀┤ val metrics
+        parity_plot (validation) <─┤
+   publish_artifacts (validation) <┤ val metrics
                                    ▼
         each stage emits both: parity_plot -> work/parity_<stage>.png ; publish_artifacts -> Prefect UI
 ```
@@ -93,17 +93,17 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
     input: spec.json { dataset_id, version, path, bucket, metadata, created_by }
     creds: Credentials block (member) — minio + postgresql_catalog sections
   ┌────────────┐                        ┌─────────────┐
-  │ catalog.py │─ upload file ────────▶ │ MinIO :9000 │  → s3://<bucket>/<id>/<version>/<files>
+  │ catalog.py │─ upload file ────────> │ MinIO :9000 │  → s3://<bucket>/<id>/<version>/<files>
   └──────┬─────┘                        └─────────────┘
          │                              ┌──────────────────┐
-         └─ register row ─────────────▶ │ PostgreSQL :5432 │  → datasets(minio_path, n_files, size, metadata)
+         └─ register row ─────────────> │ PostgreSQL :5432 │  → datasets(minio_path, n_files, size, metadata)
                                         └──────────────────┘
 
   DOWNLOAD — in-container: pipeline.py
     input: pipeline( minio_bucket="datasets", minio_key, member )
     creds: Credentials.load(member).minio — Prefect Secret block (minio section)
   ┌─────────────┐                       ┌──────────────────┐
-  │ pipeline.py │─ download file ─────▶ │ MinIO minio:9000 │  → bucket/key → ./data/<key name>
+  │ pipeline.py │─ download file ─────> │ MinIO minio:9000 │  → bucket/key → ./data/<key name>
   └─────────────┘                       └──────────────────┘
   ```
 
@@ -175,37 +175,7 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
   python catalog.py find <id> fab=fab2 -m <member> --pg-host localhost                   # search by metadata key=value
   ```
 
-#### Versioning
-
-  데이터셋을 갱신할 때 이전 버전을 덮어쓰지 않고 보존합니다. 버전을 경로에 넣어 (`.../v1/`, `.../v2/`) 새 버전은 새 경로로 올리고, `catalog` 테이블에는 버전마다 새 레코드를 추가합니다.
-
-  - **MinIO 경로 규칙**: `s3://datasets/<DatasetId>/<Version>/...`
-  - **이름 규칙 (`DatasetId`·`Version`)**: 소문자·숫자·`_`·`.` 만 사용합니다 (공백·대문자·`-` 불가). 이 값이 그대로 MinIO 경로와 catalog 키가 되기 때문입니다.
-
-  ```python
-  import catalog                       # catalog access layer
-
-  catalog.ensure_schema()              # create the datasets table idempotently (once at flow start)
-  catalog.register("sydney_202605", "v2", "s3://datasets/sydney_202605/v2/",
-                   created_by="zoo", prefect_run_id="<run_id>",
-                   metadata={"fab": "fab2", "chamber": "CH3"})   # metadata (dict) → JSONB
-  rows = catalog.find("sydney_202605", fab="fab2")               # search (dataset_id + metadata keys)
-  ```
-
-#### Lineage
-
-  `catalog` 레코드의 `prefect_run_id` (데이터를 만든 실행) 와, MLflow run 태그에 기록하는 입력 데이터 버전을 **서로 참조** 해 두면 데이터 ↔ 코드 ↔ 결과를 양방향으로 추적할 수 있습니다.
-
-  ```
-  data (version) ──used by──▶ code (Prefect run) ──produces──▶ result (MLflow run / model)
-     ▲                                                              │
-     └────────────────────  trace back (result → data)  ◀──────────┘
-  ```
-
-  - **순방향** — 어떤 데이터 버전을 어떤 flow run 이 만들었고, 그 run 에서 나온 MLflow run·모델이 무엇인지 추적합니다.
-  - **역방향** — 운영 모델의 MLflow run 태그 (`input_dataset`/`input_version`) → `catalog.find(...)` → `minio_path` 로 원본까지 거슬러 올라갑니다.
-
-#### Output Placement & Name Collision
+#### MinIO Key
 
   전 팀원이 같은 MinIO 버킷에 결과물을 쓰므로 이름이 겹칠 수 있습니다. MLflow run (`run_id`)·Prefect run (`id`)·Optuna trial (`study_name`+`number`) 은 **자동으로 격리** 되고, 직접 저장하는 파일만 경로에 고유 키를 넣어 분리합니다.
 
@@ -213,17 +183,6 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
   # member / experiment comes from a job setting, env var, or flow parameter.
   out_uri = f"s3://models/{member}/{experiment}/{run_id}/model.pt"
   ```
-
-  | Artifact | Location |
-  |--------|-----------|
-  | 학습된 모델 가중치 | MinIO `s3://models/...` |
-  | MLflow params·metrics | PostgreSQL `mlflow` DB |
-  | MLflow 모델·plot·artifact | MinIO `s3://mlflow/...` |
-  | Optuna trial 기록 | PostgreSQL `optuna` DB |
-  | 데이터셋 + 버전·메타데이터 | 실제 데이터 → MinIO `s3://datasets/...`, 메타 → PostgreSQL `catalog` DB |
-  | flow/task run 상태·로그 | PostgreSQL `prefect` DB |
-
-  > 위에서 코드가 **직접 접속**하는 곳은 MinIO 와 PostgreSQL 의 `catalog`·`optuna` DB 뿐입니다 — `mlflow`·`prefect` DB 는 MLflow server·Prefect server 가 대신 접속합니다. 자격증명 (`MINIO_*` / `POSTGRESQL_CATALOG_DSN` / `POSTGRESQL_OPTUNA_DSN`) 셋업은 [prefect.md](../Docker/Prefect/prefect.md) §5 Credentials, DB 별 권한 분리는 [postgresql.md](../Docker/PostgreSQL/postgresql.md) §4 Granular Database Access Control 를 참고합니다.
 
 ---
 
@@ -417,6 +376,21 @@ def inference_flow():
 
 - **Prefect (`@task(retries=3)` / `@flow`)** — 언제·어떤 순서로 실행할지, 실패 시 재시도·로깅을 맡습니다.
 - **MLflow (`mlflow.pyfunc.load_model`)** — `models:/mnist-classifier/Production` 으로 레지스트리에서 실제 모델을 내려받아 로드합니다.
+
+---
+
+## 9. Lineage
+
+  `catalog` 레코드의 `prefect_run_id` (데이터를 만든 실행) 와, MLflow run 태그에 기록하는 입력 데이터 버전을 **서로 참조** 해 두면 데이터 ↔ 코드 ↔ 결과를 양방향으로 추적할 수 있습니다.
+
+  ```
+  data (version) ──used by──> code (Prefect run) ──produces──> result (MLflow run / model)
+     ▲                                                              │
+     └────────────────────  trace back (result → data)  <──────────┘
+  ```
+
+  - **순방향** — 어떤 데이터 버전을 어떤 flow run 이 만들었고, 그 run 에서 나온 MLflow run·모델이 무엇인지 추적합니다.
+  - **역방향** — 운영 모델의 MLflow run 태그 (`input_dataset`/`input_version`) → `catalog.find(...)` → `minio_path` 로 원본까지 거슬러 올라갑니다.
 
 ---
 

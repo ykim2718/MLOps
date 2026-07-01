@@ -79,10 +79,10 @@ in this step** and do not exist in bronze:
 ```text
 bronze column                          silver feature (per row)
 ─────────────                          ────────────────────────
-Datetime    ── .hour / .dayofweek ──▶  hour, dayofweek, is_weekend   (numeric)
-Datetime    ── sin/cos of cycle ────▶  hour_sin/cos, dow_sin/cos, month_sin/cos
-Temperature .. DiffuseFlows ── 0-1 ──▶ 5 scaled weather features
-PowerConsumption_Zone{1,2,3}        ──▶ y   (the selected target_zone)
+Datetime    ── .hour / .dayofweek ──>  hour, dayofweek, is_weekend   (numeric)
+Datetime    ── sin/cos of cycle ────>  hour_sin/cos, dow_sin/cos, month_sin/cos
+Temperature .. DiffuseFlows ── 0-1 ──> 5 scaled weather features
+PowerConsumption_Zone{1,2,3}        ──> y   (the selected target_zone)
 ```
 
 ### Sizes and splits
@@ -226,26 +226,26 @@ the hand-off: `train_featurize` passes the fitted `scaler.json` + `features.json
                                    │                                                  │
                                    ▼                                                  ▼
                            ┌────────────────┐                                 ┌────────────────┐
-          prepare.json ───▶│  train_prepare │                 prepare.json ──▶│  test_prepare  │
+          prepare.json ───>│  train_prepare │                 prepare.json ──>│  test_prepare  │
                            └───────┬────────┘                                 └───────┬────────┘
                                    │ trainval_raw + val_start                         │ test_raw
                                    ▼                                                  ▼
                            ┌────────────────┐                                 ┌────────────────┐
-                           │ train_featurize│── scaler.json + features.json ─▶│ test_featurize │
+                           │ train_featurize│── scaler.json + features.json ─>│ test_featurize │
                            └───────┬────────┘                                 └───────┬────────┘
                                    │ train/val.parquet                                │ test.parquet
                                    ▼                                                  ▼
                            ┌────────────────┐                                 ┌────────────────┐
-       optuna.json ───────▶│      train     │────────── model.txt ───────────▶│      test      │
+       optuna.json ───────>│      train     │────────── model.txt ───────────>│      test      │
                            └───────┬────────┘                                 └───────┬────────┘
-       parity_plot (train) ◀───────┤                                                  ├──▶ parity_plot (test)
-   publish_artifacts (train) ◀─────┤ model + metrics                         metrics  └──▶ publish_artifacts (test)
+       parity_plot (train) <───────┤                                                  ├──> parity_plot (test)
+   publish_artifacts (train) <─────┤ model + metrics                         metrics  └──> publish_artifacts (test)
                                    ▼                                         + pred.csv
                            ┌────────────────┐
                            │    validate    │
                            └───────┬────────┘
-        parity_plot (validation) ◀─┤
-   publish_artifacts (validation) ◀┤ val metrics
+        parity_plot (validation) <─┤
+   publish_artifacts (validation) <┤ val metrics
                                    ▼
         each stage emits both: parity_plot -> work/parity_<stage>.png ; publish_artifacts -> Prefect UI
 ```

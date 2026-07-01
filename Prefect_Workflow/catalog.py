@@ -35,16 +35,64 @@ PostgreSQL `catalog` DB 의 `datasets` 테이블을 다룬다.
        python catalog.py remove   sydney_202605 --yes     # 확인 프롬프트 건너뛰기
        python catalog.py objects  sydney_202605           # MinIO 에 실제 있는 객체 나열
 
-자격증명·연결 주소는 Prefect 프로필(`prefect config set PREFECT_API_URL=...`)로 연결된 Prefect
-서버의 **팀원 블록**(블록 이름 = 팀원 이름, 예 `Jason`)에서 가져온다 → _section() 참고. 각 팀원 블록은
-minio(자기 키) + postgresql_catalog·postgresql_optuna(공용 DB, 모든 팀원 블록에 같은 값) 세 섹션
-(nested dict)을 담고, 비밀 값은 SecretDict 로 가려진다. catalog.py 는 컨테이너 밖에서 도는 도구라
-docker-compose.env(Docker/Prefect/ 에 있어 찾을 수 없음)도, 프로세스 환경변수도 쓰지 않는다. member 가
-없거나 서버 미연결/블록 없음이면 default(localhost)로 떨어진다(관리자가 팀원마다
-`python credentials.py <member>.json` 으로 등록해 둔 경우 인증되어 동작). Credentials 클래스는 credentials.py 에 있다.
+MinIO·PostgreSQL 에 붙는 명령엔 `-b <block>` (자격증명 블록 선택; 라이브러리에선 set_member()) 와
+`--pg-host`/`--minio-host` (endpoint host 만 덮어쓰기, creds 불변) 를 붙일 수 있다. 컨테이너용 블록을
+host 에서 쓸 땐 `-b <block> --pg-host localhost --minio-host localhost`. 블록·자격증명 상세는 아래 CLI help 참고.
 
-**DB·MinIO 모두 팀원 블록에서 온다**: `-m <member>`(라이브러리에선 set_member())로 어느 팀원 블록을
-읽을지 정한다 — 모든 명령에 -m 가 있다. catalog·optuna 는 공용 DB 라 어느 팀원 블록이든 같은 값 → _section().
+CLI help (`python catalog.py`):
+
+usage: catalog.py [-h] [-V] <command> ...
+
+catalog.py v0.0.33 - Data catalog (PostgreSQL ledger) + MinIO object operations.
+
+positional arguments:
+  <command>
+    list         [PostgreSQL] list datasets (latest-version summary)
+    versions     [PostgreSQL] show one dataset's version history
+    tree         [PostgreSQL; --files also MinIO] dataset > version tree
+    find         [PostgreSQL] search by dataset_id + metadata key=value
+    spec         write an empty upload spec.json template to fill in
+    upload       [MinIO + PostgreSQL] upload files + register, from a JSON
+                 spec
+    download     [PostgreSQL + MinIO] look up in catalog, download objects
+    remove       [MinIO + PostgreSQL] PERMANENTLY delete objects + rows
+    objects      [MinIO] list raw MinIO objects (not the catalog)
+
+options:
+  -h, --help     show this help message and exit
+  -V, --version  show program's version number and exit
+
+examples:
+  python catalog.py list                              # dataset summary (latest version)
+  python catalog.py versions sydney_202605            # one dataset's version history
+  python catalog.py tree --files                      # dataset > version tree (+ file-type counts)
+  python catalog.py find sydney_202605 fab=fab2       # search by metadata key=value
+  python catalog.py spec spec.json                    # write an empty upload spec template
+  python catalog.py upload spec.json                  # upload to MinIO + register (JSON spec)
+  python catalog.py download sydney_202605 v2 ./out   # version omitted -> latest; dest -> ./<id>
+  python catalog.py remove sydney_202605 v2 --yes     # version omitted -> whole dataset
+  python catalog.py objects sydney_202605             # raw MinIO objects (not the catalog)
+  python catalog.py list -b alice                     # read alice's block for DB/MinIO creds (-b, any command)
+
+upload spec.json:
+  {"dataset_id": "sydney_202605", "version": "v2", "path": "./out",
+   "bucket": "datasets", "created_by": "zoo", "description": "fab2 CH3",
+   "metadata": {"fab": "fab2", "chamber": "CH3"}}
+
+targets (each command prints where it connects + creds source at start):
+  [PostgreSQL] = catalog DB ledger,  [MinIO] = object storage
+  creds source: prefect-block | default
+  list/versions/find = PostgreSQL    objects = MinIO
+  upload/download/remove = both      tree = PostgreSQL (+MinIO with --files)
+
+credentials - from a Prefect block (via the profile's PREFECT_API_URL), else default
+(localhost). no env vars, no docker-compose.env.
+  block sections (nested dict, hidden via SecretDict):
+    minio = {endpoint, access_key, secret_key}
+    postgresql_catalog/postgresql_optuna = {endpoint, username, password, database}
+  -b <block> picks the block (DB + MinIO). catalog/optuna are the shared DB.
+  --pg-host/--minio-host override only the endpoint host (creds unchanged) - reuse a
+                  container block from the host: --pg-host localhost --minio-host localhost.
 """
 import argparse
 import glob
@@ -58,7 +106,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import psycopg2
 from psycopg2.extras import Json, RealDictCursor
 
-__version__ = "0.0.32"  # Semantic Versioning:  Version = Major.Minor.Patch
+__version__ = "0.0.33"  # Semantic Versioning:  Version = Major.Minor.Patch
 
 _MEMBER = None       # block name = team member's name; set by CLI -m or set_member(), used to read creds
 _PG_HOST = None      # CLI --pg-host: override the postgresql endpoint host only (creds unchanged)
@@ -603,7 +651,7 @@ def _cmd_versions(args: argparse.Namespace) -> None:
 
 
 def _cmd_tree(args: argparse.Namespace) -> None:
-    _print_tree(args.dataset_id, args.files, args.member)
+    _print_tree(args.dataset_id, args.files, args.block)
 
 
 def _cmd_find(args: argparse.Namespace) -> None:
@@ -617,30 +665,30 @@ def _cmd_spec(args: argparse.Namespace) -> None:
 
 def _cmd_upload(args: argparse.Namespace) -> None:
     spec_path = Path(args.spec)
-    upload(json.loads(spec_path.read_text(encoding="utf-8")), member=args.member,
+    upload(json.loads(spec_path.read_text(encoding="utf-8")), member=args.block,
            spec_dir=spec_path.parent)
 
 
 def _cmd_download(args: argparse.Namespace) -> None:
-    download(args.dataset_id, args.version, args.dest, member=args.member)
+    download(args.dataset_id, args.version, args.dest, member=args.block)
 
 
 def _cmd_remove(args: argparse.Namespace) -> None:
-    remove(args.dataset_id, args.version, yes=args.yes, member=args.member)
+    remove(args.dataset_id, args.version, yes=args.yes, member=args.block)
 
 
 def _cmd_objects(args: argparse.Namespace) -> None:
-    _print_rows(objects(args.dataset_id, member=args.member), ["key", "size"])
+    _print_rows(objects(args.dataset_id, member=args.block), ["key", "size"])
 
 
-def _add_member(sp: argparse.ArgumentParser) -> None:
-    """연결 옵션을 붙인다: -m/--member (블록 = 팀원 이름; DB·MinIO creds) + 엔드포인트 host 덮어쓰기.
+def _add_block(sp: argparse.ArgumentParser) -> None:
+    """연결 옵션을 붙인다: -b/--block (자격증명 블록 선택; DB·MinIO creds) + 엔드포인트 host 덮어쓰기.
 
     --pg-host/--minio-host 는 엔드포인트의 host 만 바꾼다 (creds 불변) — 컨테이너용 블록을
     호스트에서 재사용할 때 `--pg-host localhost --minio-host localhost` 처럼 쓴다.
     """
-    sp.add_argument("-m", "--member", type=str, default=None,
-                    help="team member name = credential block name; read DB/MinIO creds from that block")
+    sp.add_argument("-b", "--block", type=str, default=None,
+                    help="credential block name; read DB/MinIO creds from that Prefect block")
     sp.add_argument("--pg-host", type=str, default=None,
                     help="override the postgresql endpoint host only, e.g. localhost (creds unchanged)")
     sp.add_argument("--minio-host", type=str, default=None,
@@ -659,7 +707,7 @@ def _build_parser() -> argparse.ArgumentParser:
           python catalog.py download sydney_202605 v2 ./out   # version omitted -> latest; dest -> ./<id>
           python catalog.py remove sydney_202605 v2 --yes     # version omitted -> whole dataset
           python catalog.py objects sydney_202605             # raw MinIO objects (not the catalog)
-          python catalog.py list -m alice                     # read alice's block for DB/MinIO creds (-m, any command)
+          python catalog.py list -b alice                     # read alice's block for DB/MinIO creds (-b, any command)
 
         upload spec.json:
           {"dataset_id": "sydney_202605", "version": "v2", "path": "./out",
@@ -672,13 +720,12 @@ def _build_parser() -> argparse.ArgumentParser:
           list/versions/find = PostgreSQL    objects = MinIO
           upload/download/remove = both      tree = PostgreSQL (+MinIO with --files)
 
-        credentials - from the team member's Prefect block (block name = member; via the
-        profile's PREFECT_API_URL), else default. no env vars, no docker-compose.env.
-          block "<member>" sections (nested dict, hidden via SecretDict):
+        credentials - from a Prefect block (via the profile's PREFECT_API_URL), else default
+        (localhost). no env vars, no docker-compose.env.
+          block sections (nested dict, hidden via SecretDict):
             minio = {endpoint, access_key, secret_key}
             postgresql_catalog/postgresql_optuna = {endpoint, username, password, database}
-          -m <member> picks the block (DB + MinIO). catalog/optuna are the shared DB,
-                          duplicated identically in every member block (any member's works).
+          -b <block> picks the block (DB + MinIO). catalog/optuna are the shared DB.
           --pg-host/--minio-host override only the endpoint host (creds unchanged) - reuse a
                           container block from the host: --pg-host localhost --minio-host localhost.
         """)
@@ -692,12 +739,12 @@ def _build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("list", help="[PostgreSQL] list datasets (latest-version summary)")
     sp.set_defaults(func=_cmd_list, uses_pg=True, uses_minio=False)
-    _add_member(sp)
+    _add_block(sp)
 
     sp = sub.add_parser("versions", help="[PostgreSQL] show one dataset's version history")
     sp.set_defaults(func=_cmd_versions, uses_pg=True, uses_minio=False)
     sp.add_argument("dataset_id", type=str)
-    _add_member(sp)
+    _add_block(sp)
 
     sp = sub.add_parser("tree", help="[PostgreSQL; --files also MinIO] dataset > version tree")
     sp.set_defaults(func=_cmd_tree, uses_pg=True, uses_minio=False)   # --files adds MinIO at run time
@@ -705,14 +752,14 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="limit to one dataset (default: all)")
     sp.add_argument("--files", action="store_true", default=False,
                     help="show MinIO file-type counts per version")
-    _add_member(sp)
+    _add_block(sp)
 
     sp = sub.add_parser("find", help="[PostgreSQL] search by dataset_id + metadata key=value")
     sp.set_defaults(func=_cmd_find, uses_pg=True, uses_minio=False)
     sp.add_argument("dataset_id", type=str)
     sp.add_argument("filters", type=str, nargs="*", default=[], metavar="key=value",
                     help="metadata filters")
-    _add_member(sp)
+    _add_block(sp)
 
     sp = sub.add_parser("spec", help="write an empty upload spec.json template to fill in")
     sp.set_defaults(func=_cmd_spec, uses_pg=False, uses_minio=False)
@@ -722,14 +769,14 @@ def _build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("upload", help="[MinIO + PostgreSQL] upload files + register, from a JSON spec")
     sp.set_defaults(func=_cmd_upload, uses_pg=True, uses_minio=True)
     sp.add_argument("spec", type=str, metavar="spec.json")
-    _add_member(sp)
+    _add_block(sp)
 
     sp = sub.add_parser("download", help="[PostgreSQL + MinIO] look up in catalog, download objects")
     sp.set_defaults(func=_cmd_download, uses_pg=True, uses_minio=True)
     sp.add_argument("dataset_id", type=str)
     sp.add_argument("version", type=str, nargs="?", default=None, help="default: latest")
     sp.add_argument("dest", type=str, nargs="?", default=None, help="default: ./<dataset_id>")
-    _add_member(sp)
+    _add_block(sp)
 
     sp = sub.add_parser("remove", help="[MinIO + PostgreSQL] PERMANENTLY delete objects + rows")
     sp.set_defaults(func=_cmd_remove, uses_pg=True, uses_minio=True)
@@ -738,13 +785,13 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="default: entire dataset (all versions)")
     sp.add_argument("--yes", action="store_true", default=False,
                     help="skip the DELETE confirmation")
-    _add_member(sp)
+    _add_block(sp)
 
     sp = sub.add_parser("objects", help="[MinIO] list raw MinIO objects (not the catalog)")
     sp.set_defaults(func=_cmd_objects, uses_pg=False, uses_minio=True)
     sp.add_argument("dataset_id", type=str, nargs="?", default=None,
                     help="limit to one dataset (default: all)")
-    _add_member(sp)
+    _add_block(sp)
 
     return p
 
@@ -762,14 +809,14 @@ def _print_targets(args: argparse.Namespace) -> None:
         _, src = _section("postgresql_catalog")
         print(f"  PostgreSQL (catalog DB): {_mask_dsn(_dsn())}  [creds: {src}]", file=sys.stderr)
     if args.uses_minio or getattr(args, "files", False):   # tree --files also reaches MinIO
-        m, src = _section("minio", getattr(args, "member", None))
+        m, src = _section("minio", getattr(args, "block", None))
         ep = _override_url_host(m["endpoint"], _MINIO_HOST)
         print(f"  MinIO (object storage):  {ep}  [creds: {src}]", file=sys.stderr)
 
 
 def _main(args: argparse.Namespace) -> None:
     """Dispatch one already-parsed command (parsing/validation done in parse_args())."""
-    set_member(getattr(args, "member", None))              # DB ops (_dsn) read creds from this member's block
+    set_member(getattr(args, "block", None))              # DB ops (_dsn) read creds from this member's block
     set_host_overrides(getattr(args, "pg_host", None), getattr(args, "minio_host", None))
     _print_targets(args)
     args.func(args)                                        # handler bound via set_defaults(func=...)

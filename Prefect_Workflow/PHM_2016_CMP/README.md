@@ -1,6 +1,6 @@
 # PHM 2016 CMP - Virtual Metrology (LightGBM)
 
-<sub>rev. 30</sub>
+<sub>rev. 31</sub>
 
 Predicts wafer **AVG_REMOVAL_RATE** (a continuous target - the same Virtual Metrology
 shape as film-thickness / etch-rate prediction) from CMP tool sensor trajectories,
@@ -86,10 +86,10 @@ non-sensor features are **born in this step** and do not exist in bronze:
 ```text
 bronze column                          silver feature (one per trajectory)
 ─────────────                          ───────────────────────────────────
-TIMESTAMP       ── count rows ──────▶  n_samples   (numeric)
-TIMESTAMP       ── max - min ───────▶  duration    (numeric)
-STAGE (A/B)     ── == "B" ? 1 : 0 ──▶  stage_is_B  (category, 0/1)
-sensor x7..x25  ── mean/std/min/max/median + last/delta/slope ──▶  152 features
+TIMESTAMP       ── count rows ──────>  n_samples   (numeric)
+TIMESTAMP       ── max - min ───────>  duration    (numeric)
+STAGE (A/B)     ── == "B" ? 1 : 0 ──>  stage_is_B  (category, 0/1)
+sensor x7..x25  ── mean/std/min/max/median + last/delta/slope ──>  152 features
 ```
 
 In bronze, x (trajectories) and y (`AVG_REMOVAL_RATE`) sit in separate files; silver joins
@@ -243,26 +243,26 @@ the hand-off: `train_featurize` passes the fitted `scaler.json` + `features.json
                                    │                                  │
                                    ▼                                  ▼
  ┌─────────────┐           ┌────────────────┐               ┌────────────────┐
- │ load_config │──cfg─────▶│  train_prepare │               │  test_prepare  │
+ │ load_config │──cfg─────>│  train_prepare │               │  test_prepare  │
  └─────────────┘           └───────┬────────┘               └───────┬────────┘
                                    │ rate, split.json                │ test_traj_raw
                                    ▼                                  ▼
                            ┌────────────────┐ scaler.json + ┌────────────────┐
-                           │ train_featurize│─features.json▶│ test_featurize │
+                           │ train_featurize│─features.json>│ test_featurize │
                            └───────┬────────┘               └───────┬────────┘
                                    │ train/val.parquet               │ test.parquet
                                    ▼                                  ▼
    ┌───────────┐           ┌────────────────┐   model.txt   ┌────────────────┐
-   │ optuna DB │◀──trials──│      train     │──────────────▶│      test      │
+   │ optuna DB │<──trials──│      train     │──────────────>│      test      │
    └───────────┘           └───────┬────────┘               └───────┬────────┘
-       parity_plot (train) ◀───────┤                                ├──▶ parity_plot (test)
-   publish_artifacts (train) ◀─────┤ model + metrics       metrics  └──▶ publish_artifacts (test)
+       parity_plot (train) <───────┤                                ├──> parity_plot (test)
+   publish_artifacts (train) <─────┤ model + metrics       metrics  └──> publish_artifacts (test)
                                    ▼                      + pred.csv
                            ┌────────────────┐
                            │    validate    │
                            └───────┬────────┘
-        parity_plot (validation) ◀─┤
-   publish_artifacts (validation) ◀┤ val metrics
+        parity_plot (validation) <─┤
+   publish_artifacts (validation) <┤ val metrics
                                    ▼
         each stage emits both: parity_plot -> work/parity_<stage>.png ; publish_artifacts -> Prefect UI
 ```
