@@ -1,6 +1,6 @@
 # AI/ML Workflow Automation
 
-<sub>rev. 48</sub>
+<sub>rev. 51</sub>
 
 Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환경입니다. 이 문서는 **전체 워크플로우의 인덱스 (개요)** 이고, 도구별 상세는 컴포넌트 문서로 잇습니다.
 
@@ -14,7 +14,7 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
 
 1) **Lineage** — 데이터·코드·결과를 양방향으로 추적합니다.
 2) **Reproducibility** — 데이터 버전·하이퍼파라미터·시드를 고정해 동일 결과를 보장합니다.
-3) **Persistence & Versioning** — 모델·데이터를 catalog 로 버전 보존하고 검색·선택 다운로드합니다 (메타 → PostgreSQL `catalog`, 실데이터 → MinIO).
+3) **Persistence & Versioning** — 모델·데이터를 catalog 에 등록해 보존하고 검색·선택 다운로드합니다 (버전은 minio_key 경로에 담김; 메타 → PostgreSQL `catalog`, 실데이터 → MinIO).
 4) **Monitoring** — Prefect / MLflow / MinIO 대시보드로 현황을 한눈에 봅니다.
 5) **Reusability** — 워크플로우·피처를 다른 프로젝트에서 다시 씁니다.
 6) **Scheduled Automation** — cron/interval 스케줄로 무인 실행합니다.
@@ -89,11 +89,11 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
   데이터가 실제로 오가는 두 지점의 endpoint · parameter 입니다 — **upload 은 host 의 `catalog.py` 가 `spec.json` 으로**, **download 은 컨테이너 안 `pipeline.py` 가 Prefect Secret 블록으로** 합니다.
 
   ```text
-  UPLOAD — host: catalog.py upload spec.json  (-b <block> [--pg-host/--minio-host localhost])
-    input: spec.json { dataset_id, version, path, bucket, metadata, created_by }
+  UPLOAD — host: catalog.py upload spec.json --path <p>  (-b <block> [--pg-host/--minio-host localhost])
+    input: spec.json { minio_key, bucket, metadata } + --path <p> (file/folder/glob)
     creds: Credentials block (member) — minio + postgresql_catalog sections
   ┌────────────┐                        ┌─────────────┐
-  │ catalog.py │─ upload file ────────> │ MinIO :9000 │  → s3://<bucket>/<id>/<version>/<files>
+  │ catalog.py │─ upload file ────────> │ MinIO :9000 │  → s3://<bucket>/<minio_key>/<files>
   └──────┬─────┘                        └─────────────┘
          │                              ┌──────────────────┐
          └─ register row ─────────────> │ PostgreSQL :5432 │  → datasets(minio_path, n_files, size, metadata)
@@ -109,70 +109,70 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
 
 ### Upload
 
-  `catalog.py upload <spec.json>` 은 spec 의 `path` 가 가리키는 파일을 MinIO 에 올리고 `catalog` 에 버전 레코드를 등록합니다. host 에서는 `-b <block>` 로 자격증명 블록을 고르고 컨테이너용 endpoint 를 `--pg-host/--minio-host localhost` 로 덮어씁니다.
+  `catalog.py upload <spec.json> --path <경로>` 는 **`--path` 가 가리키는 파일**을 MinIO 에 올리고 `catalog` 에 레코드 (메타는 spec.json) 를 등록합니다. host 에서는 `-b <block>` 로 자격증명 블록을 고르고 컨테이너용 endpoint 를 `--pg-host/--minio-host localhost` 로 덮어씁니다. spec.json 하나에 여러 spec 을 `{minio_key: spec, ...}` 로 담았다면 `--minio-key <key>` 로 그중 하나만 올립니다 (그 키가 minio_key 가 됨).
 
   ```python
-  # catalog.py  upload(spec, member) — key steps (dataset_id/version/path/bucket come from spec)
-  files = _resolve_sources(spec["path"])       # file | folder (recursive) | glob (dir/*.csv, **)
+  # catalog.py  upload(spec, path, member) — key steps (path from CLI --path; minio_key/bucket from spec)
+  files = _resolve_sources(path)               # file | folder (recursive) | glob (dir/*.csv, **)
   ensure_schema()                              # create the datasets table if missing
-  if get(dataset_id, version):                 # versions are immutable -> stop if it exists
-      raise FileExistsError("version already exists")
-  for fp, rel in files:                        # upload each file -> s3://<bucket>/<id>/<version>/<rel>
+  if get(minio_key):                           # minio_key is immutable -> stop if it exists
+      raise FileExistsError("minio_key already exists")
+  for fp, rel in files:                        # upload each file -> s3://<bucket>/<minio_key>/<rel>
       s3.upload_file(str(fp), bucket, prefix + rel)
-  register(dataset_id, version, minio_path,    # register the catalog row (path + counts + metadata)
+  register(minio_key, minio_path,              # register the catalog row (path + counts + metadata)
            n_files=n_files, size_bytes=size_bytes, metadata=spec.get("metadata"))
   ```
 
   ```powershell
-  python catalog.py spec spec.json                                                    # scaffold an empty spec
-  python catalog.py upload spec.json -b <block> --pg-host localhost --minio-host localhost
+  python catalog.py spec spec.json                                                          # scaffold an empty spec
+  python catalog.py upload spec.json --path ./data -b <block> --pg-host localhost --minio-host localhost
+  python catalog.py upload specs.json --minio-key epc/v1 --path ./data -b <block> --minio-host localhost  # pick one
   ```
 
-  올릴 대상은 spec 의 **`path` 하나**로 정하고, 파일 한 개·여러 개·와일드카드는 그 `path` 값으로 구별됩니다 (별도 목록 필드 없음).
+  올릴 대상은 **`--path` 하나**로 정하고, 파일 한 개·여러 개·와일드카드는 그 값으로 구별됩니다 (별도 목록 없음).
 
-  | path | files | MinIO key |
+  | --path | files | MinIO key |
   |---|---|---|
-  | single file `data/powerconsumption.csv` | 그 파일 1개 | `<id>/<version>/powerconsumption.csv` |
-  | folder `data` | 폴더 아래 전부 (재귀) | `<id>/<version>/<상대경로>` |
-  | wildcard `data/*.parquet` | 매치 파일 (비재귀) | `<id>/<version>/<파일명>` |
-  | recursive wildcard `data/**/*.parquet` | 하위까지 매치 | `<id>/<version>/<상대경로>` |
+  | single file `data/powerconsumption.csv` | 그 파일 1개 | `<minio_key>/powerconsumption.csv` |
+  | folder `data` | 폴더 아래 전부 (재귀) | `<minio_key>/<상대경로>` |
+  | wildcard `data/*.parquet` | 매치 파일 (비재귀) | `<minio_key>/<파일명>` |
+  | recursive wildcard `data/**/*.parquet` | 하위까지 매치 | `<minio_key>/<상대경로>` |
 
   ```json
-  {"dataset_id": "epc", "version": "v1", "path": "data/powerconsumption.csv",
+  {"minio_key": "epc/v1",
    "bucket": "datasets", "created_by": "ykim", "metadata": {"source": "kaggle"}}
   ```
 
-  > `path` 만 바꿔 위 네 경우를 씁니다 (`"path": "data"` · `"path": "data/*.parquet"` · `"path": "data/**/*.parquet"`). 매치가 0건이면 `FileNotFoundError` 로 중단하고, 같은 `dataset_id`/`version` 이 이미 있으면 덮지 않고 중단합니다.
+  > `--path` 값만 바꿔 위 네 경우를 씁니다 (`--path data` · `--path data/*.parquet` · `--path data/**/*.parquet`). 매치가 0건이면 `FileNotFoundError` 로 중단하고, 같은 `minio_key` 가 이미 있으면 덮지 않고 중단합니다. spec.json 엔 `path` 를 넣지 않습니다 (필수 키는 `minio_key`).
 
 ### Download
 
-  `catalog.py download <id> [version] [dest]` 은 catalog 에서 `minio_path` 를 찾아 (version 생략 시 최신) 그 아래 객체를 `dest` (기본 `./<id>`) 로 내려받습니다.
+  `catalog.py download <minio_key> [dest]` 은 catalog 에서 그 key 의 `minio_path` 를 찾아 그 아래 객체를 `dest` (기본 `./<minio_key>`) 로 내려받습니다.
 
   ```python
-  # catalog.py  download(dataset_id, version, dest, member) — key steps
-  row = get(dataset_id, version)               # version omitted -> latest row
-  bucket, prefix = split(row["minio_path"])    # s3://bucket/<id>/<version>/
+  # catalog.py  download(minio_key, dest, member) — key steps
+  row = get(minio_key)                         # look up the catalog row for the key
+  bucket, prefix = split(row["minio_path"])    # s3://bucket/<minio_key>/
   for obj in list_objects(bucket, prefix):     # every object under the prefix
       s3.download_file(bucket, obj["Key"], dest_path)   # -> dest/<relative key>
   ```
 
   ```powershell
-  python catalog.py download <id> <version> ./out -b <block> --pg-host localhost --minio-host localhost
+  python catalog.py download <minio_key> ./out -b <block> --pg-host localhost --minio-host localhost
   ```
 
   > flow 실행 중의 자동 download 는 CLI 가 아니라 컨테이너 안 `pipeline.py` 가 Prefect Secret 블록으로 합니다 (위 [Flow](#flow) 다이어그램).
 
 ### List
 
-  여러 데이터셋·모델을 만들고 비교·재현하려면 산출물을 **버전 관리** 하고 무엇이 어디 있는지 **검색** 할 수 있어야 합니다. 이 스택은 실제 데이터를 MinIO 에, 가벼운 메타데이터·버전 이력·계보를 PostgreSQL `catalog` DB 에 둡니다.
+  여러 데이터셋·모델을 만들고 비교·재현하려면 산출물이 무엇이 어디 있는지 **검색** 할 수 있어야 합니다. 이 스택은 실제 데이터를 MinIO 에, 가벼운 메타데이터·계보를 PostgreSQL `catalog` DB 에 둡니다.
 
-  `catalog` 은 `catalog` DB 안의 테이블 하나 (`datasets`) 이며, MinIO 의 실제 데이터를 가리키는 **메타데이터 장부** 입니다. 이 장부를 다루는 **catalog 접근 계층** (테이블 생성·버전 등록·검색) 이 워크플로우에서 데이터의 위치·버전·계보를 기록합니다. 전체 명령은 [Appendix A. catalog.py CLI](#appendix-a-catalogpy-cli) 를 참고합니다.
+  `catalog` 은 `catalog` DB 안의 테이블 하나 (`datasets`) 이며, MinIO 의 실제 데이터를 가리키는 **메타데이터 장부** 입니다. 이 장부를 다루는 **catalog 접근 계층** (테이블 생성·등록·검색) 이 워크플로우에서 데이터의 위치 (minio_key)·계보를 기록합니다. 전체 명령은 [Appendix A. catalog.py CLI](#appendix-a-catalogpy-cli) 를 참고합니다.
 
   ```powershell
-  python catalog.py list -b <block> --pg-host localhost                                 # datasets summary (latest)
-  python catalog.py versions <id> -b <block> --pg-host localhost                        # version history
-  python catalog.py tree --files -b <block> --pg-host localhost --minio-host localhost  # id > version tree (+ counts)
-  python catalog.py find <id> fab=fab2 -b <block> --pg-host localhost                   # search by metadata key=value
+  python catalog.py list -b <block> --pg-host localhost                                 # registered datasets summary
+  python catalog.py find epc fab=fab2 -b <block> --pg-host localhost                    # search by minio_key prefix + key=value
+  python catalog.py objects epc -b <block> --minio-host localhost                       # raw MinIO objects under a prefix
   ```
 
 #### MinIO Key
@@ -390,7 +390,7 @@ def inference_flow():
   ```
 
   - **순방향** — 어떤 데이터 버전을 어떤 flow run 이 만들었고, 그 run 에서 나온 MLflow run·모델이 무엇인지 추적합니다.
-  - **역방향** — 운영 모델의 MLflow run 태그 (`input_dataset`/`input_version`) → `catalog.find(...)` → `minio_path` 로 원본까지 거슬러 올라갑니다.
+  - **역방향** — 운영 모델의 MLflow run 태그 (`input_minio_key`) → `catalog.find(...)` → `minio_path` 로 원본까지 거슬러 올라갑니다.
 
 ---
 
@@ -402,15 +402,13 @@ def inference_flow():
 
 | Command | Target | Purpose |
 |---|---|---|
-| `list` | PostgreSQL | 데이터셋 목록 (최신 버전 요약) |
-| `versions <id>` | PostgreSQL | 한 데이터셋의 버전 이력 |
-| `tree [id] [--files]` | PostgreSQL (+MinIO `--files`) | 데이터셋 > 버전 트리 (`--files` 면 MinIO 파일 종류별 개수) |
-| `find <id> [key=value ...]` | PostgreSQL | metadata 키=값 검색 |
+| `list` | PostgreSQL | 등록된 데이터셋 목록 (minio_key 요약) |
+| `find <minio_key> [key=value ...]` | PostgreSQL | minio_key prefix + metadata 키=값 검색 |
 | `spec [out.json]` | (local) | 빈 upload spec.json 뼈대 생성 (채워서 `upload` 에 사용; 기본 `spec.json`) |
-| `upload <spec.json>` | MinIO + PostgreSQL | MinIO 적재 + catalog 등록 (JSON spec) |
-| `download <id> [version] [dest]` | PostgreSQL + MinIO | 버전 객체 다운로드 (version 생략 시 최신, dest 기본 `./<id>`) |
-| `remove <id> [version] [--yes]` | MinIO + PostgreSQL | MinIO + catalog 에서 영구 삭제 (version 생략 시 데이터셋 전체) |
-| `objects [id]` | MinIO | MinIO 에 실제로 있는 객체 나열 (catalog 무관) |
+| `upload <spec.json> --path P [--minio-key key]` | MinIO + PostgreSQL | `--path` 의 파일/폴더/glob 을 MinIO 적재 + catalog 등록 (메타는 spec; `--minio-key` 면 spec 이 `{key: spec, ...}` 중 하나) |
+| `download <minio_key> [dest]` | PostgreSQL + MinIO | 그 key 의 객체 다운로드 (dest 기본 `./<minio_key>`) |
+| `remove <minio_key> [--yes]` | MinIO + PostgreSQL | 그 key 의 MinIO 객체 + catalog 행 영구 삭제 |
+| `objects [minio_key]` | MinIO | MinIO 에 실제로 있는 객체 나열 (catalog 무관; minio_key prefix 로 한정) |
 
 MinIO·PostgreSQL 에 접속하는 명령에는 `-b <block>` (자격증명 블록 선택) 와 `--pg-host`/`--minio-host` (endpoint host 만 덮어쓰기, creds 불변) 를 붙일 수 있습니다 — 컨테이너용 블록을 host 에서 쓸 때 유용합니다 (`spec` 은 로컬 파일 생성이라 해당 없음). 자세한 것은 아래 [Credentials](#credentials-prefect-block).
 
@@ -427,32 +425,31 @@ function Add-PyPath([string]$file) {
 Add-PyPath ..\Docker\Prefect\credentials.py   # catalog.py imports credentials.py from this folder
 $env:PYTHONPATH
 
-python catalog.py list                              # dataset summary (latest version)
-python catalog.py versions sydney_202605            # one dataset's version history
-python catalog.py tree --files                      # dataset > version tree (+ file-type counts)
-python catalog.py find sydney_202605 fab=fab2       # search by metadata key=value
+python catalog.py list                              # registered datasets (minio_key summary)
+python catalog.py find epc fab=fab2                 # search by minio_key prefix + metadata key=value
 python catalog.py spec spec.json                    # write an empty upload spec template
-python catalog.py upload spec.json                  # upload to MinIO + register (JSON spec)
-python catalog.py download sydney_202605 v2 ./out   # version omitted -> latest; dest -> ./<id>
-python catalog.py remove sydney_202605 v2 --yes     # version omitted -> whole dataset
-python catalog.py objects sydney_202605             # raw MinIO objects (not the catalog)
+python catalog.py upload spec.json --path ./out     # upload files at --path + register (JSON spec)
+python catalog.py upload specs.json --minio-key epc/v1 --path ./out  # pick one from a {key: spec} file
+python catalog.py download epc/v1 ./out             # dest omitted -> ./<minio_key>
+python catalog.py remove epc/v1 --yes               # delete objects + catalog row for the key
+python catalog.py objects epc                       # raw MinIO objects (not the catalog)
 ```
 
 `upload` 의 `spec.json` 예시입니다.
 
 ```json
-{"dataset_id": "sydney_202605", "version": "v2", "path": "./out",
+{"minio_key": "epc/v1",
  "bucket": "datasets", "created_by": "zoo", "description": "fab2 CH3",
  "metadata": {"fab": "fab2", "chamber": "CH3"}}
 ```
 
-> 버전은 불변 (immutable) 입니다 — 같은 `dataset_id`/`version` 이 MinIO 나 catalog 에 이미 있으면 `upload` 는 덮어쓰지 않고 중단합니다 (버전을 올려 다시 시도). `remove` 는 MinIO 객체 (모든 버전·삭제마커) 와 catalog 행을 영구 삭제하므로 `--yes` 없이는 `DELETE` 입력을 요구합니다.
+> `minio_key` 는 불변 (immutable) 입니다 — 같은 key 가 MinIO 나 catalog 에 이미 있으면 `upload` 는 덮어쓰지 않고 중단합니다 (새 key 로 다시 시도). `remove` 는 MinIO 객체 (모든 버전·삭제마커) 와 catalog 행을 영구 삭제하므로 `--yes` 없이는 `DELETE` 입력을 요구합니다.
 
 host 에서 컨테이너용 블록 (endpoint 가 `postgres`·`minio` 서비스명) 으로 접속할 때는 `-b <block>` 로 블록을 고르고 `--pg-host`/`--minio-host` 로 host 만 `localhost` 로 바꿉니다.
 
 ```powershell
-python catalog.py upload spec.json -b <block> --pg-host localhost --minio-host localhost
-python catalog.py remove <id> <version> -b <block> --pg-host localhost --minio-host localhost
+python catalog.py upload spec.json --path ./out -b <block> --pg-host localhost --minio-host localhost
+python catalog.py remove <minio_key> -b <block> --pg-host localhost --minio-host localhost
 ```
 
 ### Credentials (Prefect block)
