@@ -45,7 +45,7 @@ CLI help (`python catalog.py`):
 
 usage: catalog.py [-h] [-V] <command> ...
 
-catalog.py v0.0.36 - Data catalog (PostgreSQL ledger) + MinIO object operations.
+catalog.py v0.0.37 - Data catalog (PostgreSQL ledger) + MinIO object operations.
 
 positional arguments:
   <command>
@@ -105,7 +105,7 @@ from typing import Any, List, Optional, Tuple
 import psycopg2
 from psycopg2.extras import Json, RealDictCursor
 
-__version__ = "0.0.36"  # Semantic Versioning:  Version = Major.Minor.Patch
+__version__ = "0.0.37"  # Semantic Versioning:  Version = Major.Minor.Patch
 
 _MEMBER = None       # block name = team member's name; set by CLI -m or set_member(), used to read creds
 _PG_HOST = None      # CLI --pg-host: override the postgresql endpoint host only (creds unchanged)
@@ -232,7 +232,7 @@ def register(minio_key: str, minio_path: str, *, created_by: Optional[str] = Non
 # --------------------------------------------------------------------------- #
 # 업로드 (MinIO 적재 + catalog 등록) — JSON spec 으로 구동
 # --------------------------------------------------------------------------- #
-_NAME_RE = re.compile(r"^[a-z0-9_.-]+(/[a-z0-9_.-]+)*$")   # minio_key: slash-separated segments (e.g. epc/v1)
+_NAME_RE = re.compile(r"^[A-Za-z0-9_.#-]+(/[A-Za-z0-9_.#-]+)*$")   # minio_key: slash-joined segments (e.g. Samsung/PoC/#0/V0)
 _REQUIRED_SPEC_KEYS = ("minio_key",)                      # upload() rejects a spec missing this (path is CLI --path)
 _SPEC_TEMPLATE = {                                        # `spec` command writes this skeleton to fill in
     "minio_key": "",
@@ -241,14 +241,14 @@ _SPEC_TEMPLATE = {                                        # `spec` command write
 
 
 def _check_name(name: str, field: str) -> None:
-    """minio_key 규칙: 소문자·숫자·`_`·`.`·`-` 세그먼트를 `/` 로 이은 것 (예 `epc/v1`).
+    """minio_key 규칙: 영문·숫자·`_`·`.`·`-`·`#` 세그먼트를 `/` 로 이은 것 (예 `Samsung/PoC/#0/V0`).
 
-    이 값이 그대로 MinIO 키 prefix 와 catalog 키가 되므로 강제한다 (공백·대문자·`//`·앞뒤 `/` 불가).
+    이 값이 그대로 MinIO 키 prefix 와 catalog 키가 되므로 강제한다 (공백·`//`·앞뒤 `/` 불가).
     """
     if not name or not _NAME_RE.match(name):
         raise ValueError(
-            f"{field} '{name}' invalid: lowercase a-z, digits, '_', '.', '-' segments joined by '/' "
-            "(e.g. epc/v1; no spaces, uppercase, leading/trailing/double slash).")
+            f"{field} '{name}' invalid: letters, digits, '_', '.', '-', '#' segments joined by '/' "
+            "(e.g. Samsung/PoC/#0/V0; no spaces, leading/trailing/double slash).")
 
 
 def _has_match(cand: str) -> bool:
