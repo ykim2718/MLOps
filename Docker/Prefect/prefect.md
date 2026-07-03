@@ -1,6 +1,8 @@
 # Prefect Pipeline Orchestration on Docker
 
-<sub>rev. 520</sub>
+<sub>rev. 521</sub>
+
+![Prefect](https://www.prefect.io/_next/image?url=%2Fwordmark.png&w=256&q=75&dpl=dpl_CK3dmhFuR2uJSTb6hJA3oanCtvDW)
 
 > 공식 사이트: [https://www.prefect.io/](https://www.prefect.io/)
 
@@ -1129,16 +1131,33 @@ if __name__ == "__main__":
 
 ## Appendix H. Orchestrator Benchmarking
 
-"**가벼운 에이전트 (dispatcher) 가 작업을 집어, 작업마다 격리된 일시적 실행 단위를 띄워 실행하고 정리**" 하는 패턴은 오케스트레이션의 업계 표준입니다. 이 스택의 `docker` work pool 은 그 표준의 **단일 호스트 변형** 이고, 규모가 커지면 실행 단위를 컨테이너 → **pod** 로 올린 Kubernetes 변형으로 확장됩니다.
+### Prefect vs Dagster vs Airflow
 
-| System | Dispatcher (agent) | Execution unit | Scale |
-|--------|--------------------|----------------|-------|
-| **Prefect** (docker pool) | worker | run 마다 **컨테이너** | 단일 호스트·소–중 |
-| **Prefect** (kubernetes pool) | worker | run 마다 **pod** | 클러스터·대 |
-| **Airflow** (KubernetesExecutor) | scheduler/executor | task 마다 **pod** | 클러스터·대 |
-| **Argo Workflows** | controller | step 마다 **pod** | 클러스터·대 |
-| **GitHub Actions / GitLab CI** | runner | job 마다 **컨테이너** | CI/CD |
-| **Kubernetes** (native Job) | controller | **pod** | 클러스터 |
+  오케스트레이터를 고를 때 자주 견주는 세 python 도구입니다. 셋 다 데이터/ML 파이프라인을 스케줄·실행·관측하지만 지향이 다릅니다 — **Prefect** 는 순수 python·동적 흐름, **Dagster** 는 데이터 자산 (asset) 과 타입·테스트, **Airflow** 는 성숙한 스케줄러와 최대 생태계입니다. 이 스택이 **Prefect** 를 고른 까닭은 flow 를 평범한 python 으로 짜면서 run 마다 격리된 컨테이너로 동적으로 띄우는 구성이 자연스럽기 때문입니다 (docker work pool).
+
+  | Aspect | Prefect | Dagster | Airflow |
+  |--------|---------|---------|---------|
+  | Core abstraction | `@flow` · `@task` (명령형 python) | software-defined **asset** (데이터 자산 중심) | **DAG** (task 의존 그래프) |
+  | Programming model | 순수 python·동적, 런타임에 흐름 결정 | asset·graph 선언형, 타입·테스트 강조 | DAG 선언, 스케줄러 중심 |
+  | Dynamic workflows | native (런타임 분기·매핑 자유) | 지원 (제약 있음) | 약함 (정적 DAG 전제) |
+  | Scheduling | flow run · automation · event | schedule · sensor · asset 기반 | 강력한 cron 스케줄러 (원조) |
+  | Execution isolation | work pool: process · **docker** · k8s | run launcher: docker · k8s · celery | executor: Local · Celery · **Kubernetes** |
+  | UI / lineage | flow run · task · 파라미터 자동 기록 | 데이터 자산 계보 (lineage) 1급 | DAG/task 로그 · 성숙한 UI |
+  | Maturity / ecosystem | 신생 · 경량, 빠른 반복 | 신생, 데이터 플랫폼 지향 | 최고참 · 최대 생태계 |
+  | Best fit | 동적 ML/데이터 파이프라인, python 우선 | 데이터 자산 · 품질/테스트 중시 | 정형 배치 ETL · 대규모 스케줄 |
+
+### Execution pattern across systems
+
+  "**가벼운 에이전트 (dispatcher) 가 작업을 집어, 작업마다 격리된 일시적 실행 단위를 띄워 실행하고 정리**" 하는 패턴은 오케스트레이션의 업계 표준입니다. 이 스택의 `docker` work pool 은 그 표준의 **단일 호스트 변형** 이고, 규모가 커지면 실행 단위를 컨테이너 → **pod** 로 올린 Kubernetes 변형으로 확장됩니다.
+
+  | System | Dispatcher (agent) | Execution unit | Scale |
+  |--------|--------------------|----------------|-------|
+  | **Prefect** (docker pool) | worker | run 마다 **컨테이너** | 단일 호스트·소–중 |
+  | **Prefect** (kubernetes pool) | worker | run 마다 **pod** | 클러스터·대 |
+  | **Airflow** (KubernetesExecutor) | scheduler/executor | task 마다 **pod** | 클러스터·대 |
+  | **Argo Workflows** | controller | step 마다 **pod** | 클러스터·대 |
+  | **GitHub Actions / GitLab CI** | runner | job 마다 **컨테이너** | CI/CD |
+  | **Kubernetes** (native Job) | controller | **pod** | 클러스터 |
 
 ### What a pod is
 
