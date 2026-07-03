@@ -1,6 +1,6 @@
 # Prefect Pipeline Orchestration on Docker
 
-<sub>rev. 527</sub>
+<sub>rev. 528</sub>
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
@@ -756,7 +756,7 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
   from prefect.deployments import run_deployment
 
   flow_run = run_deployment(                                                   # ask the server to create a flow run
-      name="pipeline/pipelineflow-high",
+      name="pipeline/pipelineflow-high",                                      # deployment name
       parameters={"git_repo": "https://github.com/team/repo.git",
                   "git_commit_hash": "a1b2c3d", "minio_key": "SYDNEY/Bennelong Point", "member": "alice"},
   )
