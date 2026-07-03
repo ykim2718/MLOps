@@ -1,6 +1,6 @@
 # Prefect Pipeline Orchestration on Docker
 
-<sub>rev. 529</sub>
+<sub>rev. 530</sub>
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
@@ -214,6 +214,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
 
   ```yaml
   # docker-compose.server.yml
+  # __version__ = "0.0.11"
   name: prefect-server   # compose project name baked in (replaces -p); run_server.ps1 / register_pool.ps1 rely on it
   services:
     prefect_server:
@@ -221,7 +222,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
       command: prefect server start --host 0.0.0.0
       env_file:
         # PREFECT_SERVER_DATABASE_CONNECTION_URL + PREFECT_API_URL (host LAN IP); the UI inherits PREFECT_API_URL, so no PREFECT_UI_API_URL is needed.
-        - ../docker-compose.env       # shared, at Docker/Prefect root
+        - ../docker-compose.env       # shared, kept at Docker/Prefect root
       ports:
         - "4200:4200"                 # dashboard/API. Clients connect on this port.
       volumes:
