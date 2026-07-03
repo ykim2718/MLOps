@@ -1,6 +1,6 @@
 # Prefect Pipeline Orchestration on Docker
 
-<sub>rev. 528</sub>
+<sub>rev. 529</sub>
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
@@ -88,7 +88,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
      run    : run_server.ps1                      # in PrefectServer/: create network + compose up -d
      config → ../docker-compose.env
               PREFECT_SERVER_DATABASE_CONNECTION_URL = postgres:5432/prefect
-              PREFECT_UI_API_URL                     = http://localhost:4200/api
+              PREFECT_API_URL                        = http://<server IP>:4200/api   # UI inherits this
        │
        └─ Work Pool Registration ── register_pool.ps1   # routing 2 — pool routing: run → pool (once, after server up)
           config → base job template (docker-pool-template-{high,low}.json)
@@ -220,11 +220,8 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
       image: prefecthq/prefect:3-latest
       command: prefect server start --host 0.0.0.0
       env_file:
-        - ../docker-compose.env       # injects PREFECT_SERVER_DATABASE_CONNECTION_URL (shared, at Docker/Prefect root)
-      environment:
-        # the UI hands this API URL to the browser; docker-compose.env's PREFECT_API_URL is the internal
-        # hostname (prefect_server) the browser can't resolve, so use the host's published port instead.
-        - PREFECT_UI_API_URL=http://localhost:4200/api
+        # PREFECT_SERVER_DATABASE_CONNECTION_URL + PREFECT_API_URL (host LAN IP); the UI inherits PREFECT_API_URL, so no PREFECT_UI_API_URL is needed.
+        - ../docker-compose.env       # shared, at Docker/Prefect root
       ports:
         - "4200:4200"                 # dashboard/API. Clients connect on this port.
       volumes:
@@ -255,7 +252,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
 
   - `command: prefect server start --host 0.0.0.0` 은 컨테이너 밖에서도 접속하도록 모든 인터페이스에 바인딩합니다.
   - `networks: mlops` 로 `postgres` 와 서비스명으로 통신합니다. `postgres` 는 별도 compose 라 `depends_on` 대신 `restart: unless-stopped` 로 준비될 때까지 재시도합니다.
-  - `environment: PREFECT_UI_API_URL` 은 UI 가 **브라우저에게** 넘길 API 주소입니다. env_file 의 `PREFECT_API_URL` 은 도커 내부 호스트명 (`prefect_server`) 이라 브라우저가 못 푸니, 호스트 게시 포트 `http://localhost:4200/api` 로 따로 지정합니다 (다른 머신에서 열면 그 머신이 닿는 서버 주소로 바꿉니다).
+  - **UI API 주소** — UI 가 **브라우저에게** 넘길 API 주소는 `PREFECT_UI_API_URL` 인데, 따로 지정하지 않으면 `PREFECT_API_URL` 을 그대로 상속합니다. 그래서 env_file 의 `PREFECT_API_URL` 을 브라우저가 닿는 **호스트 LAN IP** (`http://<server IP>:4200/api`) 로 두면 remote 머신에서 대시보드를 열어도 정상 동작하므로, `PREFECT_UI_API_URL` 을 따로 두지 않습니다. (도커 내부 이름 `prefect_server` 나 `localhost` 로 두면 각각 브라우저가 못 풀거나 자기 자신을 가리켜 remote 에서 빈 화면이 됩니다.)
   - `worker_pruner` 는 server 와 함께 뜨는 작은 사이드카 (alpine + curl + jq) 로, `PRUNE_INTERVAL_SECONDS` (기본 1시간) 마다 server 의 **OFFLINE (stale) 워커 레코드** 를 API 로 지웁니다 (`prune_loop.sh`). Prefect 는 죽은 워커를 OFFLINE 로 표시만 하고 지우지 않으므로, ONLINE 워커는 두고 나머지만 삭제해 목록을 깨끗이 유지합니다. `command` 의 `tr -d '\r'` 는 Windows 줄끝 (CR) 을 걸러 셸이 깨지지 않게 합니다.
 
   #### Execution Command
