@@ -1,6 +1,6 @@
 # Prefect Pipeline Orchestration on Docker
 
-<sub>rev. 525</sub>
+<sub>rev. 527</sub>
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
@@ -501,7 +501,9 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
 
 ### 5.2 Deployment
 
-  server 에 deployment 를 관리자가 1회 등록합니다. Deployment 는 yaml 로 entrypoint, work pool, pipeline flow image 를 정의합니다. 팀원이 작성하는 학습 스크립트 (`my_flow.py`) 와는 무관합니다.
+  work pool 등록은 **실행 방식** (routing lane 을 만드는 인프라) 이고, deployment 는 **실행 내용의 정의** 입니다.
+
+  server 에 deployment 를 관리자가 container 밖에서 1회 등록합니다. Deployment 는 yaml 로 entrypoint, work pool, pipeline flow image 를 정의합니다. 팀원이 작성하는 학습 스크립트 (`my_flow.py`) 와는 무관합니다.
 
   #### Yaml
 
@@ -540,7 +542,7 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
   - `prefect CLI --name` — 등록할 deployment.
   - `prefect CLI --no-prompt` — 대화형 질문을 끄고 yaml 정의대로 등록합니다 (이미지 빌드·스케줄 프롬프트 안 뜸).
 
-  이 등록은 **제어 노드 호스트 셸 (컨테이너 밖) 에서 관리자가** 실행합니다 — `prefect` 가 깔린 곳에서 `PREFECT_API_URL` 을 server 로 두고 돌립니다. `prefect deploy` 는 DB 에 직접 쓰지 않고 server API 로 등록을 보냅니다 (server 가 Postgres `prefect` DB 에 저장). 등급마다 `pipelineflow-high`·`pipelineflow-low` yaml 로 두 벌 등록합니다.
+  `prefect` 가 깔린 곳에서 `PREFECT_API_URL` 을 server 로 두고 돌립니다. `prefect deploy` 는 DB 에 직접 쓰지 않고 server API 로 등록을 보냅니다 (server 가 Postgres `prefect` DB 에 저장). 등급마다 `pipelineflow-high`·`pipelineflow-low` yaml 로 두 벌 등록합니다.
 
   #### Verification
 
