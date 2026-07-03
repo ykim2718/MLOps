@@ -26,11 +26,12 @@ s3://<bucket>/<minio_key>/<상대경로> 로 올라가고, catalog 는 UNIQUE(mi
        python catalog.py spec   spec.json                                 # 빈 spec 뼈대 → minio_key 채움
        python catalog.py upload spec.json --path ./out
        python catalog.py upload specs.json --minio-key epc/v1 --path ./out  # {K: spec, ...} 중 K 만 선택
+       python catalog.py upload spec.json --minio-key epc/v1 --register-only  # MinIO 에 이미 있는 객체로 등록만
    spec.json 예시 (예약 키는 minio_key·bucket·block 뿐, 나머지는 자유 형식으로 doc 에 보존):
        {"minio_key": "epc/v1", "bucket": "datasets",
         "provider": "zoo", "description": {"fab": "fab2", "chamber": "CH3"}}
    (--path 는 파일·폴더·와일드카드(`dir/*.csv`, 재귀 `dir/**/*.csv`). boto3 로 올리므로 mc 불필요.
-    minio_key 는 불변 — 이미 있으면 중단.)
+    minio_key 는 불변 — 이미 있으면 중단. 업로드가 MinIO 는 됐는데 등록 전에 끊겼으면 --register-only 로 복구.)
 
 4) 다운로드 / 삭제 / 원본 객체 보기 (모두 boto3, mc 불필요):
        python catalog.py download epc/v1 ./out       # dest 기본 ./<minio_key>
@@ -46,7 +47,7 @@ CLI help (`python catalog.py`):
 
 usage: catalog.py [-h] [-V] <command> ...
 
-catalog.py v0.0.40 - Data catalog (PostgreSQL ledger) + MinIO object operations.
+catalog.py v0.0.41 - Data catalog (PostgreSQL ledger) + MinIO object operations.
 
 positional arguments:
   <command>
@@ -69,6 +70,7 @@ examples:
   python catalog.py spec spec.json                    # write an empty upload spec template
   python catalog.py upload spec.json --path ./out     # upload files at --path + register (JSON spec)
   python catalog.py upload specs.json --minio-key epc/v1 --path ./out  # pick one from a {key: spec} file
+  python catalog.py upload spec.json --minio-key epc/v1 --register-only  # register objects already in MinIO
   python catalog.py download epc/v1 ./out             # dest omitted -> ./<minio_key>
   python catalog.py remove epc/v1 --yes               # delete objects + catalog row for the key
   python catalog.py objects epc                       # raw MinIO objects (not the catalog)
@@ -105,7 +107,7 @@ from typing import Any, List, Optional, Tuple
 import psycopg2
 from psycopg2.extras import Json, RealDictCursor
 
-__version__ = "0.0.40"  # Semantic Versioning:  Version = Major.Minor.Patch
+__version__ = "0.0.41"  # Semantic Versioning:  Version = Major.Minor.Patch
 
 _BLOCK = None       # credential block name (-b); set by CLI or set_block(), used to read creds
 _PG_HOST = None      # CLI --pg-host: override the postgresql endpoint host only (creds unchanged)
@@ -324,7 +326,8 @@ def _resolve_sources(path: str) -> List[Tuple[Path, str]]:
     return [(src, src.name)]
 
 
-def upload(spec: dict, path: str, block: Optional[str] = None, spec_dir: Optional[Path] = None) -> str:
+def upload(spec: dict, path: Optional[str] = None, block: Optional[str] = None,
+           spec_dir: Optional[Path] = None, register_only: bool = False) -> str:
     """spec (메타데이터) + path (올릴 파일) 로 MinIO 에 올리고 catalog 에 등록한다 (minio_key 로 식별).
 
     path 는 CLI --path 로 받는다 (spec 에 넣지 않음): 파일·폴더·와일드카드 `dir/*.csv`.
@@ -335,6 +338,8 @@ def upload(spec: dict, path: str, block: Optional[str] = None, spec_dir: Optiona
     상대 path 는 실행 폴더(cwd) 와 catalog.py 위치 두 기준으로 찾는다 (절대경로는 그대로). _locate() 참고.
     block (인자 또는 spec['block']) 가 있으면 그 사용자의 MinIO 키로 올린다.
     minio_key 는 불변 (immutable): 같은 key 가 MinIO 나 catalog 에 이미 있으면 덮지 않고 중단한다.
+    register_only=True 면 파일 업로드를 건너뛰고, MinIO 에 이미 있는 그 key 의 객체로 catalog 행만 등록한다
+    (업로드가 MinIO 는 됐는데 catalog 등록 전에 끊긴 경우 복구용; path 불필요, 객체 수/크기는 MinIO 에서 집계).
     """
     missing = [k for k in _REQUIRED_SPEC_KEYS if not spec.get(k)]
     if missing:
@@ -347,27 +352,43 @@ def upload(spec: dict, path: str, block: Optional[str] = None, spec_dir: Optiona
     block = block or spec.get("block")
 
     _check_name(minio_key, "minio_key")
-    located = _locate(path, spec_dir)              # resolve relative path vs cwd + catalog dir
-    files = _resolve_sources(located)              # file | folder (recursive) | glob (dir/*.csv, **)
-
     s3 = _s3(block)
     prefix = f"{minio_key}/"
     minio_path = f"s3://{bucket}/{prefix}"
-    ensure_schema()                                # create the catalog table if missing, before the dup check
-    if get(minio_key) or s3.list_objects_v2(
-            Bucket=bucket, Prefix=prefix, MaxKeys=1).get("KeyCount", 0):
-        raise FileExistsError(f"minio_key already exists: {minio_path} (use a new key)")
+    ensure_schema()                                # create the catalog table if missing, before the checks
 
-    # upload each resolved file (key suffix already computed relative to the path's base)
-    n_files, size_bytes = 0, 0
-    for fp, rel in files:
-        s3.upload_file(str(fp), bucket, prefix + rel)
-        n_files += 1
-        size_bytes += fp.stat().st_size
+    if register_only:                              # recover a stranded upload: count existing objects, no upload
+        if get(minio_key):
+            raise FileExistsError(f"already registered in catalog: {minio_key} (nothing to do)")
+        n_files, size_bytes = 0, 0
+        for page in s3.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=prefix):
+            for obj in page.get("Contents", []):
+                if obj["Key"].endswith("/"):
+                    continue
+                n_files += 1
+                size_bytes += obj["Size"]
+        if n_files == 0:
+            raise FileNotFoundError(f"--register-only but no objects under {minio_path} (nothing to register)")
+        action = "registered (existing objects, no upload)"
+    else:
+        if not path:
+            raise ValueError("--path is required (unless --register-only)")
+        located = _locate(path, spec_dir)          # resolve relative path vs cwd + catalog dir
+        files = _resolve_sources(located)          # file | folder (recursive) | glob (dir/*.csv, **)
+        if get(minio_key) or s3.list_objects_v2(
+                Bucket=bucket, Prefix=prefix, MaxKeys=1).get("KeyCount", 0):
+            raise FileExistsError(f"minio_key already exists: {minio_path} "
+                                  "(use a new key, or --register-only to register existing objects)")
+        n_files, size_bytes = 0, 0
+        for fp, rel in files:                      # upload each resolved file (key suffix relative to path base)
+            s3.upload_file(str(fp), bucket, prefix + rel)
+            n_files += 1
+            size_bytes += fp.stat().st_size
+        action = f"uploaded {n_files} file(s), {size_bytes} B and registered"
 
     doc = {k: v for k, v in spec.items() if k != "block"}   # store the spec verbatim (minus the creds selector)
     register(minio_key, minio_path, doc, n_files=n_files, size_bytes=size_bytes)
-    print(f"[catalog] uploaded {n_files} file(s), {size_bytes} B -> {minio_path} and registered")
+    print(f"[catalog] {action} -> {minio_path}")
     return minio_path
 
 
@@ -574,7 +595,7 @@ def _cmd_upload(args: argparse.Namespace) -> None:
         spec = {**spec, "minio_key": args.minio_key}     # minio_key from the key -> satisfies the required check
     else:
         spec = data
-    upload(spec, args.path, block=args.block)     # --path relative to cwd (+ catalog dir); no spec_dir
+    upload(spec, args.path, block=args.block, register_only=args.register_only)   # --path vs cwd (+ catalog dir)
 
 
 def _cmd_download(args: argparse.Namespace) -> None:
@@ -611,6 +632,7 @@ def _build_parser() -> argparse.ArgumentParser:
           python catalog.py spec spec.json                    # write an empty upload spec template
           python catalog.py upload spec.json --path ./out     # upload files at --path + register (JSON spec)
           python catalog.py upload specs.json --minio-key epc/v1 --path ./out  # pick one from a {key: spec} file
+          python catalog.py upload spec.json --minio-key epc/v1 --register-only  # register objects already in MinIO
           python catalog.py download epc/v1 ./out             # dest omitted -> ./<minio_key>
           python catalog.py remove epc/v1 --yes               # delete objects + catalog row for the key
           python catalog.py objects epc                       # raw MinIO objects (not the catalog)
@@ -651,7 +673,7 @@ def _build_parser() -> argparse.ArgumentParser:
     sp.set_defaults(func=_cmd_find, uses_pg=True, uses_minio=False)
     sp.add_argument("minio_key", type=str, help="minio_key prefix (LIKE) to match")
     sp.add_argument("filters", type=str, nargs="*", default=[], metavar="key=value",
-                    help="metadata filters")
+                    help="doc top-level filters (doc->>key = value)")
     _add_block(sp)
 
     sp = sub.add_parser("spec", help="write an empty upload spec.json template to fill in")
@@ -662,10 +684,13 @@ def _build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("upload", help="[MinIO + PostgreSQL] upload files + register, from a JSON spec")
     sp.set_defaults(func=_cmd_upload, uses_pg=True, uses_minio=True)
     sp.add_argument("spec", type=str, metavar="spec.json")
-    sp.add_argument("--path", required=True,
-                    help="file/folder/wildcard to upload (dir/*.csv, recursive dir/**/*.csv)")
+    sp.add_argument("--path", default=None,
+                    help="file/folder/wildcard to upload (dir/*.csv, recursive dir/**/*.csv); "
+                         "required unless --register-only")
     sp.add_argument("--minio-key", type=str, default=None,
                     help="if spec.json is {minio_key: spec, ...}, upload that one (and set its minio_key)")
+    sp.add_argument("--register-only", action="store_true", default=False,
+                    help="skip upload; register the catalog row from objects already in MinIO under the key")
     _add_block(sp)
 
     sp = sub.add_parser("download", help="[PostgreSQL + MinIO] look up in catalog, download objects")

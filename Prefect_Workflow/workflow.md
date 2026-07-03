@@ -1,6 +1,6 @@
 # AI/ML Workflow Automation
 
-<sub>rev. 54</sub>
+<sub>rev. 55</sub>
 
 Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환경입니다. 이 문서는 **전체 워크플로우의 인덱스 (개요)** 이고, 도구별 상세는 컴포넌트 문서로 잇습니다.
 
@@ -399,14 +399,14 @@ def inference_flow():
 
 `catalog.py` 는 데이터 카탈로그 (PostgreSQL `catalog` DB 장부) 와 MinIO 객체를 함께 다루는 접근 계층이자 CLI 입니다. flow 에서 라이브러리로 import 해 쓰거나 ([§3 Data Catalog](#3-data)), 아래 CLI 로 직접 둘러보기·업로드·다운로드·삭제합니다. **catalog.py 는 컨테이너 밖에서 실행** 되므로 자격증명은 Prefect 프로필 ([§6 Server Connection](#6-python-execution) 의 `prefect config set PREFECT_API_URL=...`) 로 연결된 **Prefect Secret 블록** 에서 가져옵니다 (멤버별 `Credentials` 블록은 아래 [Credentials](#credentials-prefect-block), 없으면 default). 프로세스 환경변수나 `docker-compose.env` 파일은 쓰지 않습니다 (그 파일은 컨테이너 스택용이라 host 의 catalog.py 가 찾을 수 없음). 업로드·다운로드·삭제는 boto3 로 처리하므로 `mc` 가 필요 없습니다.
 
-**Target** 은 명령이 접속하는 곳입니다 (**PostgreSQL** = catalog DB 장부, **MinIO** = 객체 저장소). 각 명령은 실행 시작 시 접속 대상 (PostgreSQL DSN — 비밀번호 가림 · MinIO endpoint) 과 **자격증명 출처** (`[creds: prefect-block (member=…) | default]`) 를 stderr 로 먼저 출력해 "어디로 접속해 도는지, 자격증명을 어디서 가져왔는지" 를 알립니다. Prefect 서버 블록에서 가져오면 `prefect-block`, 서버 미연결·블록 없음이면 `default` 로 표시됩니다. `--version`/`-V` 로 버전을 확인합니다.
+**Target** 은 명령이 접속하는 곳입니다 (**PostgreSQL** = catalog DB 장부, **MinIO** = 객체 저장소). 각 명령은 실행 시작 시 접속 대상 (PostgreSQL DSN — 비밀번호 가림 · MinIO endpoint) 과 **자격증명 출처** (`[creds: prefect-block (block=…) | default (localhost)]`) 를 stderr 로 먼저 출력해 "어디로 접속해 도는지, 자격증명을 어디서 가져왔는지" 를 알립니다. `-b <block>` 로 블록을 주면 `prefect-block (block=…)`, `-b` 없이 돌리면 `default (localhost)` 로 표시됩니다. `-b` 를 **줬는데** credentials.py import 실패나 블록 로드 실패(서버 미연결·블록 없음)면 조용히 default 로 안 가고 오류로 즉시 중단합니다. `--version`/`-V` 로 버전을 확인합니다.
 
 | Command | Target | Purpose |
 |---|---|---|
 | `list` | PostgreSQL | 등록된 데이터셋 목록 (minio_key 요약) |
 | `find <minio_key> [key=value ...]` | PostgreSQL | minio_key prefix + doc 최상위 키=값 검색 |
 | `spec [out.json]` | (local) | 빈 upload spec.json 뼈대 생성 (채워서 `upload` 에 사용; 기본 `spec.json`) |
-| `upload <spec.json> --path P [--minio-key key]` | MinIO + PostgreSQL | `--path` 의 파일/폴더/glob 을 MinIO 적재 + catalog 등록 (메타는 spec; `--minio-key` 면 spec 이 `{key: spec, ...}` 중 하나) |
+| `upload <spec.json> --path P [--minio-key key] [--register-only]` | MinIO + PostgreSQL | `--path` 의 파일/폴더/glob 을 MinIO 적재 + catalog 등록 (메타는 spec; `--minio-key` 면 spec 이 `{key: spec, ...}` 중 하나). `--register-only` 는 업로드를 건너뛰고 MinIO 에 이미 있는 그 key 의 객체로 catalog 행만 등록 (`--path` 불필요; 업로드가 MinIO 는 됐는데 등록 전에 끊긴 경우 복구용) |
 | `download <minio_key> [dest]` | PostgreSQL + MinIO | 그 key 의 객체 다운로드 (dest 기본 `./<minio_key>`) |
 | `remove <minio_key> [--yes]` | MinIO + PostgreSQL | 그 key 의 MinIO 객체 + catalog 행 영구 삭제 |
 | `objects [minio_key]` | MinIO | MinIO 에 실제로 있는 객체 나열 (catalog 무관; minio_key prefix 로 한정) |
@@ -431,12 +431,13 @@ python catalog.py find epc fab=fab2                 # search by minio_key prefix
 python catalog.py spec spec.json                    # write an empty upload spec template
 python catalog.py upload spec.json --path ./out     # upload files at --path + register (JSON spec)
 python catalog.py upload specs.json --minio-key epc/v1 --path ./out  # pick one from a {key: spec} file
+python catalog.py upload spec.json --minio-key epc/v1 --register-only  # register objects already in MinIO (no upload)
 python catalog.py download epc/v1 ./out             # dest omitted -> ./<minio_key>
 python catalog.py remove epc/v1 --yes               # delete objects + catalog row for the key
 python catalog.py objects epc                       # raw MinIO objects (not the catalog)
 ```
 
-`upload` 의 `spec.json` 예시입니다. 예약 키(`minio_key`·`bucket`·`member`) 외의 필드는 형식 제약 없이 `doc`(JSONB) 로 그대로 저장됩니다 (임의 키·중첩 허용 — 아래 `description` 처럼 객체도 가능).
+`upload` 의 `spec.json` 예시입니다. 예약 키(`minio_key`·`bucket`·`block`) 외의 필드는 형식 제약 없이 `doc`(JSONB) 로 그대로 저장됩니다 (임의 키·중첩 허용 — 아래 `description` 처럼 객체도 가능).
 
 ```json
 {"minio_key": "epc/v1", "bucket": "datasets",
@@ -444,7 +445,7 @@ python catalog.py objects epc                       # raw MinIO objects (not the
  "description": {"fab": "fab2", "chamber": "CH3", "rows": 52416}}
 ```
 
-> `minio_key` 는 불변 (immutable) 입니다 — 같은 key 가 MinIO 나 catalog 에 이미 있으면 `upload` 는 덮어쓰지 않고 중단합니다 (새 key 로 다시 시도). `remove` 는 MinIO 객체 (모든 버전·삭제마커) 와 catalog 행을 영구 삭제하므로 `--yes` 없이는 `DELETE` 입력을 요구합니다.
+> `minio_key` 는 불변 (immutable) 입니다 — 같은 key 가 MinIO 나 catalog 에 이미 있으면 `upload` 는 덮어쓰지 않고 중단합니다 (새 key 로 다시 시도). 업로드가 MinIO 는 됐는데 catalog 등록 전에 끊겼다면 `--register-only` 로 재업로드 없이 catalog 행만 등록해 복구합니다. `remove` 는 MinIO 객체 (모든 버전·삭제마커) 와 catalog 행을 영구 삭제하므로 `--yes` 없이는 `DELETE` 입력을 요구합니다.
 
 host 에서 컨테이너용 블록 (endpoint 가 `postgres`·`minio` 서비스명) 으로 접속할 때는 `-b <block>` 로 블록을 고르고 `--pg-host`/`--minio-host` 로 host 만 `localhost` 로 바꿉니다.
 
