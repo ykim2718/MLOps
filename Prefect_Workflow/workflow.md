@@ -1,6 +1,6 @@
 # AI/ML Workflow Automation
 
-<sub>rev. 55</sub>
+<sub>rev. 56</sub>
 
 Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환경입니다. 이 문서는 **전체 워크플로우의 인덱스 (개요)** 이고, 도구별 상세는 컴포넌트 문서로 잇습니다.
 
@@ -144,7 +144,7 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
    "provider": "ykim", "description": {"source": "kaggle", "rows": 52416}}
   ```
 
-  > 예약 키(`minio_key`·`bucket`·`member`) 외의 필드(`provider`·`description{…}` 등)는 형식 제약 없이 `doc` 에 그대로 저장됩니다. `--path` 값만 바꿔 위 네 경우를 씁니다 (`--path data` · `--path data/*.parquet` · `--path data/**/*.parquet`). 매치가 0건이면 `FileNotFoundError` 로 중단하고, 같은 `minio_key` 가 이미 있으면 덮지 않고 중단합니다. spec.json 엔 `path` 를 넣지 않습니다 (필수 키는 `minio_key`).
+  > 예약 키(`minio_key`·`bucket`·`block`) 외의 필드(`provider`·`description{…}` 등)는 형식 제약 없이 `doc` 에 그대로 저장됩니다. `--path` 값만 바꿔 위 네 경우를 씁니다 (`--path data` · `--path data/*.parquet` · `--path data/**/*.parquet`). 매치가 0건이면 `FileNotFoundError` 로 중단하고, 같은 `minio_key` 가 이미 있으면 덮지 않고 중단합니다. spec.json 엔 `path` 를 넣지 않습니다 (필수 키는 `minio_key`).
 
 ### Download
 
