@@ -1,8 +1,8 @@
 # Prefect Pipeline Orchestration on Docker
 
-<sub>rev. 522</sub>
+<sub>rev. 523</sub>
 
-![Prefect](https://www.prefect.io/wordmark.png)
+![Prefect](assets/prefect-wordmark.png)
 
 > 공식 사이트: [https://www.prefect.io/](https://www.prefect.io/)
 

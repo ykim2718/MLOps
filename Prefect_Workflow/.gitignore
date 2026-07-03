@@ -1,0 +1,2 @@
+# run_dry_pipeline.py builds these per-run folders (repo/ script/ data/) here; keep them out of git.
+dry-run-*/
