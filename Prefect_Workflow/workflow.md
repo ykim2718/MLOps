@@ -1,6 +1,6 @@
 # AI/ML Workflow Automation
 
-<sub>rev. 51</sub>
+<sub>rev. 54</sub>
 
 Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환경입니다. 이 문서는 **전체 워크플로우의 인덱스 (개요)** 이고, 도구별 상세는 컴포넌트 문서로 잇습니다.
 
@@ -90,13 +90,13 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
 
   ```text
   UPLOAD — host: catalog.py upload spec.json --path <p>  (-b <block> [--pg-host/--minio-host localhost])
-    input: spec.json { minio_key, bucket, metadata } + --path <p> (file/folder/glob)
-    creds: Credentials block (member) — minio + postgresql_catalog sections
+    input: spec.json { minio_key, bucket, ...free-form } + --path <p> (file/folder/glob)
+    creds: Credentials block (-b <block>) — minio + postgresql_catalog sections
   ┌────────────┐                        ┌─────────────┐
   │ catalog.py │─ upload file ────────> │ MinIO :9000 │  → s3://<bucket>/<minio_key>/<files>
   └──────┬─────┘                        └─────────────┘
          │                              ┌──────────────────┐
-         └─ register row ─────────────> │ PostgreSQL :5432 │  → datasets(minio_path, n_files, size, metadata)
+         └─ register row ─────────────> │ PostgreSQL :5432 │  → datasets(minio_key, minio_path, n_files, size, doc)
                                         └──────────────────┘
 
   DOWNLOAD — in-container: pipeline.py
@@ -109,18 +109,19 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
 
 ### Upload
 
-  `catalog.py upload <spec.json> --path <경로>` 는 **`--path` 가 가리키는 파일**을 MinIO 에 올리고 `catalog` 에 레코드 (메타는 spec.json) 를 등록합니다. host 에서는 `-b <block>` 로 자격증명 블록을 고르고 컨테이너용 endpoint 를 `--pg-host/--minio-host localhost` 로 덮어씁니다. spec.json 하나에 여러 spec 을 `{minio_key: spec, ...}` 로 담았다면 `--minio-key <key>` 로 그중 하나만 올립니다 (그 키가 minio_key 가 됨).
+  `catalog.py upload <spec.json> --path <경로>` 는 **`--path` 가 가리키는 파일**을 MinIO 에 올리고 `catalog` 에 레코드를 등록합니다. spec 은 **자유 형식 문서**로, 예약 키(`minio_key`·`bucket`·`member`)만 해석하고 나머지는 그대로 `doc`(JSONB) 로 보존합니다 (임의 키·중첩 허용). host 에서는 `-b <block>` 로 자격증명 블록을 고르고 컨테이너용 endpoint 를 `--pg-host/--minio-host localhost` 로 덮어씁니다. spec.json 하나에 여러 spec 을 `{minio_key: spec, ...}` 로 담았다면 `--minio-key <key>` 로 그중 하나만 올립니다 (그 키가 minio_key 가 됨).
 
   ```python
-  # catalog.py  upload(spec, path, member) — key steps (path from CLI --path; minio_key/bucket from spec)
+  # catalog.py  upload(spec, path, block) — key steps (path from CLI --path; minio_key/bucket from spec)
   files = _resolve_sources(path)               # file | folder (recursive) | glob (dir/*.csv, **)
   ensure_schema()                              # create the datasets table if missing
   if get(minio_key):                           # minio_key is immutable -> stop if it exists
       raise FileExistsError("minio_key already exists")
   for fp, rel in files:                        # upload each file -> s3://<bucket>/<minio_key>/<rel>
       s3.upload_file(str(fp), bucket, prefix + rel)
-  register(minio_key, minio_path,              # register the catalog row (path + counts + metadata)
-           n_files=n_files, size_bytes=size_bytes, metadata=spec.get("metadata"))
+  doc = {k: v for k, v in spec.items() if k != "member"}   # store the spec verbatim -> doc JSONB
+  register(minio_key, minio_path, doc,         # register the catalog row (path + counts + doc)
+           n_files=n_files, size_bytes=size_bytes)
   ```
 
   ```powershell
@@ -139,18 +140,18 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
   | recursive wildcard `data/**/*.parquet` | 하위까지 매치 | `<minio_key>/<상대경로>` |
 
   ```json
-  {"minio_key": "epc/v1",
-   "bucket": "datasets", "created_by": "ykim", "metadata": {"source": "kaggle"}}
+  {"minio_key": "epc/v1", "bucket": "datasets",
+   "provider": "ykim", "description": {"source": "kaggle", "rows": 52416}}
   ```
 
-  > `--path` 값만 바꿔 위 네 경우를 씁니다 (`--path data` · `--path data/*.parquet` · `--path data/**/*.parquet`). 매치가 0건이면 `FileNotFoundError` 로 중단하고, 같은 `minio_key` 가 이미 있으면 덮지 않고 중단합니다. spec.json 엔 `path` 를 넣지 않습니다 (필수 키는 `minio_key`).
+  > 예약 키(`minio_key`·`bucket`·`member`) 외의 필드(`provider`·`description{…}` 등)는 형식 제약 없이 `doc` 에 그대로 저장됩니다. `--path` 값만 바꿔 위 네 경우를 씁니다 (`--path data` · `--path data/*.parquet` · `--path data/**/*.parquet`). 매치가 0건이면 `FileNotFoundError` 로 중단하고, 같은 `minio_key` 가 이미 있으면 덮지 않고 중단합니다. spec.json 엔 `path` 를 넣지 않습니다 (필수 키는 `minio_key`).
 
 ### Download
 
   `catalog.py download <minio_key> [dest]` 은 catalog 에서 그 key 의 `minio_path` 를 찾아 그 아래 객체를 `dest` (기본 `./<minio_key>`) 로 내려받습니다.
 
   ```python
-  # catalog.py  download(minio_key, dest, member) — key steps
+  # catalog.py  download(minio_key, dest, block) — key steps
   row = get(minio_key)                         # look up the catalog row for the key
   bucket, prefix = split(row["minio_path"])    # s3://bucket/<minio_key>/
   for obj in list_objects(bucket, prefix):     # every object under the prefix
@@ -403,7 +404,7 @@ def inference_flow():
 | Command | Target | Purpose |
 |---|---|---|
 | `list` | PostgreSQL | 등록된 데이터셋 목록 (minio_key 요약) |
-| `find <minio_key> [key=value ...]` | PostgreSQL | minio_key prefix + metadata 키=값 검색 |
+| `find <minio_key> [key=value ...]` | PostgreSQL | minio_key prefix + doc 최상위 키=값 검색 |
 | `spec [out.json]` | (local) | 빈 upload spec.json 뼈대 생성 (채워서 `upload` 에 사용; 기본 `spec.json`) |
 | `upload <spec.json> --path P [--minio-key key]` | MinIO + PostgreSQL | `--path` 의 파일/폴더/glob 을 MinIO 적재 + catalog 등록 (메타는 spec; `--minio-key` 면 spec 이 `{key: spec, ...}` 중 하나) |
 | `download <minio_key> [dest]` | PostgreSQL + MinIO | 그 key 의 객체 다운로드 (dest 기본 `./<minio_key>`) |
@@ -426,7 +427,7 @@ Add-PyPath ..\Docker\Prefect\credentials.py   # catalog.py imports credentials.p
 $env:PYTHONPATH
 
 python catalog.py list                              # registered datasets (minio_key summary)
-python catalog.py find epc fab=fab2                 # search by minio_key prefix + metadata key=value
+python catalog.py find epc fab=fab2                 # search by minio_key prefix + doc key=value
 python catalog.py spec spec.json                    # write an empty upload spec template
 python catalog.py upload spec.json --path ./out     # upload files at --path + register (JSON spec)
 python catalog.py upload specs.json --minio-key epc/v1 --path ./out  # pick one from a {key: spec} file
@@ -435,12 +436,12 @@ python catalog.py remove epc/v1 --yes               # delete objects + catalog r
 python catalog.py objects epc                       # raw MinIO objects (not the catalog)
 ```
 
-`upload` 의 `spec.json` 예시입니다.
+`upload` 의 `spec.json` 예시입니다. 예약 키(`minio_key`·`bucket`·`member`) 외의 필드는 형식 제약 없이 `doc`(JSONB) 로 그대로 저장됩니다 (임의 키·중첩 허용 — 아래 `description` 처럼 객체도 가능).
 
 ```json
-{"minio_key": "epc/v1",
- "bucket": "datasets", "created_by": "zoo", "description": "fab2 CH3",
- "metadata": {"fab": "fab2", "chamber": "CH3"}}
+{"minio_key": "epc/v1", "bucket": "datasets",
+ "provider": "zoo",
+ "description": {"fab": "fab2", "chamber": "CH3", "rows": 52416}}
 ```
 
 > `minio_key` 는 불변 (immutable) 입니다 — 같은 key 가 MinIO 나 catalog 에 이미 있으면 `upload` 는 덮어쓰지 않고 중단합니다 (새 key 로 다시 시도). `remove` 는 MinIO 객체 (모든 버전·삭제마커) 와 catalog 행을 영구 삭제하므로 `--yes` 없이는 `DELETE` 입력을 요구합니다.
@@ -462,7 +463,7 @@ python catalog.py remove <minio_key> -b <block> --pg-host localhost --minio-host
   | `postgresql_catalog` | `endpoint` · `username` · `password` · `database` | PostgreSQL (`catalog` DB) |
   | `postgresql_optuna` | `endpoint` · `username` · `password` · `database` | PostgreSQL (`optuna` DB, flow·Optuna 용) |
 
-  - **`-b <block>`** 가 어느 팀원 블록을 읽을지 정합니다. catalog.py 는 그중 `minio` + `postgresql_catalog` 두 섹션만 씁니다 (`postgresql_optuna` 는 flow 용). 블록이 없거나 서버 미연결이면 default (localhost) 로 떨어지고, 배너에 `[creds: prefect-block (member=…)]` 또는 `[creds: default]` 로 출처가 표시됩니다.
+  - **`-b <block>`** 가 어느 팀원 블록을 읽을지 정합니다. catalog.py 는 그중 `minio` + `postgresql_catalog` 두 섹션만 씁니다 (`postgresql_optuna` 는 flow 용). `-b` 를 **안 주면** default (localhost) 로 돌고 배너에 `[creds: default]`, 주면 `[creds: prefect-block (member=…)]` 로 출처가 표시됩니다. `-b` 를 **줬는데** credentials.py import 실패나 블록 로드 실패(서버 미연결·블록 없음)면 조용히 default 로 안 떨어지고 오류로 즉시 중단합니다 (silent-default 방지 — `credentials.py` 는 catalog.py 옆이나 `PYTHONPATH` 에 있어야 함).
   - **`--pg-host` / `--minio-host`** 는 블록 endpoint 의 host 만 덮어씁니다 (creds·port 불변). 컨테이너용 블록 (endpoint 가 `postgres`·`minio` 서비스명) 을 host 에서 쓸 때 `--pg-host localhost --minio-host localhost` 로 붙입니다.
   - `PREFECT_API_URL` (Prefect 프로필) 은 이 블록을 받기 위한 **접속점** 일 뿐 catalog 데이터가 아닙니다. 프로세스 환경변수·`docker-compose.env` 는 쓰지 않습니다.
 

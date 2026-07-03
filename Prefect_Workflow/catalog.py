@@ -2,10 +2,12 @@
 
 PostgreSQL `catalog` DB 의 `datasets` 테이블을 다룬다.
 실제 데이터 파일은 MinIO 에 있고, 여기서는 "무엇이 · 어디에(minio_key) ·
-누가 만들었는지" 같은 **메타데이터만** 기록/조회한다(파일 자체는 boto3/MinIO 담당).
+어떤 내용인지" 같은 **메타데이터만** 기록/조회한다(파일 자체는 boto3/MinIO 담당).
 
 각 데이터셋은 minio_key (전체 S3 키 prefix, 예 `epc/v1`) 하나로 식별한다. 파일은
 s3://<bucket>/<minio_key>/<상대경로> 로 올라가고, catalog 는 UNIQUE(minio_key).
+메타데이터(spec)는 고정 컬럼이 아니라 **자유 형식 문서 `doc`(JSONB)** 로 통째로 보존된다
+— 임의 키·중첩(project·vendor·description{…} 등)을 그대로 담고, doc 필드로 검색한다.
 
 두 가지로 쓴다.
 
@@ -13,21 +15,20 @@ s3://<bucket>/<minio_key>/<상대경로> 로 올라가고, catalog 는 UNIQUE(mi
        import catalog
        catalog.ensure_schema()
        catalog.register("epc/v1", "s3://datasets/epc/v1/",
-                        created_by="zoo", metadata={"fab": "fab2", "chamber": "CH3"})
+                        {"provider": "zoo", "fab": "fab2", "note": {"chamber": "CH3"}})
        rows = catalog.find("epc", fab="fab2")
 
 2) CLI 로 카탈로그 둘러보기 (이력을 모르는 팀원이 탐색·선택할 때):
        python catalog.py list                     # 등록된 데이터셋 목록(minio_key 요약)
-       python catalog.py find epc fab=fab2         # 검색(minio_key prefix + metadata 키=값)
+       python catalog.py find epc fab=fab2         # 검색(minio_key prefix + doc 키=값)
 
 3) 업로드 + 등록 (MinIO 적재와 catalog 등록을 한 번에). 올릴 대상은 CLI `--path` 로 준다:
        python catalog.py spec   spec.json                                 # 빈 spec 뼈대 → minio_key 채움
        python catalog.py upload spec.json --path ./out
        python catalog.py upload specs.json --minio-key epc/v1 --path ./out  # {K: spec, ...} 중 K 만 선택
-   spec.json 예시 (단일 spec; --minio-key 를 쓰면 spec.json 은 {minio_key: spec, ...} 형태):
-       {"minio_key": "epc/v1",
-        "bucket": "datasets", "created_by": "zoo", "description": "fab2 CH3",
-        "metadata": {"fab": "fab2", "chamber": "CH3"}}
+   spec.json 예시 (예약 키는 minio_key·bucket·block 뿐, 나머지는 자유 형식으로 doc 에 보존):
+       {"minio_key": "epc/v1", "bucket": "datasets",
+        "provider": "zoo", "description": {"fab": "fab2", "chamber": "CH3"}}
    (--path 는 파일·폴더·와일드카드(`dir/*.csv`, 재귀 `dir/**/*.csv`). boto3 로 올리므로 mc 불필요.
     minio_key 는 불변 — 이미 있으면 중단.)
 
@@ -37,7 +38,7 @@ s3://<bucket>/<minio_key>/<상대경로> 로 올라가고, catalog 는 UNIQUE(mi
        python catalog.py remove   epc/v1 --yes       # 확인 프롬프트 건너뛰기
        python catalog.py objects  epc                # MinIO 에 실제 있는 객체 나열
 
-MinIO·PostgreSQL 에 붙는 명령엔 `-b <block>` (자격증명 블록 선택; 라이브러리에선 set_member()) 와
+MinIO·PostgreSQL 에 붙는 명령엔 `-b <block>` (자격증명 블록 선택; 라이브러리에선 set_block()) 와
 `--pg-host`/`--minio-host` (endpoint host 만 덮어쓰기, creds 불변) 를 붙일 수 있다. 컨테이너용 블록을
 host 에서 쓸 땐 `-b <block> --pg-host localhost --minio-host localhost`. 블록·자격증명 상세는 아래 CLI help 참고.
 
@@ -45,12 +46,12 @@ CLI help (`python catalog.py`):
 
 usage: catalog.py [-h] [-V] <command> ...
 
-catalog.py v0.0.37 - Data catalog (PostgreSQL ledger) + MinIO object operations.
+catalog.py v0.0.40 - Data catalog (PostgreSQL ledger) + MinIO object operations.
 
 positional arguments:
   <command>
     list         [PostgreSQL] list registered datasets (minio_key summary)
-    find         [PostgreSQL] search by minio_key prefix + metadata key=value
+    find         [PostgreSQL] search by minio_key prefix + doc key=value
     spec         write an empty upload spec.json template to fill in
     upload       [MinIO + PostgreSQL] upload files + register, from a JSON
                  spec
@@ -64,7 +65,7 @@ options:
 
 examples:
   python catalog.py list                              # registered datasets (minio_key summary)
-  python catalog.py find epc fab=fab2                 # search by minio_key prefix + metadata key=value
+  python catalog.py find epc fab=fab2                 # search by minio_key prefix + doc key=value
   python catalog.py spec spec.json                    # write an empty upload spec template
   python catalog.py upload spec.json --path ./out     # upload files at --path + register (JSON spec)
   python catalog.py upload specs.json --minio-key epc/v1 --path ./out  # pick one from a {key: spec} file
@@ -73,14 +74,13 @@ examples:
   python catalog.py objects epc                       # raw MinIO objects (not the catalog)
   python catalog.py list -b alice                     # read alice's block for DB/MinIO creds (-b, any command)
 
-upload spec.json (path is CLI --path, not in the spec):
-  {"minio_key": "epc/v1",
-   "bucket": "datasets", "created_by": "zoo", "description": "fab2 CH3",
-   "metadata": {"fab": "fab2", "chamber": "CH3"}}
+upload spec.json (reserved keys: minio_key/bucket/block; the rest is free-form -> doc JSONB):
+  {"minio_key": "epc/v1", "bucket": "datasets",
+   "provider": "zoo", "description": {"fab": "fab2", "chamber": "CH3"}}
 
 targets (each command prints where it connects + creds source at start):
   [PostgreSQL] = catalog DB ledger,  [MinIO] = object storage
-  creds source: prefect-block | default
+  creds source: prefect-block | default (localhost)
   list/find = PostgreSQL             objects = MinIO
   upload/download/remove = both
 
@@ -105,18 +105,21 @@ from typing import Any, List, Optional, Tuple
 import psycopg2
 from psycopg2.extras import Json, RealDictCursor
 
-__version__ = "0.0.37"  # Semantic Versioning:  Version = Major.Minor.Patch
+__version__ = "0.0.40"  # Semantic Versioning:  Version = Major.Minor.Patch
 
-_MEMBER = None       # block name = team member's name; set by CLI -m or set_member(), used to read creds
+_BLOCK = None       # credential block name (-b); set by CLI or set_block(), used to read creds
 _PG_HOST = None      # CLI --pg-host: override the postgresql endpoint host only (creds unchanged)
 _MINIO_HOST = None   # CLI --minio-host: override the minio endpoint host only (creds unchanged)
 
 # The Credentials block class lives in credentials.py (Prefect/ folder). Import is optional so catalog.py
-# still runs (on _DEFAULTS) without prefect/credentials available.
+# still runs (on _DEFAULTS) without prefect/credentials available -- but if a block (-b) is actually
+# requested and this import failed, _section() raises instead of silently using _DEFAULTS.
 try:
     from credentials import Credentials    # shared block class (defined in Prefect/credentials.py)
-except Exception:                          # prefect/credentials missing -> _section() falls back to _DEFAULTS
+    _CRED_IMPORT_ERR = None
+except Exception as _cred_err:             # keep the reason; surfaced only when -b/block is requested
     Credentials = None
+    _CRED_IMPORT_ERR = _cred_err
 
 _DEFAULTS = {
     "minio": {"endpoint": "http://localhost:9000", "access_key": "minioadmin", "secret_key": "minioadmin"},
@@ -129,10 +132,10 @@ _DEFAULTS = {
 }
 
 
-def set_member(member: Optional[str]) -> None:
-    """라이브러리 사용 시 자격증명을 읽을 팀원 블록 이름을 지정한다 (CLI 는 -m 가 설정)."""
-    global _MEMBER
-    _MEMBER = member
+def set_block(block: Optional[str]) -> None:
+    """라이브러리 사용 시 자격증명을 읽을 블록 이름을 지정한다 (CLI 는 -b 가 설정)."""
+    global _BLOCK
+    _BLOCK = block
 
 
 def set_host_overrides(pg_host: Optional[str] = None, minio_host: Optional[str] = None) -> None:
@@ -152,27 +155,34 @@ def _override_url_host(url: str, host: Optional[str]) -> str:
     return urlunparse(u._replace(netloc=netloc))
 
 
-def _section(section: str, member: Optional[str] = None) -> Tuple[dict, str]:
-    """한 섹션(dict)을 (값, 출처) 로 해석한다 — 블록 이름 = 팀원 이름.
+def _section(section: str, block: Optional[str] = None) -> Tuple[dict, str]:
+    """한 섹션(dict)을 (값, 출처) 로 해석한다 (자격증명 블록 이름으로 조회).
 
-    member(없으면 전역 _MEMBER)의 블록 `Credentials.load(member)` 에서 그 섹션을 돌려준다. 각 팀원 블록은
-    minio(자기 키) + postgresql_catalog·postgresql_optuna(공용 DB, 모든 팀원 블록에 같은 값) 세 섹션을 담는다.
+    block(없으면 전역 _BLOCK)의 `Credentials.load(block)` 에서 그 섹션을 돌려준다. 각 블록은
+    minio(자기 키) + postgresql_catalog·postgresql_optuna(공용 DB, 모든 블록에 같은 값) 세 섹션을 담는다.
     catalog.py 는 컨테이너 밖에서 도는 도구라 docker-compose.env 도, 프로세스 환경변수도 쓰지 않는다 (블록만).
-    member 가 없거나 prefect 미설치/서버 미연결/블록 없음이면 _DEFAULTS(localhost) 로 떨어진다. 출처는
-    'prefect-block (member=...)' | 'default'.
+    block 가 없으면 _DEFAULTS(localhost) 로 떨어진다. block(-b) 를 줬는데 credentials.py import 실패거나
+    블록 로드 실패(서버 미연결·블록 없음)면 조용히 default 로 떨어지지 않고 RuntimeError 로 즉시 중단한다
+    (silent-default 방지). 출처는 'prefect-block (block=...)' | 'default (localhost)'.
     """
-    member = member or _MEMBER
-    if Credentials is not None and member:
-        try:
-            d = getattr(Credentials.load(member), section).get_secret_value()      # SecretDict -> plain dict
-            return d, f"prefect-block (member={member})"
-        except Exception:                                                          # block missing / server down
-            pass
-    return _DEFAULTS[section], "default"
+    block = block or _BLOCK
+    if not block:                                                     # no -b -> localhost defaults (intended)
+        return _DEFAULTS[section], "default (localhost)"
+    if Credentials is None:                                            # -b given but block class import failed -> fatal
+        raise RuntimeError(
+            f"-b {block} requested but the Credentials block class could not be imported: {_CRED_IMPORT_ERR!r}. "
+            "put credentials.py next to catalog.py or on PYTHONPATH.")
+    try:
+        d = getattr(Credentials.load(block), section).get_secret_value()          # SecretDict -> plain dict
+    except Exception as exc:                                            # block missing / server down -> fatal
+        raise RuntimeError(
+            f"-b {block}: failed to load Credentials block '{block}' "
+            f"(Prefect server unreachable or block missing): {exc}") from exc
+    return d, f"prefect-block (block={block})"
 
 
 def _dsn() -> str:
-    """팀원 블록의 'postgresql_catalog' 섹션 필드로 DSN 을 조립한다 (DSN 문자열을 통째로 저장하지 않음)."""
+    """블록의 'postgresql_catalog' 섹션 필드로 DSN 을 조립한다 (DSN 문자열을 통째로 저장하지 않음)."""
     cfg, _ = _section("postgresql_catalog")
     host, _, port = cfg["endpoint"].partition(":")           # "postgres:5432"
     if _PG_HOST:                                             # CLI --pg-host overrides host only
@@ -184,14 +194,10 @@ CREATE TABLE IF NOT EXISTS datasets (
     id             SERIAL PRIMARY KEY,
     minio_key      TEXT NOT NULL,
     minio_path     TEXT NOT NULL,
-    created_by     TEXT,
-    created_at     TIMESTAMP DEFAULT now(),
     n_files        INT,
     size_bytes     BIGINT,
-    content_hash   TEXT,
-    prefect_run_id TEXT,
-    description    TEXT,
-    metadata       JSONB,
+    created_at     TIMESTAMP DEFAULT now(),
+    doc            JSONB NOT NULL DEFAULT '{}'::jsonb,
     UNIQUE(minio_key)
 );
 """
@@ -210,33 +216,31 @@ def ensure_schema() -> None:
         cur.execute(DDL)
 
 
-def register(minio_key: str, minio_path: str, *, created_by: Optional[str] = None,
-             n_files: Optional[int] = None, size_bytes: Optional[int] = None,
-             content_hash: Optional[str] = None, prefect_run_id: Optional[str] = None,
-             description: Optional[str] = None, metadata: Optional[dict] = None) -> None:
-    """새 데이터셋을 카탈로그에 등록 (minio_key 로 식별). metadata 는 dict → JSONB.
+def register(minio_key: str, minio_path: str, doc: Optional[dict] = None, *,
+             n_files: Optional[int] = None, size_bytes: Optional[int] = None) -> None:
+    """새 데이터셋을 카탈로그에 등록 (minio_key 로 식별). doc 는 자유 형식 문서 → JSONB.
 
+    doc 에는 spec 을 통째로 담는다 (project·vendor·description{…} 등 임의 중첩 키 그대로 보존).
+    n_files/size_bytes 는 업로드 시 계산된 운영 통계라 별도 컬럼으로 둔다.
     UNIQUE(minio_key) 라 같은 key 재등록은 무시(DO NOTHING)된다.
     """
     with _conn() as c, c.cursor() as cur:
         cur.execute(
-            """INSERT INTO datasets
-               (minio_key, minio_path, created_by, n_files, size_bytes,
-                content_hash, prefect_run_id, description, metadata)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            """INSERT INTO datasets (minio_key, minio_path, n_files, size_bytes, doc)
+               VALUES (%s,%s,%s,%s,%s)
                ON CONFLICT (minio_key) DO NOTHING""",
-            (minio_key, minio_path, created_by, n_files, size_bytes,
-             content_hash, prefect_run_id, description, Json(metadata or {})))
+            (minio_key, minio_path, n_files, size_bytes, Json(doc or {})))
 
 
 # --------------------------------------------------------------------------- #
 # 업로드 (MinIO 적재 + catalog 등록) — JSON spec 으로 구동
 # --------------------------------------------------------------------------- #
-_NAME_RE = re.compile(r"^[A-Za-z0-9_.#-]+(/[A-Za-z0-9_.#-]+)*$")   # minio_key: slash-joined segments (e.g. Samsung/PoC/#0/V0)
+_NAME_RE = re.compile(r"^[A-Za-z0-9_.#-]+(/[A-Za-z0-9_.#-]+)*$")   # minio_key: slash-joined segments (Samsung/#0/V0)
 _REQUIRED_SPEC_KEYS = ("minio_key",)                      # upload() rejects a spec missing this (path is CLI --path)
 _SPEC_TEMPLATE = {                                        # `spec` command writes this skeleton to fill in
-    "minio_key": "",
-    "bucket": "datasets", "created_by": "", "description": "", "metadata": {},
+    "minio_key": "",                                      # required; the rest is free-form and stored verbatim
+    "bucket": "datasets",
+    "description": "", "metadata": {},                   # example free-form fields (any keys allowed)
 }
 
 
@@ -320,17 +324,16 @@ def _resolve_sources(path: str) -> List[Tuple[Path, str]]:
     return [(src, src.name)]
 
 
-def upload(spec: dict, path: str, member: Optional[str] = None, spec_dir: Optional[Path] = None) -> str:
+def upload(spec: dict, path: str, block: Optional[str] = None, spec_dir: Optional[Path] = None) -> str:
     """spec (메타데이터) + path (올릴 파일) 로 MinIO 에 올리고 catalog 에 등록한다 (minio_key 로 식별).
 
     path 는 CLI --path 로 받는다 (spec 에 넣지 않음): 파일·폴더·와일드카드 `dir/*.csv`.
-    spec keys:
-      minio_key (req; 예 `epc/v1`) · bucket (기본 'datasets') · created_by · description ·
-      metadata (dict) · prefect_run_id · member
-    파일은 s3://<bucket>/<minio_key>/<상대경로> 로 올라간다.
+    spec 은 자유 형식 문서다. upload() 가 해석하는 예약 키는 minio_key (req; 예 `epc/v1`)·
+    bucket (기본 'datasets')·block 뿐이고, 나머지 키는 그대로 doc(JSONB) 로 보존된다
+    (project·vendor·description{…} 같은 임의 중첩 구조 허용). 파일은 s3://<bucket>/<minio_key>/<상대경로>.
 
     상대 path 는 실행 폴더(cwd) 와 catalog.py 위치 두 기준으로 찾는다 (절대경로는 그대로). _locate() 참고.
-    member (인자 또는 spec['member']) 가 있으면 그 사용자의 MinIO 키로 올린다.
+    block (인자 또는 spec['block']) 가 있으면 그 사용자의 MinIO 키로 올린다.
     minio_key 는 불변 (immutable): 같은 key 가 MinIO 나 catalog 에 이미 있으면 덮지 않고 중단한다.
     """
     missing = [k for k in _REQUIRED_SPEC_KEYS if not spec.get(k)]
@@ -341,13 +344,13 @@ def upload(spec: dict, path: str, member: Optional[str] = None, spec_dir: Option
             " run 'python catalog.py spec <out.json>' to scaffold one.")
     minio_key = spec["minio_key"]
     bucket = spec.get("bucket", "datasets")
-    member = member or spec.get("member")
+    block = block or spec.get("block")
 
     _check_name(minio_key, "minio_key")
     located = _locate(path, spec_dir)              # resolve relative path vs cwd + catalog dir
     files = _resolve_sources(located)              # file | folder (recursive) | glob (dir/*.csv, **)
 
-    s3 = _s3(member)
+    s3 = _s3(block)
     prefix = f"{minio_key}/"
     minio_path = f"s3://{bucket}/{prefix}"
     ensure_schema()                                # create the catalog table if missing, before the dup check
@@ -362,12 +365,8 @@ def upload(spec: dict, path: str, member: Optional[str] = None, spec_dir: Option
         n_files += 1
         size_bytes += fp.stat().st_size
 
-    register(minio_key, minio_path,
-             created_by=spec.get("created_by"),
-             n_files=n_files, size_bytes=size_bytes,
-             prefect_run_id=spec.get("prefect_run_id"),
-             description=spec.get("description"),
-             metadata=spec.get("metadata") or {})
+    doc = {k: v for k, v in spec.items() if k != "block"}   # store the spec verbatim (minus the creds selector)
+    register(minio_key, minio_path, doc, n_files=n_files, size_bytes=size_bytes)
     print(f"[catalog] uploaded {n_files} file(s), {size_bytes} B -> {minio_path} and registered")
     return minio_path
 
@@ -386,10 +385,10 @@ def write_spec_template(out: str = "spec.json") -> str:
 # 다운로드 / 삭제 (MinIO ± catalog) — boto3 직접 (mc 불필요)
 # --------------------------------------------------------------------------- #
 def download(minio_key: str, dest: Optional[str] = None,
-             member: Optional[str] = None) -> str:
+             block: Optional[str] = None) -> str:
     """catalog 에서 minio_key 의 minio_path 를 찾아 그 아래 객체를 dest 로 내려받는다.
 
-    dest 기본값은 `./<minio_key>`. member 를 주면 그 사용자의 MinIO 키로 받는다.
+    dest 기본값은 `./<minio_key>`. block 를 주면 그 사용자의 MinIO 키로 받는다.
     "search → select → download" 흐름.
     """
     from urllib.parse import urlparse
@@ -401,7 +400,7 @@ def download(minio_key: str, dest: Optional[str] = None,
     u = urlparse(row["minio_path"])                # s3://bucket/key/...
     bucket, prefix = u.netloc, u.path.lstrip("/")
     dest = dest or minio_key
-    s3 = _s3(member)
+    s3 = _s3(block)
     n = 0
     for page in s3.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=prefix):
         for obj in page.get("Contents", []):
@@ -433,10 +432,10 @@ def _delete_prefix(s3: Any, bucket: str, prefix: str) -> int:
     return deleted
 
 
-def remove(minio_key: str, *, yes: bool = False, member: Optional[str] = None) -> None:
+def remove(minio_key: str, *, yes: bool = False, block: Optional[str] = None) -> None:
     """minio_key 의 MinIO 객체와 catalog 행을 영구 삭제한다.
 
-    member 를 주면 그 사용자의 MinIO 키로 지운다 (그 사용자 권한으로만 삭제 가능).
+    block 를 주면 그 사용자의 MinIO 키로 지운다 (그 사용자 권한으로만 삭제 가능).
     되돌릴 수 없다. yes=False 면 'DELETE' 입력을 요구한다 (CLI 안전장치).
     """
     from urllib.parse import urlparse
@@ -452,7 +451,7 @@ def remove(minio_key: str, *, yes: bool = False, member: Optional[str] = None) -
         if input("Type DELETE to confirm: ") != "DELETE":
             raise SystemExit("cancelled (did not type DELETE).")
 
-    n_obj = _delete_prefix(_s3(member), bucket, prefix)
+    n_obj = _delete_prefix(_s3(block), bucket, prefix)
     with _conn() as c, c.cursor() as cur:
         cur.execute("DELETE FROM datasets WHERE minio_key=%s", (minio_key,))
         n_rows = cur.rowcount
@@ -460,10 +459,10 @@ def remove(minio_key: str, *, yes: bool = False, member: Optional[str] = None) -
 
 
 def objects(minio_key: Optional[str] = None, *, bucket: str = "datasets",
-            member: Optional[str] = None) -> List[dict]:
-    """MinIO 에 실제로 있는 객체를 나열한다 (catalog 등록과 무관한 원본 보기). member 키 우선."""
+            block: Optional[str] = None) -> List[dict]:
+    """MinIO 에 실제로 있는 객체를 나열한다 (catalog 등록과 무관한 원본 보기). block 키 우선."""
     prefix = f"{minio_key}/" if minio_key else ""
-    s3 = _s3(member)
+    s3 = _s3(block)
     rows = []
     for page in s3.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=prefix):
         for obj in page.get("Contents", []):
@@ -475,10 +474,10 @@ def objects(minio_key: Optional[str] = None, *, bucket: str = "datasets",
 # 읽기 / 검색
 # --------------------------------------------------------------------------- #
 def find(minio_key: Optional[str] = None, **filters: Any) -> List[dict]:
-    """minio_key/메타데이터로 검색. 예: find('epc/v1', fab='fab2').
+    """minio_key/doc 필드로 검색. 예: find('Samsung', provider='정지혁').
 
-    minio_key 는 prefix 부분일치(LIKE), filters 는 metadata JSONB 의 키=값 으로 해석된다(문자열 비교).
-    결과는 최신 생성 순(dict 리스트).
+    minio_key 는 prefix 부분일치(LIKE), filters 는 doc JSONB 의 최상위 키=값 으로 해석된다(문자열 비교).
+    결과는 최신 생성 순(dict 리스트, doc 포함).
     """
     sql = "SELECT * FROM datasets WHERE TRUE"
     args = []
@@ -486,7 +485,7 @@ def find(minio_key: Optional[str] = None, **filters: Any) -> List[dict]:
         sql += " AND minio_key LIKE %s"
         args.append(f"{minio_key}%")
     for k, v in filters.items():
-        sql += " AND metadata->>%s = %s"
+        sql += " AND doc->>%s = %s"
         args += [k, str(v)]
     sql += " ORDER BY created_at DESC"
     with _conn() as c, c.cursor(cursor_factory=RealDictCursor) as cur:
@@ -505,12 +504,9 @@ def get(minio_key: str) -> Optional[dict]:
 # 둘러보기(탐색) — 이력을 모르는 팀원이 목록을 보고 고르기 위한 헬퍼
 # --------------------------------------------------------------------------- #
 def list_datasets() -> List[dict]:
-    """등록된 데이터셋 요약: minio_key + 제작자 + 파일 수 + 갱신 시각 (최근 순)."""
+    """등록된 데이터셋 요약: minio_key + 파일 수 + 크기 + 등록 시각 (최근 순)."""
     sql = """
-        SELECT minio_key,
-               created_by AS created_by,
-               n_files,
-               created_at AS created_at
+        SELECT minio_key, n_files, size_bytes, created_at
         FROM datasets
         ORDER BY created_at DESC
     """
@@ -522,14 +518,14 @@ def list_datasets() -> List[dict]:
 # --------------------------------------------------------------------------- #
 # 파일 종류(확장자) 집계 — MinIO 객체를 세어 트리에 표시 (boto3 는 필요할 때만 import)
 # --------------------------------------------------------------------------- #
-def _s3(member: Optional[str] = None) -> Any:
+def _s3(block: Optional[str] = None) -> Any:
     """MinIO(S3 호환) 클라이언트. 블록의 'minio' 섹션(endpoint·access·secret)을 그대로 쓴다.
 
-    member(없으면 전역 _MEMBER)의 블록 minio 키로 접속해 버킷 권한이 팀원별로 적용된다. member 가
-    없거나 블록이 없으면 _DEFAULTS 로 떨어진다.
+    block(없으면 전역 _BLOCK)의 minio 키로 접속해 버킷 권한이 블록별로 적용된다. block 가
+    없으면 _DEFAULTS 로 떨어진다.
     """
     import boto3
-    m, _ = _section("minio", member)                  # endpoint/access_key/secret_key (per-user, fallback shared)
+    m, _ = _section("minio", block)                  # endpoint/access_key/secret_key (per-block, fallback shared)
     return boto3.client("s3", endpoint_url=_override_url_host(m["endpoint"], _MINIO_HOST),
                         aws_access_key_id=m["access_key"], aws_secret_access_key=m["secret_key"])
 
@@ -553,12 +549,12 @@ def _print_rows(rows: List[dict], cols: List[str]) -> None:
 # Command handlers: one per subcommand, bound via set_defaults(func=...); each takes the parsed args.
 def _cmd_list(args: argparse.Namespace) -> None:
     _print_rows(list_datasets(),
-                ["minio_key", "created_by", "n_files", "created_at"])
+                ["minio_key", "n_files", "size_bytes", "created_at"])
 
 
 def _cmd_find(args: argparse.Namespace) -> None:
     _print_rows(find(args.minio_key, **args.filters),
-                ["minio_key", "created_by", "created_at", "minio_path"])
+                ["minio_key", "n_files", "created_at", "minio_path"])
 
 
 def _cmd_spec(args: argparse.Namespace) -> None:
@@ -578,19 +574,19 @@ def _cmd_upload(args: argparse.Namespace) -> None:
         spec = {**spec, "minio_key": args.minio_key}     # minio_key from the key -> satisfies the required check
     else:
         spec = data
-    upload(spec, args.path, member=args.block)     # --path relative to cwd (+ catalog dir); no spec_dir
+    upload(spec, args.path, block=args.block)     # --path relative to cwd (+ catalog dir); no spec_dir
 
 
 def _cmd_download(args: argparse.Namespace) -> None:
-    download(args.minio_key, args.dest, member=args.block)
+    download(args.minio_key, args.dest, block=args.block)
 
 
 def _cmd_remove(args: argparse.Namespace) -> None:
-    remove(args.minio_key, yes=args.yes, member=args.block)
+    remove(args.minio_key, yes=args.yes, block=args.block)
 
 
 def _cmd_objects(args: argparse.Namespace) -> None:
-    _print_rows(objects(args.minio_key, member=args.block), ["key", "size"])
+    _print_rows(objects(args.minio_key, block=args.block), ["key", "size"])
 
 
 def _add_block(sp: argparse.ArgumentParser) -> None:
@@ -611,7 +607,7 @@ def _build_parser() -> argparse.ArgumentParser:
     epilog = textwrap.dedent("""\
         examples:
           python catalog.py list                              # registered datasets (minio_key summary)
-          python catalog.py find epc fab=fab2                 # search by minio_key prefix + metadata key=value
+          python catalog.py find epc fab=fab2                 # search by minio_key prefix + doc key=value
           python catalog.py spec spec.json                    # write an empty upload spec template
           python catalog.py upload spec.json --path ./out     # upload files at --path + register (JSON spec)
           python catalog.py upload specs.json --minio-key epc/v1 --path ./out  # pick one from a {key: spec} file
@@ -620,14 +616,13 @@ def _build_parser() -> argparse.ArgumentParser:
           python catalog.py objects epc                       # raw MinIO objects (not the catalog)
           python catalog.py list -b alice                     # read alice's block for DB/MinIO creds (-b, any command)
 
-        upload spec.json (path is CLI --path, not in the spec):
-          {"minio_key": "epc/v1",
-           "bucket": "datasets", "created_by": "zoo", "description": "fab2 CH3",
-           "metadata": {"fab": "fab2", "chamber": "CH3"}}
+        upload spec.json (reserved keys: minio_key/bucket/block; the rest is free-form -> doc JSONB):
+          {"minio_key": "epc/v1", "bucket": "datasets",
+           "provider": "zoo", "description": {"fab": "fab2", "chamber": "CH3"}}
 
         targets (each command prints where it connects + creds source at start):
           [PostgreSQL] = catalog DB ledger,  [MinIO] = object storage
-          creds source: prefect-block | default
+          creds source: prefect-block | default (localhost)
           list/find = PostgreSQL             objects = MinIO
           upload/download/remove = both
 
@@ -652,7 +647,7 @@ def _build_parser() -> argparse.ArgumentParser:
     sp.set_defaults(func=_cmd_list, uses_pg=True, uses_minio=False)
     _add_block(sp)
 
-    sp = sub.add_parser("find", help="[PostgreSQL] search by minio_key prefix + metadata key=value")
+    sp = sub.add_parser("find", help="[PostgreSQL] search by minio_key prefix + doc key=value")
     sp.set_defaults(func=_cmd_find, uses_pg=True, uses_minio=False)
     sp.add_argument("minio_key", type=str, help="minio_key prefix (LIKE) to match")
     sp.add_argument("filters", type=str, nargs="*", default=[], metavar="key=value",
@@ -715,7 +710,7 @@ def _print_targets(args: argparse.Namespace) -> None:
 
 def _main(args: argparse.Namespace) -> None:
     """Dispatch one already-parsed command (parsing/validation done in parse_args())."""
-    set_member(getattr(args, "block", None))              # DB ops (_dsn) read creds from this member's block
+    set_block(getattr(args, "block", None))              # DB ops (_dsn) read creds from this block's block
     set_host_overrides(getattr(args, "pg_host", None), getattr(args, "minio_host", None))
     _print_targets(args)
     args.func(args)                                        # handler bound via set_defaults(func=...)
@@ -744,7 +739,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
 if __name__ == "__main__":
     try:
         _main(parse_args())
-    except (ValueError, FileNotFoundError, FileExistsError, LookupError) as exc:
+    except (ValueError, FileNotFoundError, FileExistsError, LookupError, RuntimeError) as exc:
         print(f"[catalog.py] error: {exc}", file=sys.stderr)
         raise SystemExit(2)
     except psycopg2.Error as exc:                          # DB connection/query failure -> one clean line
