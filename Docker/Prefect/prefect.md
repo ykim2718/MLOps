@@ -1,6 +1,6 @@
 # Prefect Pipeline Orchestration on Docker
 
-<sub>rev. 530</sub>
+<sub>rev. 531</sub>
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
@@ -640,8 +640,8 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
   /tmp/run-<rand>/                 # per-run temp dir (base; removed after the run)
   ├─ repo/                         # git init + fetch --depth 1 origin <git_commit_hash> (shallow git db)
   ├─ script/                       # git worktree add --detach script <git_commit_hash> (clean worktree at the commit)
-  │  ├─ my_flow.py                 # payload — the team's entry (run: python my_flow.py --data_folder ../data ...)
-  │  └─ ...                        # the rest of the team repo at <git_commit_hash>
+  │  ├─ my_flow.py                 # payload — my entry (run: python my_flow.py --data_folder ../data ...)
+  │  └─ ...                        # the rest of my repo at <git_commit_hash>
   └─ data/                         # MinIO download target (bucket/key → here)
      └─ <object>                   # e.g. Bennelong Point
   ```

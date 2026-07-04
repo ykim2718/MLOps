@@ -1,5 +1,7 @@
 # Docker Hub (Image Registry)
 
+<sub>rev. 1</sub>
+
 이미지를 Docker Hub 에 올리고 받는 명령을 모았습니다. `<user>` 는 Docker Hub 계정, `<repo>` 는 저장소 이름, `<tag>` 는 버전표 (예: `1.0`, `latest`) 입니다.
 
 ## 1. Auth

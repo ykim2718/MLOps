@@ -1,6 +1,6 @@
 # AI/ML Workflow Automation
 
-<sub>rev. 56</sub>
+<sub>rev. 62</sub>
 
 Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환경입니다. 이 문서는 **전체 워크플로우의 인덱스 (개요)** 이고, 도구별 상세는 컴포넌트 문서로 잇습니다.
 
@@ -13,12 +13,13 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
 여러 팀원이 한 server 를 공유해 AI 학습을 돌릴 때 **데이터·실험·결과를 잃지 않고 추적·재현·공유** 하는 것이 목표입니다.
 
 1) **Lineage** — 데이터·코드·결과를 양방향으로 추적합니다.
-2) **Reproducibility** — 데이터 버전·하이퍼파라미터·시드를 고정해 동일 결과를 보장합니다.
-3) **Persistence & Versioning** — 모델·데이터를 catalog 에 등록해 보존하고 검색·선택 다운로드합니다 (버전은 minio_key 경로에 담김; 메타 → PostgreSQL `catalog`, 실데이터 → MinIO).
-4) **Monitoring** — Prefect / MLflow / MinIO 대시보드로 현황을 한눈에 봅니다.
+2) **Persistence** — 모델·데이터를 catalog 에 등록해 보존하고 검색·선택 다운로드합니다 (메타 → PostgreSQL `catalog`, 실데이터 → MinIO).
+3) **Versioning** — 코드·런타임·데이터 버전을 고정합니다 (데이터 버전은 불변 `minio_key` 경로에 담김 — [§8](#8-lineage--reproducibility)).
+4) **Reproducibility** — 데이터 버전·하이퍼파라미터·시드를 고정해 동일 결과를 보장합니다.
 5) **Reusability** — 워크플로우·피처를 다른 프로젝트에서 다시 씁니다.
-6) **Scheduled Automation** — cron/interval 스케줄로 무인 실행합니다.
-7) **Resource Management** — work pool·`--limit` 으로 공유 GPU/CPU 를 분배합니다.
+6) **Monitoring** — Prefect / MLflow / MinIO 대시보드로 현황을 한눈에 봅니다.
+7) **Scheduled Automation** — cron/interval 스케줄로 무인 실행합니다.
+8) **Resource Management** — work pool·`--limit` 으로 공유 GPU/CPU 를 분배합니다.
 
 ---
 
@@ -32,11 +33,13 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
 | **MinIO** | `minio` | 대용량 데이터/모델/아티팩트 저장 (S3 호환). 버킷은 `datasets`·`models`·`mlflow` 입니다. | http://localhost:9001 | [minio.md](../Docker/MinIO/minio.md) |
 | **MLflow** | `mlflow` | 실험 (params·metrics) 추적, 모델 레지스트리. backend=`postgres`, artifact=`minio`. | http://localhost:5000 | [mlflow.md](../Docker/MLflow/mlflow.md) |
 | **PostgreSQL** | `postgres` · <br>`pgadmin` | 모든 도구의 메타데이터 DB. `prefect`·`mlflow`·`optuna`·`catalog` 4개 논리 DB 를 운영합니다. | http://localhost:5050 (pgAdmin)<br>localhost:5432 (DB) | [postgresql.md](../Docker/PostgreSQL/postgresql.md) |
-| **Optuna** | python script | 하이퍼파라미터 튜닝 (trial 탐색). study storage 로 `postgres` 의 `optuna` DB 를 씁니다. | http://localhost:8080 (필요 시 기동) | [§5](#5-optuna) |
+| **Optuna** | python script | 하이퍼파라미터 튜닝 (trial 탐색). study storage 로 `postgres` 의 `optuna` DB 를 씁니다. | http://localhost:8080 (필요 시 기동) | [Appendix B](#appendix-b-optuna) |
 
 > 이 스택은 한 호스트에 `postgres`·`minio`·`mlflow`·`prefect_server`·`prefect_dispatcher` (dispatcher) 를 모아 띄우고, dispatcher 가 job 마다 **Pipeline Flow 컨테이너** 를 일시적으로 띄우는 **Docker work pool** 구조입니다. 각 컨테이너는 받은 `git_repo`·`git_commit_hash` 을 shallow `git fetch` (`--depth 1`) + `git worktree` 로 펼쳐 실행하고 끝나면 스스로 파괴됩니다 (상세는 [prefect.md](../Docker/Prefect/prefect.md)).
 
-### Pipeline
+---
+
+## 3. ML Workflow DAG
 
 ```text
                              TRAINING LANE                                        TEST LANE
@@ -68,21 +71,9 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
         each stage emits both: parity_plot -> work/parity_<stage>.png ; publish_artifacts -> Prefect UI
 ```
 
-  `pipeline.py` 가 `pipeline_flow` 컨테이너 안에서 run 마다 만드는 폴더 구조입니다.
-
-  ```text
-  /tmp/run-<rand>/                 # per-run temp dir (base; removed after the run)
-  ├─ repo/                         # git init + fetch --depth 1 origin <git_commit_hash> (shallow git db)
-  ├─ script/                       # git worktree add --detach script <git_commit_hash> (clean worktree at the commit)
-  │  ├─ my_flow.py                 # payload — the team's entry (run: python my_flow.py --data_folder ../data ...)
-  │  └─ ...                        # the rest of the team repo at <git_commit_hash>
-  └─ data/                         # MinIO download target (bucket/key → here)
-     └─ <object>                   # e.g. Bennelong Point
-  ```
-
 ---
 
-## 3. Data
+## 4. Data
 
 ### Flow
 
@@ -164,35 +155,29 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
 
   > flow 실행 중의 자동 download 는 CLI 가 아니라 컨테이너 안 `pipeline.py` 가 Prefect Secret 블록으로 합니다 (위 [Flow](#flow) 다이어그램).
 
-### List
-
-  여러 데이터셋·모델을 만들고 비교·재현하려면 산출물이 무엇이 어디 있는지 **검색** 할 수 있어야 합니다. 이 스택은 실제 데이터를 MinIO 에, 가벼운 메타데이터·계보를 PostgreSQL `catalog` DB 에 둡니다.
-
-  `catalog` 은 `catalog` DB 안의 테이블 하나 (`datasets`) 이며, MinIO 의 실제 데이터를 가리키는 **메타데이터 장부** 입니다. 이 장부를 다루는 **catalog 접근 계층** (테이블 생성·등록·검색) 이 워크플로우에서 데이터의 위치 (minio_key)·계보를 기록합니다. 전체 명령은 [Appendix A. catalog.py CLI](#appendix-a-catalogpy-cli) 를 참고합니다.
-
-  ```powershell
-  python catalog.py list -b <block> --pg-host localhost                                 # registered datasets summary
-  python catalog.py find epc fab=fab2 -b <block> --pg-host localhost                    # search by minio_key prefix + key=value
-  python catalog.py objects epc -b <block> --minio-host localhost                       # raw MinIO objects under a prefix
-  ```
-
-#### MinIO Key
-
-  전 팀원이 같은 MinIO 버킷에 결과물을 쓰므로 이름이 겹칠 수 있습니다. MLflow run (`run_id`)·Prefect run (`id`)·Optuna trial (`study_name`+`number`) 은 **자동으로 격리** 되고, 직접 저장하는 파일만 경로에 고유 키를 넣어 분리합니다.
-
-  ```python
-  # member / experiment comes from a job setting, env var, or flow parameter.
-  out_uri = f"s3://models/{member}/{experiment}/{run_id}/model.pt"
-  ```
-
 ---
 
-## 4. Script
+## 5. Python Script
 
-팀 payload 와 단계별 스크립트로 이루어진 ML 코드 구조입니다. orchestrator (`pipeline.py`) 가 git 으로 이 repo 를 받아 `python my_flow.py` 로 실행합니다 ([§6. Python Execution](#6-python-execution)).
+`pipeline.py` 가 `pipeline_flow` 컨테이너 안에서 run 마다 만드는 폴더 구조입니다.
 
 ```text
-script/                          # team repo, git-delivered into a per-run worktree (§6)
+/tmp/run-<rand>/                 # per-run temp dir (base; removed after the run)
+├─ repo/                         # git init + fetch --depth 1 origin <git_commit_hash> (shallow git db)
+├─ script/                       # git worktree add --detach script <git_commit_hash> (clean worktree at the commit)
+│  ├─ my_flow.py                 # payload — the team's entry (run: python my_flow.py --data_folder ../data ...)
+│  ├─ train_prepare.py, train_featurize.py, train.py, validate.py
+│  ├─ test_prepare.py, test_featurize.py, test.py
+│  ├─ parity_plot.py, prepare.json, optuna.json
+│  └─ commons/                   # common repo (nested repository)
+└─ data/                         # MinIO download target (bucket/key → here)
+   └─ <object>                   # e.g. Bennelong Point
+```
+
+팀 payload 와 단계별 스크립트로 이루어진 ML 코드 구조입니다. orchestrator (`pipeline.py`) 가 git 으로 이 repo 를 받아 `python my_flow.py` 로 실행합니다 ([§7. Python Execution](#7-python-execution)).
+
+```text
+script/                          # team repo, git-delivered into a per-run worktree (§7)
 ├─ my_flow.py                    # payload entry — @flow wires the stages (run: python my_flow.py --data_folder ...)
 ├─ train_dp.py · train_fe.py · train.py · train_eval.py   # train branch: dp → fe → train → eval
 ├─ test_dp.py  · test_fe.py  · test.py  · test_eval.py    # test branch:  dp → fe → test  → eval
@@ -214,30 +199,26 @@ script/                          # team repo, git-delivered into a per-run workt
 
 ---
 
-## 5. Optuna
+## 6. Trigger
 
-Optuna 는 하이퍼파라미터를 trial 단위로 탐색하는 튜닝 도구입니다. `objective` (목적 함수) 를 매 trial 마다 호출해 하이퍼파라미터를 제안받고 점수를 반환받으며, 그 점수로 다음 trial 을 더 똑똑하게 고릅니다. 이 스택에는 Optuna 전용 도커 서비스가 없고, **라이브러리로 코드에 포함** 되어 study 기록만 PostgreSQL 의 `optuna` DB 에 저장합니다.
+  등록된 deployment 를 파라미터와 함께 실행(trigger)합니다 — 팀원·코드·데이터는 `git_repo`·`git_commit_hash`·`minio_key` 파라미터로, 성능 등급은 deployment (`pipeline/pipelineflow-high`·`-low`) 로 고릅니다 (deployment 등록은 관리자가 1회, [prefect.md](../Docker/Prefect/prefect.md) §4.2).
 
-```python
-import os, optuna
+  ```powershell
+  # Trigger — pick the tier by deployment; heavy -> high, light -> low (params otherwise identical).
+  prefect deployment run "pipeline/pipelineflow-high" -p member=alice -p git_repo=https://github.com/<member>/<repo>.git -p git_commit_hash=a1b2c3d -p minio_key=SYDNEY/001.parquet
+  prefect deployment run "pipeline/pipelineflow-low"  -p member=alice -p git_repo=https://github.com/<member>/<repo>.git -p git_commit_hash=a1b2c3d -p minio_key=SYDNEY/001.parquet
+  ```
+  ```python
+  from prefect.deployments import run_deployment
+  params = {"member": "alice", "git_repo": "https://github.com/<member>/<repo>.git", "git_commit_hash": "a1b2c3d", "minio_key": "SYDNEY/001.parquet"}
+  run_deployment("pipeline/pipelineflow-high", parameters=params)   # or "pipeline/pipelineflow-low" for the low tier
+  ```
 
-study = optuna.create_study(
-    study_name="mnist-resnet50",
-    storage=os.environ["POSTGRESQL_OPTUNA_DSN"],   # shared storage (PostgreSQL optuna DB)
-    direction="maximize",
-    load_if_exists=True,        # resume if it already exists
-)
-study.optimize(objective, n_trials=20)
-```
-
-- **공유 DB (기본)** — `POSTGRESQL_OPTUNA_DSN` (`postgresql://.../optuna`). 여러 worker·여러 PC 가 하나의 study 를 분산 병렬로 탐색하거나 기록을 중앙에 보존할 때 유리합니다.
-- **로컬 파일 (대안)** — `sqlite:///optuna.db`. 단일 PC 에서 가볍게 쓸 때 적합합니다.
-- Optuna 가 DB 에 넣는 것은 trial 메타데이터 (파라미터·점수) 뿐이고, 모델 가중치 같은 실제 산출물은 MinIO 에 저장합니다.
-- **Dashboard** — 상시 서비스가 아니라 필요할 때 띄웁니다: `optuna-dashboard postgresql://<user>:<pw>@localhost:5432/optuna` → `http://localhost:8080`. 위 `optuna` DB 의 trial 기록 (파라미터·점수·수렴 곡선) 을 브라우저로 봅니다.
+  > 팀원마다 자기 repo·커밋을 넘기면 같은 이미지로 각자 다른 코드를 동시에 돌릴 수 있습니다 (컨테이너가 각자 사설 worktree 에 펼침). 무거운 job 은 `pipeline/pipelineflow-high`, 가벼운 job 은 `pipeline/pipelineflow-low` 로 보내 성능 등급을 고릅니다.
 
 ---
 
-## 6. Python Execution
+## 7. Python Execution
 
 ### Server Connection
 
@@ -311,52 +292,63 @@ study.optimize(objective, n_trials=20)
       my_flow(a.data_folder, a.member, a.git_commit_hash)
   ```
 
-  > 데이터 다운로드용 `MINIO_*` 는 orchestrator (`pipeline.py`) 가 쓰고, payload 가 직접 쓰는 자격증명 (`catalog`·`optuna`·MLflow 아티팩트용) 은 [prefect.md](../Docker/Prefect/prefect.md) §5 처럼 `Secret.load(...)` 로 받습니다. MLflow 는 git repo 안에서 돌면 git 커밋을 자동 태그하므로 모델 ↔ 코드가 연결됩니다 (§7).
-
-### Deployment & Trigger
-
-  **Pipeline Flow 이미지 ([prefect.md](../Docker/Prefect/prefect.md) §4.1, `pipeline-flow:latest`)** 에 **orchestrator (`pipeline.py`) 가 들어 있으므로**, deployment entrypoint 를 **`pipeline.py:pipeline` 로 명시** 해 그 이미지로 등록합니다 (server·dispatcher 이미지가 아니라 `pipeline_flow` 이미지입니다). 이 등록은 **플랫폼·관리자가 1회** 하며 팀원 payload (`my_flow.py`) 에는 넣지 않습니다. 팀원·코드베이스 구분은 **`git_repo`·`git_commit_hash` 파라미터** 로, **성능 등급** 은 **등급별 deployment** (`pipeline/pipelineflow-high`·`pipeline/pipelineflow-low` — 각각 등급 pool 에 바인딩) 로 처리합니다 ([prefect.md](../Docker/Prefect/prefect.md) §1·§4.2).
-
-  ```powershell
-  # Register once (admin); definitions in pipelineflow-{high,low}.yml (see prefect.md §4.2), one per tier.
-  prefect deploy --prefect-file pipelineflow-high.yml --name pipelineflow-high --no-prompt
-  prefect deploy --prefect-file pipelineflow-low.yml  --name pipelineflow-low  --no-prompt
-  ```
-
-  ```powershell
-  # Trigger — pick the tier by deployment; heavy -> high, light -> low (params otherwise identical).
-  prefect deployment run "pipeline/pipelineflow-high" -p member=alice -p git_repo=https://github.com/<member>/<repo>.git -p git_commit_hash=a1b2c3d -p minio_key=SYDNEY/001.parquet
-  prefect deployment run "pipeline/pipelineflow-low"  -p member=alice -p git_repo=https://github.com/<member>/<repo>.git -p git_commit_hash=a1b2c3d -p minio_key=SYDNEY/001.parquet
-  ```
-  ```python
-  from prefect.deployments import run_deployment
-  params = {"member": "alice", "git_repo": "https://github.com/<member>/<repo>.git", "git_commit_hash": "a1b2c3d", "minio_key": "SYDNEY/001.parquet"}
-  run_deployment("pipeline/pipelineflow-high", parameters=params)   # or "pipeline/pipelineflow-low" for the low tier
-  ```
-
-  > 팀원마다 자기 repo·커밋을 넘기면 같은 이미지로 각자 다른 코드를 동시에 돌릴 수 있습니다 (컨테이너가 각자 사설 worktree 에 펼침). 무거운 job 은 `pipeline/pipelineflow-high`, 가벼운 job 은 `pipeline/pipelineflow-low` 로 보내 성능 등급을 고릅니다.
+  > 데이터 다운로드용 `MINIO_*` 는 orchestrator (`pipeline.py`) 가 쓰고, payload 가 직접 쓰는 자격증명 (`catalog`·`optuna`·MLflow 아티팩트용) 은 [prefect.md](../Docker/Prefect/prefect.md) §5 처럼 `Secret.load(...)` 로 받습니다. MLflow 는 git repo 안에서 돌면 git 커밋을 자동 태그하므로 모델 ↔ 코드가 연결됩니다 (§8).
 
 ---
 
-## 7. Code Delivery & Versioning
+## 8. Lineage & Reproducibility
 
-Prefect 자체는 코드를 버전관리하지 않습니다 (orchestrator 일 뿐). 이 구성에서는 **세 축** 으로 버전이 고정됩니다.
+한 실행을 나중에 그대로 되살리려면 **입력을 못 박고(version)** · **관계를 기록하고(lineage)** · **그 좌표로 다시 돌립니다(re-run)**. Prefect 는 orchestrator 일 뿐 버전을 보관하지 않으므로, 세 축을 파라미터·태그로 고정합니다.
+
+### Versioning
 
 | Axis | Pinned by | Meaning |
 |------|-----------|---------|
-| **Code version** | `git_repo`·`git_commit_hash` parameters (shallow `git fetch --depth 1` + `git worktree add <commit>`) | 어떤 repo·커밋으로 실행할지 — 커밋 고정 시 완전 재현 |
-| **Runtime version** | Pipeline Flow image tag | 라이브러리 + orchestrator 버전 |
-| **Data version** | `minio_key` parameter | 어떤 데이터 버전을 쓸지 (버전이 key 경로에 담긴 불변 경로) |
+| **Code** | `git_repo`·`git_commit_hash` (shallow `git fetch --depth 1` + `git worktree add <commit>`) | 어떤 repo·커밋으로 실행할지 — 커밋 고정 시 완전 재현 |
+| **Runtime** | Pipeline Flow image tag (`pipeline-flow:<tag>`) | 라이브러리 + orchestrator 버전 |
+| **Data** | `minio_key` (catalog `datasets`, 불변 key) | 어떤 데이터를 쓸지 — 버전이 key 경로에 담긴 불변 경로 |
 
-- **코드 버전** — trigger 시 `git_repo` 와 `git_commit_hash` (SHA) 를 넘기면, 컨테이너가 그 repo 를 shallow `git fetch` (`--depth 1`) 한 뒤 그 커밋을 `git worktree` 로 펼쳐 실행하므로 항상 같은 코드가 돕니다. 브랜치명을 넘기면 "그 시점 최신" 이 됩니다.
-- **런타임 버전** — 이미지 태그 (`pipeline-flow:latest`) 가 라이브러리를 고정합니다. 라이브러리를 바꾸면 새 태그로 빌드합니다.
-- **모델 ↔ 코드 연결** — MLflow 는 git repo 안에서 run 을 돌리면 git 커밋 SHA 를 자동 태그로 남기므로, "이 모델이 어떤 코드로 학습됐나" 는 MLflow 의 git 커밋 태그로 추적됩니다 (데이터 lineage 는 카탈로그가 담당).
+- **Code** — trigger 시 `git_commit_hash` (SHA) 를 넘기면 컨테이너가 그 커밋을 `git worktree` 로 펼쳐 실행하므로 항상 같은 코드가 돕니다. 브랜치명은 "그 시점 최신" 이라 재현이 안 되니, 재현엔 SHA 를 씁니다.
+- **Runtime** — 이미지 태그가 라이브러리 + orchestrator 를 고정합니다. 라이브러리를 바꾸면 새 태그로 빌드합니다 (`latest` 는 가변이라 재현엔 명시 태그).
+- **Data** — `minio_key` 는 불변이라 같은 key = 같은 바이트입니다. catalog 가 그 key ↔ 메타(`doc`)·등록 시각을 장부로 보관합니다.
 
-> **Private repo** — 런타임 `git fetch` 대상이 private repo 면 토큰이 필요합니다. 토큰을 Prefect Secret 으로 받아 인증된 URL (`git_repo`) 로 fetch 하거나 git credential helper 를 설정합니다. public repo 면 그대로 됩니다.
+### Lineage
+
+`catalog` 레코드 (`minio_key`·`doc`·`prefect_run_id`) 와 MLflow run 태그 (입력 `input_minio_key`, git 커밋 SHA) 를 **서로 참조** 해 두면 세 축이 한 실행에서 묶입니다.
+
+```
+data (minio_key) ──used by──> code (Prefect run @ git SHA) ──produces──> result (MLflow run / model)
+   ▲                                                                          │
+   └──────────────────────  trace back (result → code → data)  <─────────────┘
+```
+
+- **Forward** — 어떤 데이터를 어떤 커밋의 flow run 이 썼고, 그 run 에서 나온 MLflow run·모델이 무엇인지 따라갑니다.
+- **Backward** — 운영 모델의 MLflow run 태그 (`input_minio_key`·git SHA) → `catalog.find(...)` · `git checkout <SHA>` 로 원본 데이터·코드까지 거슬러 올라갑니다.
+- **Model ↔ code** — MLflow 는 git repo 안에서 run 을 돌리면 커밋 SHA 를 자동 태그하므로 "이 모델이 어떤 코드로 학습됐나" 가 남습니다.
+
+### History
+
+- **Data** — `python catalog.py list` · `find <minio_key>` 로 등록된 데이터셋·메타(`doc`)·등록 시각을 봅니다 ([Appendix A](#appendix-a-catalogpy-cli)).
+- **Code** — `git log <git_commit_hash>` 로 그 커밋의 이력을, MLflow run 의 git 태그로 "어느 모델 ← 어느 커밋" 을 봅니다.
+- **Runs / models** — MLflow UI 에서 run·파라미터·메트릭·모델 레지스트리 단계 (`Production` 등) 를 봅니다.
+
+### Re-run
+
+과거 실행을 그대로 되살리려면 그때의 **세 좌표** 를 그대로 넘겨 다시 trigger 합니다.
+
+```powershell
+# 그때의 SHA·key 를 그대로; 런타임 태그가 달라졌으면 그 태그로 등록된 deployment 로 보냅니다.
+prefect deployment run "pipeline/pipelineflow-high" -p git_repo=<repo> -p git_commit_hash=<그때 SHA> -p minio_key=<그때 key>
+```
+
+- 세 축 (코드 SHA · 런타임 태그 · 데이터 key) 이 같으면 **같은 입력 → 같은 결과** 가 보장됩니다.
+- 브랜치명 · `latest` 태그 · 가변 key 를 쓰면 재현이 깨집니다 — 재현엔 항상 고정 좌표 (SHA · 명시 태그 · 불변 key) 를 씁니다.
+
+> **Private repo** — 런타임 `git fetch` 대상이 private 이면 토큰이 필요합니다. Prefect Secret 으로 토큰을 받아 인증 URL (`git_repo`) 로 fetch 하거나 git credential helper 를 설정합니다. public repo 면 그대로 됩니다.
 
 ---
 
-## 8. Inference
+## 9. Inference
 
 학습이 끝나 MLflow 레지스트리에 `Production` 으로 승격된 모델을 불러와 추론하는 단계입니다. 여기서도 **Prefect 는 실행·재시도·로깅을, MLflow 는 모델의 실제 다운로드·로드를** 맡아 역할을 나눕니다.
 
@@ -377,21 +369,6 @@ def inference_flow():
 
 - **Prefect (`@task(retries=3)` / `@flow`)** — 언제·어떤 순서로 실행할지, 실패 시 재시도·로깅을 맡습니다.
 - **MLflow (`mlflow.pyfunc.load_model`)** — `models:/mnist-classifier/Production` 으로 레지스트리에서 실제 모델을 내려받아 로드합니다.
-
----
-
-## 9. Lineage
-
-  `catalog` 레코드의 `prefect_run_id` (데이터를 만든 실행) 와, MLflow run 태그에 기록하는 입력 데이터 버전을 **서로 참조** 해 두면 데이터 ↔ 코드 ↔ 결과를 양방향으로 추적할 수 있습니다.
-
-  ```
-  data (version) ──used by──> code (Prefect run) ──produces──> result (MLflow run / model)
-     ▲                                                              │
-     └────────────────────  trace back (result → data)  <──────────┘
-  ```
-
-  - **순방향** — 어떤 데이터 버전을 어떤 flow run 이 만들었고, 그 run 에서 나온 MLflow run·모델이 무엇인지 추적합니다.
-  - **역방향** — 운영 모델의 MLflow run 태그 (`input_minio_key`) → `catalog.find(...)` → `minio_path` 로 원본까지 거슬러 올라갑니다.
 
 ---
 
@@ -464,8 +441,31 @@ python catalog.py remove <minio_key> -b <block> --pg-host localhost --minio-host
   | `postgresql_catalog` | `endpoint` · `username` · `password` · `database` | PostgreSQL (`catalog` DB) |
   | `postgresql_optuna` | `endpoint` · `username` · `password` · `database` | PostgreSQL (`optuna` DB, flow·Optuna 용) |
 
-  - **`-b <block>`** 가 어느 팀원 블록을 읽을지 정합니다. catalog.py 는 그중 `minio` + `postgresql_catalog` 두 섹션만 씁니다 (`postgresql_optuna` 는 flow 용). `-b` 를 **안 주면** default (localhost) 로 돌고 배너에 `[creds: default]`, 주면 `[creds: prefect-block (member=…)]` 로 출처가 표시됩니다. `-b` 를 **줬는데** credentials.py import 실패나 블록 로드 실패(서버 미연결·블록 없음)면 조용히 default 로 안 떨어지고 오류로 즉시 중단합니다 (silent-default 방지 — `credentials.py` 는 catalog.py 옆이나 `PYTHONPATH` 에 있어야 함).
+  - **`-b <block>`** 가 어느 팀원 블록을 읽을지 정합니다. catalog.py 는 그중 `minio` + `postgresql_catalog` 두 섹션만 씁니다 (`postgresql_optuna` 는 flow 용). `-b` 를 **안 주면** default (localhost) 로 돌고 배너에 `[creds: default (localhost)]`, 주면 `[creds: prefect-block (block=…)]` 로 출처가 표시됩니다. `-b` 를 **줬는데** credentials.py import 실패나 블록 로드 실패(서버 미연결·블록 없음)면 조용히 default 로 안 떨어지고 오류로 즉시 중단합니다 (silent-default 방지 — `credentials.py` 는 catalog.py 옆이나 `PYTHONPATH` 에 있어야 함).
   - **`--pg-host` / `--minio-host`** 는 블록 endpoint 의 host 만 덮어씁니다 (creds·port 불변). 컨테이너용 블록 (endpoint 가 `postgres`·`minio` 서비스명) 을 host 에서 쓸 때 `--pg-host localhost --minio-host localhost` 로 붙입니다.
   - `PREFECT_API_URL` (Prefect 프로필) 은 이 블록을 받기 위한 **접속점** 일 뿐 catalog 데이터가 아닙니다. 프로세스 환경변수·`docker-compose.env` 는 쓰지 않습니다.
 
-  > **권한 차단은 MinIO policy 로** — 팀원 블록의 `minio` 키가 곧 그 팀원의 MinIO 신원입니다. 진짜 사용자별 차단은 **그 키가 MinIO 에서 버킷 policy 로 제한** 되어 있어야 실제로 막히고, 그렇지 않으면 격리는 경로 규칙 `s3://.../{member}/...` ([§3 Output Placement](#3-data)) 에 의존합니다. Prefect 블록 자체엔 사용자별 접근제어가 없습니다.
+  > **권한 차단은 MinIO policy 로** — 팀원 블록의 `minio` 키가 곧 그 팀원의 MinIO 신원입니다. 진짜 사용자별 차단은 **그 키가 MinIO 에서 버킷 policy 로 제한** 되어 있어야 실제로 막히고, 그렇지 않으면 격리는 경로에 `{member}` 등 고유 키를 넣어 나누는 규칙 (`s3://.../{member}/...`) 에 의존합니다. Prefect 블록 자체엔 사용자별 접근제어가 없습니다.
+
+---
+
+## Appendix B. Optuna
+
+Optuna 는 하이퍼파라미터를 trial 단위로 탐색하는 튜닝 도구입니다. `objective` (목적 함수) 를 매 trial 마다 호출해 하이퍼파라미터를 제안받고 점수를 반환받으며, 그 점수로 다음 trial 을 더 똑똑하게 고릅니다. 이 스택에는 Optuna 전용 도커 서비스가 없고, **라이브러리로 코드에 포함** 되어 study 기록만 PostgreSQL 의 `optuna` DB 에 저장합니다.
+
+```python
+import os, optuna
+
+study = optuna.create_study(
+    study_name="mnist-resnet50",
+    storage=os.environ["POSTGRESQL_OPTUNA_DSN"],   # shared storage (PostgreSQL optuna DB)
+    direction="maximize",
+    load_if_exists=True,        # resume if it already exists
+)
+study.optimize(objective, n_trials=20)
+```
+
+- **공유 DB (기본)** — `POSTGRESQL_OPTUNA_DSN` (`postgresql://.../optuna`). 여러 worker·여러 PC 가 하나의 study 를 분산 병렬로 탐색하거나 기록을 중앙에 보존할 때 유리합니다.
+- **로컬 파일 (대안)** — `sqlite:///optuna.db`. 단일 PC 에서 가볍게 쓸 때 적합합니다.
+- Optuna 가 DB 에 넣는 것은 trial 메타데이터 (파라미터·점수) 뿐이고, 모델 가중치 같은 실제 산출물은 MinIO 에 저장합니다.
+- **Dashboard** — 상시 서비스가 아니라 필요할 때 띄웁니다: `optuna-dashboard postgresql://<user>:<pw>@localhost:5432/optuna` → `http://localhost:8080`. 위 `optuna` DB 의 trial 기록 (파라미터·점수·수렴 곡선) 을 브라우저로 봅니다.
