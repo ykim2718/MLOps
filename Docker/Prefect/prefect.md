@@ -1,6 +1,6 @@
 # Prefect Pipeline Orchestration on Docker
 
-<sub>rev. 531</sub>
+<sub>rev. 532</sub>
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
@@ -732,6 +732,15 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
 | 반환 | run id 출력 후 종료 | `FlowRun` 객체 |
 | 완료 대기 | 기본 안 함 (`--watch` 로 따라감) | 기본 대기 (`timeout=0` 이면 즉시) |
 | 주 용도 | 수동·셸·CI 스텝 | 코드 내 자동 trigger·chaining |
+
+### Server Connection
+
+  trigger 에 앞서 client (dispatcher 또는 job 을 trigger 하는 노드) 가 어느 Prefect server 에 연결할지 주소를 지정합니다. 최초 1회 설정하면 이후 모든 client 명령이 이 server 를 향합니다.
+
+  ```powershell
+  prefect config set PREFECT_API_URL="http://<Host IP>:4200/api"
+  # Use localhost for <Host IP> on the same computer.
+  ```
 
 ### 7.1 Prefect CLI
 
