@@ -1,6 +1,6 @@
 # AI/ML Workflow Automation
 
-<sub>rev. 77</sub>
+<sub>rev. 80</sub>
 
 Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환경입니다. 이 문서는 **전체 워크플로우의 인덱스 (개요)** 이고, 도구별 상세는 컴포넌트 문서로 잇습니다.
 
@@ -226,68 +226,80 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
 
   ```python
   # example/dry_run/my_flow.py — git-delivered ML payload, Prefect dry run.
-  __version__ = "0.0.2"
+  __version__ = "0.0.5"
 
   import argparse
+  from pathlib import Path
+  from typing import Any, Dict
 
+  import mlflow
   from prefect import flow, get_run_logger, task
 
-  prepare = {}                                     # stand-in for prepare.json
-  optuna = {}                                      # stand-in for optuna.json
+  State = Dict[str, str]                            # per-stage status map (stage -> "ok") threaded through the flow
+
+  prepare: Dict[str, Any] = {"train": {"split": [0.8, 0.2]}}  # stand-in for prepare.json (free-form / nested)
+  optuna: Dict[str, Any] = {}  # stand-in for optuna.json
 
   STAGES = ("train_prepare", "train_featurize", "train", "validate",
             "test_prepare", "test_featurize", "test", "parity_plot")
 
 
   @task(task_run_name="train_prepare")
-  def train_prepare(state):
+  def train_prepare(state: State, data_folder: str) -> State:
+      log = get_run_logger()
+      data = Path(data_folder)
+      n_files = sum(1 for p in data.rglob("*") if p.is_file()) if data.exists() else 0
+      log.info(f"train_prepare: {n_files} files under {data_folder}")   # Prefect run log
+      mlflow.log_metric("n_data_files", n_files)                        # MLflow (metric -> tracking store)
       return {**state, "train_prepare": "ok"}
 
 
   @task(task_run_name="train_featurize")
-  def train_featurize(state):
+  def train_featurize(state: State) -> State:
       return {**state, "train_featurize": "ok"}
 
 
   @task(task_run_name="train")
-  def train(state):
+  def train(state: State) -> State:
       return {**state, "train": "ok"}
 
 
   @task(task_run_name="validate")
-  def validate(state):
+  def validate(state: State) -> State:
       return {**state, "validate": "ok"}
 
 
   @task(task_run_name="test_prepare")
-  def test_prepare(state):
+  def test_prepare(state: State) -> State:
       return {**state, "test_prepare": "ok"}
 
 
   @task(task_run_name="test_featurize")
-  def test_featurize(state):
+  def test_featurize(state: State) -> State:
       return {**state, "test_featurize": "ok"}
 
 
   @task(task_run_name="test")
-  def test(state):
+  def test(state: State) -> State:
       return {**state, "test": "ok"}
 
 
   @task(task_run_name="parity_plot")
-  def parity_plot(state):
+  def parity_plot(state: State) -> State:
       return {**state, "parity_plot": "ok"}
 
 
   @flow(name="my_flow", flow_run_name="{member}@{git_commit_hash}", log_prints=True)
-  def my_flow(data_folder, member="local", git_commit_hash="dryrun", git_repo=""):
+  def my_flow(data_folder: str, member: str = "local", git_commit_hash: str = "dryrun",
+              git_repo: str = "") -> State:
       log = get_run_logger()
       log.info(f"dry run: member={member} commit={git_commit_hash} "
                f"data={data_folder} prepare={prepare} optuna={optuna}")
 
-      s = validate(train(train_featurize(train_prepare({}))))    # train: prepare -> featurize -> train -> validate
-      s = test(test_featurize(test_prepare(s)))                  # test:  prepare -> featurize -> test
-      s = parity_plot(s)                                         # parity over both branches
+      with mlflow.start_run(run_name=f"{member}@{git_commit_hash}"):  # real run -> MLflow server
+          s = validate(train(train_featurize(train_prepare({}, data_folder))))  # train branch
+          s = test(test_featurize(test_prepare(s)))  # test branch
+          s = parity_plot(s)  # parity over both branches
 
       ran = sorted(s)
       assert set(ran) == set(STAGES), f"missing stages: {set(STAGES) - set(ran)}"
