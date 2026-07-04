@@ -1,6 +1,6 @@
 # AI/ML Workflow Automation
 
-<sub>rev. 74</sub>
+<sub>rev. 77</sub>
 
 Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환경입니다. 이 문서는 **전체 워크플로우의 인덱스 (개요)** 이고, 도구별 상세는 컴포넌트 문서로 잇습니다.
 
@@ -73,7 +73,7 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
 
 ---
 
-## 4. Data Prepare
+## 4. Data
 
 ### Flow
 
@@ -131,8 +131,15 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
   | recursive wildcard `data/**/*.parquet` | 하위까지 매치 | `<minio_key>/<상대경로>` |
 
   ```json
-  {"minio_key": "epc/v1", "bucket": "datasets",
-   "provider": "ykim", "description": {"source": "kaggle", "rows": 52416}}
+  {
+    "minio_key": "epc/v1",
+    "bucket": "datasets",
+    "provider": "alice",
+    "description": {
+      "source": "kaggle",
+      "rows": 52416
+    }
+  }
   ```
 
   > 예약 키(`minio_key`·`bucket`·`block`) 외의 필드(`provider`·`description{…}` 등)는 형식 제약 없이 `doc` 에 그대로 저장됩니다. `--path` 값만 바꿔 위 네 경우를 씁니다 (`--path data` · `--path data/*.parquet` · `--path data/**/*.parquet`). 매치가 0건이면 `FileNotFoundError` 로 중단하고, 같은 `minio_key` 가 이미 있으면 덮지 않고 중단합니다. spec.json 엔 `path` 를 넣지 않습니다 (필수 키는 `minio_key`).
@@ -157,7 +164,7 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
 
 ---
 
-## 5. Python Script
+## 5. Run
 
 ### Script Structure
 
@@ -215,50 +222,87 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
 
 ## 6. my_flow.py
 
-  Prefect orchestrator 가 `script/` 와 `data/` 를 미리 받아 두고 실행 정보 (`--git_repo`·`--git_commit_hash`·`--member`) 와 그 경로 (`--data_folder`) 를 CLI 인자로 넘기므로, payload 는 `argparse` 로 받아 씁니다.
+  Prefect orchestrator 가 `script/` 와 `data/` 를 미리 받아 두고 실행 정보 (`--git_repo`·`--git_commit_hash`·`--member`) 와 그 경로 (`--data_folder`) 를 CLI 인자로 넘기므로, payload 는 `argparse` 로 받아 씁니다. 아래는 각 단계 함수·설정 변수가 실제 파일 (`train_prepare.py` … `optuna.json`) 을 대신하는 **dry run** 으로, 실 ML 없이 workflow 배선만 검증합니다 (실제 파일은 [example/dry_run/my_flow.py](example/dry_run/my_flow.py)).
 
   ```python
-  # my_flow.py — git-delivered ML payload; Prefect @task makes each step show in the UI (illustrative)
+  # example/dry_run/my_flow.py — git-delivered ML payload, Prefect dry run.
+  __version__ = "0.0.2"
+
   import argparse
-  import mlflow
-  from prefect import flow, task
-  from sklearn.ensemble import RandomForestClassifier
-  from sklearn.metrics import accuracy_score
 
-  @task
-  def data_prep(data_dir):                                 # dp — read the files pipeline.py downloaded into --data_folder (Step B)
-      return load_dataset(data_dir)
+  from prefect import flow, get_run_logger, task
 
-  @task
-  def feature_eng(raw):                                    # fe
-      return build_features(raw)
+  prepare = {}                                     # stand-in for prepare.json
+  optuna = {}                                      # stand-in for optuna.json
 
-  @task
-  def train_model(feat):                                   # train
-      clf = RandomForestClassifier(n_estimators=300, random_state=42)
-      clf.fit(feat.X_tr, feat.y_tr)
-      return clf
+  STAGES = ("train_prepare", "train_featurize", "train", "validate",
+            "test_prepare", "test_featurize", "test", "parity_plot")
 
-  @task
-  def test_model(clf, feat):                               # test
-      return accuracy_score(feat.y_val, clf.predict(feat.X_val))
 
-  @flow(name="my_flow", flow_run_name="{member}@{git_commit_hash}")   # the team's own flow run; the 4 tasks nest under it
-  def my_flow(data_dir, member="", git_commit_hash=""):
-      mlflow.set_tracking_uri("http://mlflow:5000")        # MLflow tracking server
-      with mlflow.start_run():                             # MLflow auto-tags the git commit
-          feat = feature_eng(data_prep(data_dir))
-          clf  = train_model(feat)
-          acc  = test_model(clf, feat)
-          mlflow.log_metric("val_accuracy", acc)           # metric -> PostgreSQL (mlflow DB)
-          mlflow.sklearn.log_model(clf, "model")           # artifact -> MinIO
+  @task(task_run_name="train_prepare")
+  def train_prepare(state):
+      return {**state, "train_prepare": "ok"}
+
+
+  @task(task_run_name="train_featurize")
+  def train_featurize(state):
+      return {**state, "train_featurize": "ok"}
+
+
+  @task(task_run_name="train")
+  def train(state):
+      return {**state, "train": "ok"}
+
+
+  @task(task_run_name="validate")
+  def validate(state):
+      return {**state, "validate": "ok"}
+
+
+  @task(task_run_name="test_prepare")
+  def test_prepare(state):
+      return {**state, "test_prepare": "ok"}
+
+
+  @task(task_run_name="test_featurize")
+  def test_featurize(state):
+      return {**state, "test_featurize": "ok"}
+
+
+  @task(task_run_name="test")
+  def test(state):
+      return {**state, "test": "ok"}
+
+
+  @task(task_run_name="parity_plot")
+  def parity_plot(state):
+      return {**state, "parity_plot": "ok"}
+
+
+  @flow(name="my_flow", flow_run_name="{member}@{git_commit_hash}", log_prints=True)
+  def my_flow(data_folder, member="local", git_commit_hash="dryrun", git_repo=""):
+      log = get_run_logger()
+      log.info(f"dry run: member={member} commit={git_commit_hash} "
+               f"data={data_folder} prepare={prepare} optuna={optuna}")
+
+      s = validate(train(train_featurize(train_prepare({}))))    # train: prepare -> featurize -> train -> validate
+      s = test(test_featurize(test_prepare(s)))                  # test:  prepare -> featurize -> test
+      s = parity_plot(s)                                         # parity over both branches
+
+      ran = sorted(s)
+      assert set(ran) == set(STAGES), f"missing stages: {set(STAGES) - set(ran)}"
+      log.info(f"dry run ok: {len(ran)}/{len(STAGES)} stages ran {ran}")
+      return s
+
 
   if __name__ == "__main__":
-      p = argparse.ArgumentParser()                        # pipeline.py passes these as CLI args (§4.3)
-      p.add_argument("--data_folder"); p.add_argument("--member", default=""); p.add_argument("--git_commit_hash", default="")
-      p.add_argument("--git_repo", default="")             # accepted for completeness; unused here
+      p = argparse.ArgumentParser()
+      p.add_argument("--data_folder", default=".")
+      p.add_argument("--member", default="local")
+      p.add_argument("--git_commit_hash", default="dryrun")
+      p.add_argument("--git_repo", default="")                   # accepted for completeness; unused here
       a = p.parse_args()
-      my_flow(a.data_folder, a.member, a.git_commit_hash)
+      my_flow(a.data_folder, member=a.member, git_commit_hash=a.git_commit_hash, git_repo=a.git_repo)
   ```
 
 ---
@@ -345,7 +389,7 @@ def inference_flow():
 
 ## Appendix A. catalog.py CLI
 
-`catalog.py` 는 데이터 카탈로그 (PostgreSQL `catalog` DB 장부) 와 MinIO 객체를 함께 다루는 접근 계층이자 CLI 입니다. flow 에서 라이브러리로 import 해 쓰거나 ([§4 Data Prepare](#4-data-prepare)), 아래 CLI 로 직접 둘러보기·업로드·다운로드·삭제합니다. **catalog.py 는 컨테이너 밖에서 실행** 되므로 자격증명은 Prefect 프로필 ([§5 Server Connection](#server-connection) 의 `prefect config set PREFECT_API_URL=...`) 로 연결된 **Prefect Secret 블록** 에서 가져옵니다 (멤버별 `Credentials` 블록은 아래 [Credentials](#credentials-prefect-block), 없으면 default). 프로세스 환경변수나 `docker-compose.env` 파일은 쓰지 않습니다 (그 파일은 컨테이너 스택용이라 host 의 catalog.py 가 찾을 수 없음). 업로드·다운로드·삭제는 boto3 로 처리하므로 `mc` 가 필요 없습니다.
+`catalog.py` 는 데이터 카탈로그 (PostgreSQL `catalog` DB 장부) 와 MinIO 객체를 함께 다루는 접근 계층이자 CLI 입니다. flow 에서 라이브러리로 import 해 쓰거나 ([§4 Data](#4-data)), 아래 CLI 로 직접 둘러보기·업로드·다운로드·삭제합니다. **catalog.py 는 컨테이너 밖에서 실행** 되므로 자격증명은 Prefect 프로필 ([§5 Server Connection](#server-connection) 의 `prefect config set PREFECT_API_URL=...`) 로 연결된 **Prefect Secret 블록** 에서 가져옵니다 (멤버별 `Credentials` 블록은 아래 [Credentials](#credentials-prefect-block), 없으면 default). 프로세스 환경변수나 `docker-compose.env` 파일은 쓰지 않습니다 (그 파일은 컨테이너 스택용이라 host 의 catalog.py 가 찾을 수 없음). 업로드·다운로드·삭제는 boto3 로 처리하므로 `mc` 가 필요 없습니다.
 
 **Target** 은 명령이 접속하는 곳입니다 (**PostgreSQL** = catalog DB 장부, **MinIO** = 객체 저장소). 각 명령은 실행 시작 시 접속 대상 (PostgreSQL DSN — 비밀번호 가림 · MinIO endpoint) 과 **자격증명 출처** (`[creds: prefect-block (block=…) | default (localhost)]`) 를 stderr 로 먼저 출력해 "어디로 접속해 도는지, 자격증명을 어디서 가져왔는지" 를 알립니다. `-b <block>` 로 블록을 주면 `prefect-block (block=…)`, `-b` 없이 돌리면 `default (localhost)` 로 표시됩니다. `-b` 를 **줬는데** credentials.py import 실패나 블록 로드 실패(서버 미연결·블록 없음)면 조용히 default 로 안 가고 오류로 즉시 중단합니다. `--version`/`-V` 로 버전을 확인합니다.
 
