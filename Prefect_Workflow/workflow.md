@@ -1,6 +1,6 @@
 # AI/ML Workflow Automation
 
-<sub>rev. 86</sub>
+<sub>rev. 87</sub>
 
 Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환경입니다. 이 문서는 **전체 워크플로우의 인덱스 (개요)** 이고, 도구별 상세는 컴포넌트 문서로 잇습니다.
 
@@ -226,7 +226,7 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
 
   ```python
   # example/dry_run/my_flow.py — git-delivered ML payload, Prefect dry run.
-  __version__ = "0.0.12"
+  __version__ = "0.0.13"
 
   import argparse
   from pathlib import Path
@@ -244,6 +244,8 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
       "__version__": "0.0.0",
       "train": {
           "split": [0.8, 0.2]
+      },
+      "validate": {
       },
       "test": {
       }

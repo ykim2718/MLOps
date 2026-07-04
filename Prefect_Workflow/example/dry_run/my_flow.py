@@ -11,7 +11,7 @@ whole prepare -> featurize -> train -> validate / test path end to end.
 Run by pipeline.py (orchestrator, prefect.md §4.3):
     python my_flow.py --git_repo <r> --git_commit_hash <c> --member <m> --data_folder <dir>
 """
-__version__ = "0.0.12"
+__version__ = "0.0.13"
 
 import argparse
 from pathlib import Path
@@ -29,6 +29,8 @@ prepare_json: Dict[str, Any] = {
     "__version__": "0.0.0",
     "train": {
         "split": [0.8, 0.2]
+    },
+    "validate": {
     },
     "test": {
     }
