@@ -1,6 +1,6 @@
 # AI/ML Workflow Automation
 
-<sub>rev. 71</sub>
+<sub>rev. 74</sub>
 
 Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환경입니다. 이 문서는 **전체 워크플로우의 인덱스 (개요)** 이고, 도구별 상세는 컴포넌트 문서로 잇습니다.
 
@@ -14,7 +14,7 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
 
 1) **Lineage** — 데이터·코드·결과를 양방향으로 추적합니다.
 2) **Persistence** — 모델·데이터를 catalog 에 등록해 보존하고 검색·선택 다운로드합니다 (메타 → PostgreSQL `catalog`, 실데이터 → MinIO).
-3) **Versioning** — 코드·런타임·데이터 버전을 고정합니다 (데이터 버전은 불변 `minio_key` 경로에 담김 — [§7](#7-lineage--reproducibility)).
+3) **Versioning** — 코드·런타임·데이터 버전을 고정합니다 (데이터 버전은 불변 `minio_key` 경로에 담김 — [§7](#7-traceability)).
 4) **Reproducibility** — 데이터 버전·하이퍼파라미터·시드를 고정해 동일 결과를 보장합니다.
 5) **Reusability** — 워크플로우·피처를 다른 프로젝트에서 다시 씁니다.
 6) **Monitoring** — Prefect / MLflow / MinIO 대시보드로 현황을 한눈에 봅니다.
@@ -177,11 +177,7 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
    └─ *.parquet
 ```
 
-### Trigger
-
-  등록된 deployment 를 파라미터와 함께 실행(trigger)합니다 — 팀원·코드·데이터는 `git_repo`·`git_commit_hash`·`minio_key` 파라미터로, `prefect deployment ls` 명령으로 관리자가 등록한 deployment 를 고릅니다.
-
-#### Server Connection
+### Server Connection
 
   trigger 에 앞서 client (dispatcher 또는 job 을 trigger 하는 노드) 가 **어느 Prefect server 에 연결할지** 주소를 지정합니다. **최초 1회** 설정하면 이후 모든 client 명령이 이 server 를 향합니다.
 
@@ -191,6 +187,10 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
   ```
 
   이 설정은 job 을 **trigger** 할 때 (`prefect deployment run ...`), **deployment 를 등록** 할 때, **Prefect Secret 블록을 등록/조회** 할 때 등 server 와 통신하는 client 작업 전반에 필요합니다.
+
+### Trigger
+
+  등록된 deployment 를 파라미터와 함께 실행(trigger)합니다 — 팀원·코드·데이터는 `git_repo`·`git_commit_hash`·`minio_key` 파라미터로, `prefect deployment ls` 명령으로 관리자가 등록한 deployment 를 고릅니다.
 
   ```powershell
   # Trigger — pick the tier by deployment; heavy -> high, light -> low (params otherwise identical).
@@ -263,11 +263,32 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
 
 ---
 
-## 7. Lineage & Reproducibility
+## 7. Traceability
 
-한 실행을 나중에 그대로 되살리려면 **입력을 못 박고(version)** · **관계를 기록하고(lineage)** · **그 좌표로 다시 돌립니다(re-run)**. Prefect 는 orchestrator 일 뿐 버전을 보관하지 않으므로, 세 축을 파라미터·태그로 고정합니다.
+여러 팀원이 결과를 잃지 않고 추적·재현·재사용하도록, 한 실행의 **입력·관계·산출물** 을 파라미터·태그·장부로 못 박습니다. Prefect 는 orchestrator 일 뿐 버전을 보관하지 않으므로, 아래 다섯 축을 명시적으로 고정합니다.
+
+### Lineage
+
+데이터·코드·결과를 양방향으로 추적합니다. `catalog` 레코드 (`minio_key`·`doc`·`prefect_run_id`) 와 MLflow run 태그 (입력 `input_minio_key`, git 커밋 SHA) 를 **서로 참조** 해 두면 세 축이 한 실행에서 묶입니다.
+
+```
+data (minio_key) ──used by──> code (Prefect run @ git SHA) ──produces──> result (MLflow run / model)
+   ▲                                                                          │
+   └──────────────────────  trace back (result → code → data)  <─────────────┘
+```
+
+- **Forward** — 어떤 데이터를 어떤 커밋의 flow run 이 썼고, 그 run 에서 나온 MLflow run·모델이 무엇인지 따라갑니다.
+- **Backward** — 운영 모델의 MLflow run 태그 (`input_minio_key`·git SHA) → `catalog.find(...)` · `git checkout <SHA>` 로 원본 데이터·코드까지 거슬러 올라갑니다.
+- **Model ↔ code** — MLflow 는 git repo 안에서 run 을 돌리면 커밋 SHA 를 자동 태그하므로 "이 모델이 어떤 코드로 학습됐나" 가 남습니다.
+- **History** — `python catalog.py list`·`find <minio_key>` (데이터·메타·등록 시각, [Appendix A](#appendix-a-catalogpy-cli)) · `git log <git_commit_hash>` (코드 이력) · MLflow UI (run·파라미터·메트릭·모델 단계) 로 각 축의 이력을 봅니다.
+
+### Persistence
+
+모델·데이터를 catalog 에 등록해 보존하고 검색·선택 다운로드합니다 — 메타는 PostgreSQL `catalog` 장부에, 실데이터·아티팩트는 MinIO 에 남습니다. 컨테이너는 run 마다 파괴돼도 결과는 이 두 저장소에 남아 나중에 `minio_key` 로 되찾습니다.
 
 ### Versioning
+
+코드·런타임·데이터 버전을 고정합니다.
 
 | Axis | Pinned by | Meaning |
 |------|-----------|---------|
@@ -279,39 +300,22 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
 - **Runtime** — 이미지 태그가 라이브러리 + orchestrator 를 고정합니다. 라이브러리를 바꾸면 새 태그로 빌드합니다 (`latest` 는 가변이라 재현엔 명시 태그).
 - **Data** — `minio_key` 는 불변이라 같은 key = 같은 바이트입니다. catalog 가 그 key ↔ 메타(`doc`)·등록 시각을 장부로 보관합니다.
 
-### Lineage
+### Reproducibility
 
-`catalog` 레코드 (`minio_key`·`doc`·`prefect_run_id`) 와 MLflow run 태그 (입력 `input_minio_key`, git 커밋 SHA) 를 **서로 참조** 해 두면 세 축이 한 실행에서 묶입니다.
-
-```
-data (minio_key) ──used by──> code (Prefect run @ git SHA) ──produces──> result (MLflow run / model)
-   ▲                                                                          │
-   └──────────────────────  trace back (result → code → data)  <─────────────┘
-```
-
-- **Forward** — 어떤 데이터를 어떤 커밋의 flow run 이 썼고, 그 run 에서 나온 MLflow run·모델이 무엇인지 따라갑니다.
-- **Backward** — 운영 모델의 MLflow run 태그 (`input_minio_key`·git SHA) → `catalog.find(...)` · `git checkout <SHA>` 로 원본 데이터·코드까지 거슬러 올라갑니다.
-- **Model ↔ code** — MLflow 는 git repo 안에서 run 을 돌리면 커밋 SHA 를 자동 태그하므로 "이 모델이 어떤 코드로 학습됐나" 가 남습니다.
-
-### History
-
-- **Data** — `python catalog.py list` · `find <minio_key>` 로 등록된 데이터셋·메타(`doc`)·등록 시각을 봅니다 ([Appendix A](#appendix-a-catalogpy-cli)).
-- **Code** — `git log <git_commit_hash>` 로 그 커밋의 이력을, MLflow run 의 git 태그로 "어느 모델 ← 어느 커밋" 을 봅니다.
-- **Runs / models** — MLflow UI 에서 run·파라미터·메트릭·모델 레지스트리 단계 (`Production` 등) 를 봅니다.
-
-### Re-run
-
-과거 실행을 그대로 되살리려면 그때의 **세 좌표** 를 그대로 넘겨 다시 trigger 합니다.
+데이터 버전·하이퍼파라미터·시드를 고정해 동일 결과를 보장합니다. 과거 실행을 되살리려면 그때의 **세 좌표** (코드 SHA · 런타임 태그 · 데이터 key) 를 그대로 넘겨 다시 trigger 합니다.
 
 ```powershell
 # 그때의 SHA·key 를 그대로; 런타임 태그가 달라졌으면 그 태그로 등록된 deployment 로 보냅니다.
 prefect deployment run "pipeline/pipelineflow-high" -p git_repo=<repo> -p git_commit_hash=<그때 SHA> -p minio_key=<그때 key>
 ```
 
-- 세 축 (코드 SHA · 런타임 태그 · 데이터 key) 이 같으면 **같은 입력 → 같은 결과** 가 보장됩니다.
-- 브랜치명 · `latest` 태그 · 가변 key 를 쓰면 재현이 깨집니다 — 재현엔 항상 고정 좌표 (SHA · 명시 태그 · 불변 key) 를 씁니다.
+- 세 축이 같으면 **같은 입력 → 같은 결과** 가 보장됩니다. 브랜치명·`latest` 태그·가변 key 를 쓰면 재현이 깨지니, 재현엔 항상 고정 좌표 (SHA · 명시 태그 · 불변 key) 를 씁니다.
 
 > **Private repo** — 런타임 `git fetch` 대상이 private 이면 토큰이 필요합니다. Prefect Secret 으로 토큰을 받아 인증 URL (`git_repo`) 로 fetch 하거나 git credential helper 를 설정합니다. public repo 면 그대로 됩니다.
+
+### Reusability
+
+워크플로우·피처를 다른 프로젝트에서 다시 씁니다. 공통 단계·유틸·catalog 접근 계층을 common repo (nested repository, [Appendix B](#appendix-b-common-repo-nested-repository)) 로 묶어 여러 팀원 repo 가 `git subtree` 로 함께 심어 씁니다.
 
 ---
 
