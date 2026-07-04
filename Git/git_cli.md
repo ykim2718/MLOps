@@ -156,12 +156,12 @@ git fetch --prune                          # 원격에서 사라진 가지의 �
 
 | Aspect | submodule | subtree |
 |--------|-----------|---------|
-| 저장 방식 | 커밋을 가리키는 포인터만 (gitlink) | 파일을 메인 이력에 합쳐 담음 |
-| 하위 폴더의 `.git` | 폴더 안에 자체 `.git` 있음 (별도 저장소) | 없음 — 메인 저장소가 곧 전부 |
-| 딸려 생기는 파일 | `.gitmodules` 생성 | 없음 |
-| 받는 쪽 (clone 할 때) | `--recurse-submodules` 등 추가 작업 필요 | 그냥 clone 으로 끝 |
-| 원본으로 되돌리기 | 폴더로 `cd` 해 직접 push | `git subtree push` |
-| 적합한 경우 | 버전 고정·독립 관리 | 의존 코드를 품어 단순화 |
+| Storage | 커밋을 가리키는 포인터만 (gitlink) | 파일을 메인 이력에 합쳐 담음 |
+| Nested `.git` | 폴더 안에 자체 `.git` 있음 (별도 저장소) | 없음 — 메인 저장소가 곧 전부 |
+| Extra file | `.gitmodules` 생성 | 없음 |
+| clone | `--recurse-submodules` 등 추가 작업 필요 | 그냥 clone 으로 끝 |
+| push | 폴더로 `cd` 해 직접 push | `git subtree push` |
+| Best for | 버전 고정·독립 관리 | 의존 코드를 품어 단순화 |
 
 ### Creation
 
@@ -433,4 +433,4 @@ git version                                # 설치된 git 버전을 확인한�
 - **remote-tracking branches** — 원격 가지를 내 쪽에 비춰 둔 읽기용 이름 (`origin/main` 등). `fetch` 때 갱신됩니다.
 - **repository** — 프로젝트의 모든 파일과 이력을 담는 저장 단위. 로컬·원격 양쪽에 존재합니다.
 - **state** — 변경 파일이 거치는 단계. **modified** 는 working tree 에서 고쳤지만 안 담은 상태, **staged** 는 `add` 로 다음 커밋에 담은 상태, **committed** 는 `commit` 으로 이력에 굳은 상태입니다.
-- **working tree** — 편집 중인 실제 파일이 펼쳐진 작업 폴더. 고친 내용을 `add` 로 stage 에 담고 `commit` 으로 굳힙니다.
+- **work tree (working tree, working directory)** — 편집 중인 실제 파일이 펼쳐진 작업 폴더. 고친 내용을 `add` 로 stage 에 담고 `commit` 으로 굳힙니다.
