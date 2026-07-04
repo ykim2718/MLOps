@@ -1,6 +1,6 @@
 # AI/ML Workflow Automation
 
-<sub>rev. 80</sub>
+<sub>rev. 86</sub>
 
 Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환경입니다. 이 문서는 **전체 워크플로우의 인덱스 (개요)** 이고, 도구별 상세는 컴포넌트 문서로 잇습니다.
 
@@ -226,95 +226,151 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
 
   ```python
   # example/dry_run/my_flow.py — git-delivered ML payload, Prefect dry run.
-  __version__ = "0.0.5"
+  __version__ = "0.0.12"
 
   import argparse
   from pathlib import Path
-  from typing import Any, Dict
+  from typing import Any, Dict, Literal
 
   import mlflow
   from prefect import flow, get_run_logger, task
+  from prefect.artifacts import create_markdown_artifact
 
   State = Dict[str, str]                            # per-stage status map (stage -> "ok") threaded through the flow
+  Stages = Literal["", "train_prepare", "train_featurize", "train", "validate",
+                   "test_prepare", "test_featurize", "test"]  # pipeline stage names
 
-  prepare: Dict[str, Any] = {"train": {"split": [0.8, 0.2]}}  # stand-in for prepare.json (free-form / nested)
-  optuna: Dict[str, Any] = {}  # stand-in for optuna.json
+  prepare_json: Dict[str, Any] = {
+      "__version__": "0.0.0",
+      "train": {
+          "split": [0.8, 0.2]
+      },
+      "test": {
+      }
+  }  # stand-in for prepare.json (free-form / nested)
+  optuna_json: Dict[str, Any] = {
+      "__version__": "0.0.0",
+      "environment": {
+      },
+      "search_space": {
+      }
+  }  # stand-in for optuna.json
 
   STAGES = ("train_prepare", "train_featurize", "train", "validate",
-            "test_prepare", "test_featurize", "test", "parity_plot")
+            "test_prepare", "test_featurize", "test")
 
 
-  @task(task_run_name="train_prepare")
-  def train_prepare(state: State, data_folder: str) -> State:
+  @task(task_run_name="train_prepare", retries=2, retry_delay_seconds=5)
+  def train_prepare(state: State, data_folder: str, prepare_json: Dict[str, Any]) -> State:
       log = get_run_logger()
       data = Path(data_folder)
       n_files = sum(1 for p in data.rglob("*") if p.is_file()) if data.exists() else 0
       log.info(f"train_prepare: {n_files} files under {data_folder}")   # Prefect run log
+      log.info(f"train_prepare: prepare_json = {prepare_json}")
       mlflow.log_metric("n_data_files", n_files)                        # MLflow (metric -> tracking store)
+      mlflow.log_param("train_prepare.prepare_json", prepare_json)      # MLflow (config visible in the run)
       return {**state, "train_prepare": "ok"}
 
 
-  @task(task_run_name="train_featurize")
+  @task(task_run_name="train_featurize", retries=2, retry_delay_seconds=5)
   def train_featurize(state: State) -> State:
       return {**state, "train_featurize": "ok"}
 
 
-  @task(task_run_name="train")
-  def train(state: State) -> State:
+  @task(task_run_name="train", retries=2, retry_delay_seconds=5)
+  def train(state: State, optuna_json: Dict[str, Any]) -> State:
+      log = get_run_logger()
+      log.info(f"train: optuna_json = {optuna_json}")                  # Prefect run log
+      mlflow.log_param("train.optuna_json", optuna_json)               # MLflow (config visible in the run)
       return {**state, "train": "ok"}
 
 
-  @task(task_run_name="validate")
+  @task(task_run_name="validate", retries=2, retry_delay_seconds=5)
   def validate(state: State) -> State:
       return {**state, "validate": "ok"}
 
 
-  @task(task_run_name="test_prepare")
-  def test_prepare(state: State) -> State:
+  @task(task_run_name="test_prepare", retries=2, retry_delay_seconds=5)
+  def test_prepare(state: State, prepare_json: Dict[str, Any]) -> State:
+      log = get_run_logger()
+      log.info(f"test_prepare: prepare_json = {prepare_json}")         # Prefect run log
+      mlflow.log_param("test_prepare.prepare_json", prepare_json)      # MLflow (config visible in the run)
       return {**state, "test_prepare": "ok"}
 
 
-  @task(task_run_name="test_featurize")
+  @task(task_run_name="test_featurize", retries=2, retry_delay_seconds=5)
   def test_featurize(state: State) -> State:
       return {**state, "test_featurize": "ok"}
 
 
-  @task(task_run_name="test")
+  @task(task_run_name="test", retries=2, retry_delay_seconds=5)
   def test(state: State) -> State:
       return {**state, "test": "ok"}
 
 
-  @task(task_run_name="parity_plot")
-  def parity_plot(state: State) -> State:
-      return {**state, "parity_plot": "ok"}
+  # report tasks — submitted concurrently after train/validate/test; MLflow is logged in the flow
+  # (main thread) since a .submit() task runs in another thread where the active MLflow run is not set.
+  @task(task_run_name="parity_plot-{stage}", retries=2, retry_delay_seconds=5)
+  def parity_plot(state: State, stage: Stages = "") -> str:
+      get_run_logger().info(f"parity_plot after {stage} ({len(state)} stages so far)")
+      return f"parity_plot.{stage}"
+
+
+  @task(task_run_name="publish_artifacts-{stage}", retries=2, retry_delay_seconds=5)
+  def publish_artifacts(state: State, stage: Stages = "") -> str:
+      log = get_run_logger()
+      log.info(f"publish_artifacts: {stage} result = {state}")         # Prefect run log
+      try:
+          create_markdown_artifact(key=f"result-{stage}",
+                                   markdown=f"# {stage} result\n\n`{state}`")   # Prefect UI artifact
+      except Exception as e:                                           # no Prefect API backend -> skip
+          log.warning(f"artifact skipped: {e}")
+      return f"publish_artifacts.{stage}"
 
 
   @flow(name="my_flow", flow_run_name="{member}@{git_commit_hash}", log_prints=True)
-  def my_flow(data_folder: str, member: str = "local", git_commit_hash: str = "dryrun",
+  def my_flow(*, member: str = "local", data_folder: str = "./data", git_commit_hash: str = "dryrun",
               git_repo: str = "") -> State:
       log = get_run_logger()
       log.info(f"dry run: member={member} commit={git_commit_hash} "
-               f"data={data_folder} prepare={prepare} optuna={optuna}")
+               f"data={data_folder} prepare={prepare_json} optuna={optuna_json}")
 
+      reports = []
       with mlflow.start_run(run_name=f"{member}@{git_commit_hash}"):  # real run -> MLflow server
-          s = validate(train(train_featurize(train_prepare({}, data_folder))))  # train branch
-          s = test(test_featurize(test_prepare(s)))  # test branch
-          s = parity_plot(s)  # parity over both branches
+          s = train_prepare({}, data_folder, prepare_json)           # train branch
+          s = train_featurize(s)
+          s = train(s, optuna_json)
+          reports += [parity_plot.submit(s, "train"), publish_artifacts.submit(s, "train")]
+          s = validate(s)
+          reports += [parity_plot.submit(s, "validate"), publish_artifacts.submit(s, "validate")]
+          s = test_prepare(s, prepare_json)                          # test branch
+          s = test_featurize(s)
+          s = test(s)
+          reports += [parity_plot.submit(s, "test"), publish_artifacts.submit(s, "test")]
+
+          published = sorted(f.result() for f in reports)            # resolve report futures (raise on failure)
+          for key in published:
+              mlflow.log_param(key, "ok")                            # MLflow: parity_plot.* / publish_artifacts.*
 
       ran = sorted(s)
       assert set(ran) == set(STAGES), f"missing stages: {set(STAGES) - set(ran)}"
-      log.info(f"dry run ok: {len(ran)}/{len(STAGES)} stages ran {ran}")
+      log.info(f"dry run ok: stages={ran} reports={published}")
       return s
 
 
-  if __name__ == "__main__":
+  def parse_args() -> argparse.Namespace:
       p = argparse.ArgumentParser()
-      p.add_argument("--data_folder", default=".")
       p.add_argument("--member", default="local")
+      p.add_argument("--data_folder", default="./data")
       p.add_argument("--git_commit_hash", default="dryrun")
       p.add_argument("--git_repo", default="")                   # accepted for completeness; unused here
-      a = p.parse_args()
-      my_flow(a.data_folder, member=a.member, git_commit_hash=a.git_commit_hash, git_repo=a.git_repo)
+      return p.parse_args()
+
+
+  if __name__ == "__main__":
+      a = parse_args()
+      my_flow(member=a.member, data_folder=a.data_folder,
+              git_commit_hash=a.git_commit_hash, git_repo=a.git_repo)
   ```
 
 ---
