@@ -47,7 +47,7 @@ CLI help (`python catalog.py`):
 
 usage: catalog.py [-h] [-V] <command> ...
 
-catalog.py v0.0.41 - Data catalog (PostgreSQL ledger) + MinIO object operations.
+catalog.py v0.0.42 - Data catalog (PostgreSQL ledger) + MinIO object operations.
 
 positional arguments:
   <command>
@@ -107,7 +107,7 @@ from typing import Any, List, Optional, Tuple
 import psycopg2
 from psycopg2.extras import Json, RealDictCursor
 
-__version__ = "0.0.41"  # Semantic Versioning:  Version = Major.Minor.Patch
+__version__ = "0.0.42"  # Semantic Versioning:  Version = Major.Minor.Patch
 
 _BLOCK = None       # credential block name (-b); set by CLI or set_block(), used to read creds
 _PG_HOST = None      # CLI --pg-host: override the postgresql endpoint host only (creds unchanged)
@@ -210,7 +210,7 @@ def _conn() -> "psycopg2.extensions.connection":
 
 
 # --------------------------------------------------------------------------- #
-# 쓰기 / 스키마
+# writes / schema
 # --------------------------------------------------------------------------- #
 def ensure_schema() -> None:
     """`datasets` 테이블이 없으면 만든다(있으면 그냥 통과). flow 시작 시 1회 호출."""
@@ -235,7 +235,7 @@ def register(minio_key: str, minio_path: str, doc: Optional[dict] = None, *,
 
 
 # --------------------------------------------------------------------------- #
-# 업로드 (MinIO 적재 + catalog 등록) — JSON spec 으로 구동
+# upload (put to MinIO + register in catalog) - driven by a JSON spec
 # --------------------------------------------------------------------------- #
 _NAME_RE = re.compile(r"^[A-Za-z0-9_.#-]+(/[A-Za-z0-9_.#-]+)*$")   # minio_key: slash-joined segments (Samsung/#0/V0)
 _REQUIRED_SPEC_KEYS = ("minio_key",)                      # upload() rejects a spec missing this (path is CLI --path)
@@ -278,7 +278,7 @@ def _locate(path: str, spec_dir: Optional[Path] = None) -> str:
     bases, seen = [], set()
     for b in (spec_dir or Path.cwd(), Path(__file__).resolve().parent):
         rb = Path(b).resolve()
-        if rb not in seen:                                 # dedupe (spec.json next to catalog.py 인 경우)
+        if rb not in seen:                                 # dedupe (when spec.json sits next to catalog.py)
             seen.add(rb)
             bases.append(rb)
     hits = [str(rb / path) for rb in bases if _has_match(str(rb / path))]
@@ -403,7 +403,7 @@ def write_spec_template(out: str = "spec.json") -> str:
 
 
 # --------------------------------------------------------------------------- #
-# 다운로드 / 삭제 (MinIO ± catalog) — boto3 직접 (mc 불필요)
+# download / remove (MinIO +/- catalog) - boto3 directly (no mc needed)
 # --------------------------------------------------------------------------- #
 def download(minio_key: str, dest: Optional[str] = None,
              block: Optional[str] = None) -> str:
@@ -492,7 +492,7 @@ def objects(minio_key: Optional[str] = None, *, bucket: str = "datasets",
 
 
 # --------------------------------------------------------------------------- #
-# 읽기 / 검색
+# reads / search
 # --------------------------------------------------------------------------- #
 def find(minio_key: Optional[str] = None, **filters: Any) -> List[dict]:
     """minio_key/doc 필드로 검색. 예: find('Samsung', provider='정지혁').
@@ -522,7 +522,7 @@ def get(minio_key: str) -> Optional[dict]:
 
 
 # --------------------------------------------------------------------------- #
-# 둘러보기(탐색) — 이력을 모르는 팀원이 목록을 보고 고르기 위한 헬퍼
+# browse (discovery) - helpers for teammates who don't know the history to list and pick
 # --------------------------------------------------------------------------- #
 def list_datasets() -> List[dict]:
     """등록된 데이터셋 요약: minio_key + 파일 수 + 크기 + 등록 시각 (최근 순)."""
@@ -537,7 +537,7 @@ def list_datasets() -> List[dict]:
 
 
 # --------------------------------------------------------------------------- #
-# 파일 종류(확장자) 집계 — MinIO 객체를 세어 트리에 표시 (boto3 는 필요할 때만 import)
+# file-type (extension) tally - count MinIO objects for the tree (boto3 imported only when needed)
 # --------------------------------------------------------------------------- #
 def _s3(block: Optional[str] = None) -> Any:
     """MinIO(S3 호환) 클라이언트. 블록의 'minio' 섹션(endpoint·access·secret)을 그대로 쓴다.

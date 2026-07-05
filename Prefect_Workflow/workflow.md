@@ -1,6 +1,6 @@
 # AI/ML Workflow Automation
 
-<sub>rev. 90</sub>
+<sub>rev. 91</sub>
 
 Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환경입니다. 이 문서는 **전체 워크플로우의 인덱스 (개요)** 이고, 도구별 상세는 컴포넌트 문서로 잇습니다.
 
@@ -192,7 +192,7 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
 
   ```powershell
   setx PREFECT_API_URL "http://<Host IP>:4200/api"     # persistent (User scope) - applies to newly opened shells
-  $env:PREFECT_API_URL = "http://<Host IP>:4200/api"   # current PowerShell only (temporary)
+  $env:PREFECT_API_URL = "http://<Host IP>:4200/api"   # temporary - current PowerShell only
   ```
 
   **2) prefect CLI** — Prefect 프로필 (`~/.prefect/profiles.toml`) 에 저장.

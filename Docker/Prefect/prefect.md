@@ -1,6 +1,6 @@
 # Prefect Pipeline Orchestration on Docker
 
-<sub>rev. 535</sub>
+<sub>rev. 536</sub>
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
@@ -741,7 +741,7 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
 
   ```powershell
   setx PREFECT_API_URL "http://<Host IP>:4200/api"     # persist (User scope) — applies to newly opened shells
-  $env:PREFECT_API_URL = "http://<Host IP>:4200/api"   # current PowerShell session only (temporary)
+  $env:PREFECT_API_URL = "http://<Host IP>:4200/api"   # temporary - current PowerShell only
   ```
 
   2) **prefect CLI** — Prefect 프로필 (`~/.prefect/profiles.toml`) 에 저장.
