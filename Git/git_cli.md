@@ -1,6 +1,6 @@
 # Git CLI (Command Line Interface)
 
-<sub>rev. 100</sub>
+<sub>rev. 102</sub>
 
 자주 쓰는 git 명령을 **작업 영역**과 **역할**로 분류했습니다. `<branch>` · `<remote>` · `<commit>` · `<file>` 은 실제 이름으로 바꿔 씁니다. 문법은 PowerShell · bash 공통입니다.
 
@@ -162,6 +162,8 @@ git fetch --prune                          # 원격에서 사라진 가지의 �
 | clone | `--recurse-submodules` 등 추가 작업 필요 | 그냥 clone 으로 끝 |
 | push | 폴더로 `cd` 해 직접 push | `git subtree push` |
 | Best for | 버전 고정·독립 관리 | 의존 코드를 품어 단순화 |
+
+> 실행 위치 — `git submodule` 은 저장소 루트에서 실행을 권장하고, `git subtree` 는 루트 실행이 강제입니다 (아니면 toplevel 에러).
 
 ### Creation
 
