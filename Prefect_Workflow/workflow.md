@@ -1,6 +1,6 @@
 # AI/ML Workflow Automation
 
-<sub>rev. 87</sub>
+<sub>rev. 88</sub>
 
 Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환경입니다. 이 문서는 **전체 워크플로우의 인덱스 (개요)** 이고, 도구별 상세는 컴포넌트 문서로 잇습니다.
 
@@ -186,14 +186,22 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
 
 ### Server Connection
 
-  trigger 에 앞서 client (dispatcher 또는 job 을 trigger 하는 노드) 가 **어느 Prefect server 에 연결할지** 주소를 지정합니다. **최초 1회** 설정하면 이후 모든 client 명령이 이 server 를 향합니다.
+  trigger 에 앞서 client (dispatcher 또는 job 을 trigger 하는 노드) 가 **어느 Prefect server 에 연결할지** (`PREFECT_API_URL`) 를 정합니다. **최초 1회** 설정하면 이후 모든 client 명령이 이 server 를 향합니다. 설정 방법은 두 가지이며, **환경변수가 프로필보다 우선**합니다 (환경변수 > 프로필 > 기본값). 같은 컴퓨터면 `<Host IP>` 는 `localhost`.
+
+  **1) 환경변수** — OS 환경변수로 지정. Windows 에서 영구 등록은 `setx` (또는 시스템 속성), 현재 셸에만 임시로 줄 땐 `$env:`.
+
+  ```powershell
+  setx PREFECT_API_URL "http://<Host IP>:4200/api"     # 영구 (User 범위) — 새로 여는 셸부터 적용
+  $env:PREFECT_API_URL = "http://<Host IP>:4200/api"   # 현재 셸에만 (임시)
+  ```
+
+  **2) prefect CLI** — Prefect 프로필 (`~/.prefect/profiles.toml`) 에 저장.
 
   ```powershell
   prefect config set PREFECT_API_URL="http://<Host IP>:4200/api"
-  # Use localhost for <Host IP> on the same computer.
   ```
 
-  이 설정은 job 을 **trigger** 할 때 (`prefect deployment run ...`), **deployment 를 등록** 할 때, **Prefect Secret 블록을 등록/조회** 할 때 등 server 와 통신하는 client 작업 전반에 필요합니다.
+  이 주소는 job 을 **trigger** 할 때 (`prefect deployment run ...`), **deployment 를 등록** 할 때, **Prefect Secret 블록을 등록/조회** 할 때 등 server 와 통신하는 client 작업 전반에 쓰입니다. 단 이 값은 **접속 주소일 뿐**이라, 그 URL 에 Prefect 서버가 실제로 떠 있어야 합니다.
 
 ### Trigger
 
