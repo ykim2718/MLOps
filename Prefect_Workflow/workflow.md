@@ -1,6 +1,6 @@
 # AI/ML Workflow Automation
 
-<sub>rev. 88</sub>
+<sub>rev. 90</sub>
 
 Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환경입니다. 이 문서는 **전체 워크플로우의 인덱스 (개요)** 이고, 도구별 상세는 컴포넌트 문서로 잇습니다.
 
@@ -191,8 +191,8 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
   **1) 환경변수** — OS 환경변수로 지정. Windows 에서 영구 등록은 `setx` (또는 시스템 속성), 현재 셸에만 임시로 줄 땐 `$env:`.
 
   ```powershell
-  setx PREFECT_API_URL "http://<Host IP>:4200/api"     # 영구 (User 범위) — 새로 여는 셸부터 적용
-  $env:PREFECT_API_URL = "http://<Host IP>:4200/api"   # 현재 셸에만 (임시)
+  setx PREFECT_API_URL "http://<Host IP>:4200/api"     # persistent (User scope) - applies to newly opened shells
+  $env:PREFECT_API_URL = "http://<Host IP>:4200/api"   # current PowerShell only (temporary)
   ```
 
   **2) prefect CLI** — Prefect 프로필 (`~/.prefect/profiles.toml`) 에 저장.
@@ -427,8 +427,8 @@ data (minio_key) ──used by──> code (Prefect run @ git SHA) ──produce
 데이터 버전·하이퍼파라미터·시드를 고정해 동일 결과를 보장합니다. 과거 실행을 되살리려면 그때의 **세 좌표** (코드 SHA · 런타임 태그 · 데이터 key) 를 그대로 넘겨 다시 trigger 합니다.
 
 ```powershell
-# 그때의 SHA·key 를 그대로; 런타임 태그가 달라졌으면 그 태그로 등록된 deployment 로 보냅니다.
-prefect deployment run "pipeline/pipelineflow-high" -p git_repo=<repo> -p git_commit_hash=<그때 SHA> -p minio_key=<그때 key>
+# same SHA/key as before; if the runtime tag changed, target the deployment registered under that tag.
+prefect deployment run "pipeline/pipelineflow-high" -p git_repo=<repo> -p git_commit_hash=<recorded SHA> -p minio_key=<recorded key>
 ```
 
 - 세 축이 같으면 **같은 입력 → 같은 결과** 가 보장됩니다. 브랜치명·`latest` 태그·가변 key 를 쓰면 재현이 깨지니, 재현엔 항상 고정 좌표 (SHA · 명시 태그 · 불변 key) 를 씁니다.
