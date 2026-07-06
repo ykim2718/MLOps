@@ -1,7 +1,7 @@
-# __version__ = "0.0.9"
+# __version__ = "0.0.10"
 
 # example/dry_run/my_flow_trigger.ps1 — verify the dry-run flow (my_flow.py) at three stages.
-#   -Mode local : run my_flow.py in-process here (fastest sanity check).
+#   -Mode local : run my_flow.py offline here (--run-on local: no Prefect server, no MLflow) - fastest sanity check.
 #   -Mode serve : flow.serve() — a serve process on THIS machine runs my_flow.py (no work pool).
 #   -Mode pool  : trigger the real pipeline deployment; pipeline.py (on a work-pool worker) git-fetches
 #                 the repo and runs my_flow.py in a container - verifies the full code+data delivery path.
@@ -16,7 +16,7 @@ param(
     [string]$PrefectDeployment = "pipeline/pipelineflow-low",  # pool: registered deployment (work pool)
     [string]$Submitter = "local",  # who launched it - dashboard label (all modes)
     [string]$PrefectBlock = "",  # pool: Credentials block name for MinIO creds (e.g. yrocket)
-    [string]$GitCommit = "dryrun",  # git_commit_hash (all modes)
+    [string]$GitCommit = "dryrun",  # pool: git_commit_hash (local runs offline, ignores it)
     [string]$DataFolder = "",  # local/serve; default <script>\data
     [string]$GitRepo = "",  # pool: repo pipeline.py fetches
     [string]$MinioKey = "electric_power_consumption/v0/powerconsumption.csv"  # pool: full OBJECT key (not a prefix)
@@ -26,14 +26,15 @@ $ErrorActionPreference = "Stop"
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 if (-not $DataFolder) { $DataFolder = Join-Path $here "data" }
 
-# Server Connection — all modes talk to this Prefect server (env var, current PowerShell only).
+# Server Connection — serve/pool talk to this Prefect server (env var, current PowerShell only).
+# local mode runs offline: my_flow.py --run-on local blanks PREFECT_API_URL inside the process.
 $env:PREFECT_API_URL = $PrefectApiUrl
 $env:PYTHONPATH = $here     # so `from my_flow import my_flow` resolves (serve mode)
 
 switch ($Mode) {
     "local" {
-        # in-process: my_flow.py runs here, now; reports to the UI if the server is up.
-        python "$here\my_flow.py" --submitter $Submitter --git_commit_hash $GitCommit --data_folder $DataFolder
+        # offline in-process: --run-on local runs ephemerally with no Prefect server and no MLflow.
+        python "$here\my_flow.py" --submitter $Submitter --data_folder $DataFolder --run-on local
     }
     "serve" {
         # serve mode: this process serves the deployment and runs my_flow.py (Ctrl+C to stop).
