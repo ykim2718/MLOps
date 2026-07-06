@@ -1,6 +1,6 @@
 # AI/ML Workflow Automation
 
-<sub>rev. 91</sub>
+<sub>rev. 92</sub>
 
 Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환경입니다. 이 문서는 **전체 워크플로우의 인덱스 (개요)** 이고, 도구별 상세는 컴포넌트 문서로 잇습니다.
 
@@ -91,8 +91,8 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
                                         └──────────────────┘
 
   DOWNLOAD — in-container: pipeline.py
-    input: pipeline( minio_bucket="datasets", minio_key, member )
-    creds: Credentials.load(member).minio — Prefect Secret block (minio section)
+    input: pipeline( minio_bucket="datasets", minio_key, submitter, prefect_block )
+    creds: Credentials.load(prefect_block).minio — Prefect Secret block (minio section)
   ┌─────────────┐                       ┌──────────────────┐
   │ pipeline.py │─ download file ─────> │ MinIO minio:9000 │  → bucket/key → ./data/<key name>
   └─────────────┘                       └──────────────────┘
@@ -209,14 +209,15 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
 
   ```powershell
   # Trigger — pick the tier by deployment; heavy -> high, light -> low (params otherwise identical).
-  prefect deployment run "pipeline/pipelineflow-high" -p member=alice -p git_repo=https://github.com/<member>/<repo>.git -p git_commit_hash=a1b2c3d -p minio_key=SYDNEY/001.parquet
-  prefect deployment run "pipeline/pipelineflow-low"  -p member=alice -p git_repo=https://github.com/<member>/<repo>.git -p git_commit_hash=a1b2c3d -p minio_key=SYDNEY/001.parquet
+  prefect deployment run "pipeline/pipelineflow-high" -p submitter=alice -p prefect_block=yrocket -p git_repo=https://github.com/<member>/<repo>.git -p git_commit_hash=a1b2c3d -p minio_key=SYDNEY/001.parquet
+  prefect deployment run "pipeline/pipelineflow-low"  -p submitter=alice -p prefect_block=yrocket -p git_repo=https://github.com/<member>/<repo>.git -p git_commit_hash=a1b2c3d -p minio_key=SYDNEY/001.parquet
   ```
   ```python
   from prefect.deployments import run_deployment
 
   params = {
-      "member": "alice",
+      "submitter": "alice",
+      "prefect_block": "yrocket",
       "git_repo": "https://github.com/<member>/<repo>.git",
       "git_commit_hash": "a1b2c3d",
       "minio_key": "SYDNEY/001.parquet",
@@ -234,7 +235,7 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
 
   ```python
   # example/dry_run/my_flow.py — git-delivered ML payload, Prefect dry run.
-  __version__ = "0.0.13"
+  __version__ = "0.0.14"
 
   import argparse
   from pathlib import Path
@@ -338,15 +339,15 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
       return f"publish_artifacts.{stage}"
 
 
-  @flow(name="my_flow", flow_run_name="{member}@{git_commit_hash}", log_prints=True)
-  def my_flow(*, member: str = "local", data_folder: str = "./data", git_commit_hash: str = "dryrun",
+  @flow(name="my_flow", flow_run_name="{submitter}@{git_commit_hash}", log_prints=True)
+  def my_flow(*, submitter: str = "local", data_folder: str = "./data", git_commit_hash: str = "dryrun",
               git_repo: str = "") -> State:
       log = get_run_logger()
-      log.info(f"dry run: member={member} commit={git_commit_hash} "
+      log.info(f"dry run: submitter={submitter} commit={git_commit_hash} "
                f"data={data_folder} prepare={prepare_json} optuna={optuna_json}")
 
       reports = []
-      with mlflow.start_run(run_name=f"{member}@{git_commit_hash}"):  # real run -> MLflow server
+      with mlflow.start_run(run_name=f"{submitter}@{git_commit_hash}"):  # real run -> MLflow server
           s = train_prepare({}, data_folder, prepare_json)           # train branch
           s = train_featurize(s)
           s = train(s, optuna_json)
@@ -370,7 +371,7 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
 
   def parse_args() -> argparse.Namespace:
       p = argparse.ArgumentParser()
-      p.add_argument("--member", default="local")
+      p.add_argument("--submitter", default="local")
       p.add_argument("--data_folder", default="./data")
       p.add_argument("--git_commit_hash", default="dryrun")
       p.add_argument("--git_repo", default="")                   # accepted for completeness; unused here
@@ -379,7 +380,7 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
 
   if __name__ == "__main__":
       a = parse_args()
-      my_flow(member=a.member, data_folder=a.data_folder,
+      my_flow(submitter=a.submitter, data_folder=a.data_folder,
               git_commit_hash=a.git_commit_hash, git_repo=a.git_repo)
   ```
 

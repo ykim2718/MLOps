@@ -1,6 +1,6 @@
 # Prefect Pipeline Orchestration on Docker
 
-<sub>rev. 536</sub>
+<sub>rev. 540</sub>
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
@@ -578,7 +578,7 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
   from prefect.blocks.core import Block
   from prefect.blocks.fields import SecretDict
 
-  __version__ = "0.0.19"  # Semantic Versioning:  Version = Major.Minor.Patch
+  __version__ = "0.0.23"  # Semantic Versioning:  Version = Major.Minor.Patch
 
 
   class Credentials(Block):              # ONE block holds everything as nested dicts; values hidden
@@ -587,52 +587,64 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
       postgresql_optuna: SecretDict      # endpoint, username, password, database
 
 
-  # flow_run_name shows whose run it is (e.g. alice@a1b2c3d).
-  @flow(name="pipeline", flow_run_name="{member}@{git_commit_hash}")
-  def pipeline(git_repo: str, git_commit_hash: str, minio_key: str, minio_bucket: str = "datasets",
-               member: str = "", payload: str = "my_flow.py") -> None:
+  # flow_run_name shows who submitted the run (e.g. alice@a1b2c3d).
+  @flow(name="pipeline", flow_run_name="{submitter}@{git_commit_hash}")
+  def pipeline(*, submitter: str = "", payload: str = "my_flow.py", prefect_block: str = "",
+               git_repo: str, git_commit_hash: str, minio_key: str, minio_bucket: str = "datasets") -> None:
       log = get_run_logger()                         # writes to this run's UI logs
       base = Path(tempfile.mkdtemp(prefix="run-"))   # per-run temp dir (removed in finally)
       repo = base / "repo"                           # git database (.git + the fetched commit)
       script = base / "script"                       # worktree: team repo snapshot at the commit
       data = base / "data"                           # MinIO download target
       try:
-          # shallow-fetch just the one commit (no history), then expand it into a clean worktree.
+          # repo/: git database - init, add remote, shallow-fetch the one commit
           subprocess.run(["git", "init", repo], check=True)
           subprocess.run(["git", "-C", repo, "remote", "add", "origin", git_repo], check=True)
           subprocess.run(["git", "-C", repo, "fetch", "--depth", "1", "origin", git_commit_hash], check=True)
+          # script/: expand the fetched commit into a clean detached worktree
           subprocess.run(["git", "-C", repo, "worktree", "add", "--detach", script, git_commit_hash], check=True)
 
-          data.mkdir(parents=True, exist_ok=True)    # git didn't create data/
-          # this run's member -> their block, minio section (§6).
-          minio = Credentials.load(member).minio.get_secret_value()
+          data.mkdir(parents=True, exist_ok=True)  # data/: MinIO download target (git didn't create it)
+          # this run's prefect_block -> its minio credentials (§6).
+          minio = Credentials.load(prefect_block).minio.get_secret_value()
           s3 = boto3.client("s3", endpoint_url=minio["endpoint"],
                             aws_access_key_id=minio["access_key"],
                             aws_secret_access_key=minio["secret_key"])
-          # bucket/key -> data/ (latest; pick a version by its key path). e.g. data/Bennelong Point
-          local = data / Path(minio_key).name
-          s3.download_file(minio_bucket, minio_key, str(local))
+          # minio_key -> data/: download every object under the key (works for a single file or a whole prefix).
+          paginator = s3.get_paginator("list_objects_v2")
+          n = 0
+          for page in paginator.paginate(Bucket=minio_bucket, Prefix=minio_key):
+              for obj in page.get("Contents", []):
+                  key = obj["Key"]
+                  rel = key[len(minio_key):].lstrip("/") or Path(key).name  # path under the prefix
+                  dest = data / rel
+                  dest.parent.mkdir(parents=True, exist_ok=True)
+                  s3.download_file(minio_bucket, key, str(dest))
+                  n += 1
+          if n == 0:
+              raise FileNotFoundError(f"no objects under s3://{minio_bucket}/{minio_key}")
+          log.info(f"downloaded {n} object(s) from s3://{minio_bucket}/{minio_key} to {data}")
 
           # run the team's payload in script/; run identity passed as CLI args; output streams to this run's logs.
-          subprocess.run(["python", payload, "--member", member,
+          subprocess.run(["python", payload, "--submitter", submitter,
                           "--git_repo", git_repo, "--git_commit_hash", git_commit_hash,
                           "--data_folder", data], cwd=script, check=True)
       except subprocess.CalledProcessError as e:     # payload exited non-zero (crashed)
           # tag the failure with whose run + message; re-raise -> run marked Failed, logs kept in the UI.
-          log.error(f"payload {payload} crashed (exit {e.returncode}) for {member}@{git_commit_hash}: {e}")
+          log.error(f"payload {payload} crashed (exit {e.returncode}) for {submitter}@{git_commit_hash}: {e}")
           raise
       finally:
           shutil.rmtree(base, ignore_errors=True)    # one cleanup removes repo/ + script/ + data/
   ```
 
-  - **자유로운 코드** — `payload` 로 팀원이 자기 스크립트를 지정하므로 코드를 정해진 틀에 맞출 필요가 없습니다. 입력은 CLI 인자 (`--git_repo`·`--git_commit_hash`·`--member`·`--data_folder`) 로 받으므로, 팀원 스크립트는 `argparse` 로 그 값만 읽으면 됩니다.
+  - **자유로운 코드** — `payload` 로 팀원이 자기 스크립트를 지정하므로 코드를 정해진 틀에 맞출 필요가 없습니다. 입력은 CLI 인자 (`--git_repo`·`--git_commit_hash`·`--submitter`·`--data_folder`) 로 받으므로, 팀원 스크립트는 `argparse` 로 그 값만 읽으면 됩니다.
   - **데이터 이력** — `minio_bucket`·`minio_key` 가 **flow 파라미터** 라서 Prefect 가 run 마다 입력값을 `prefect` DB 에 자동 저장합니다 (어느 버킷·객체를 썼는지 lineage 로 남습니다).
-  - **crash 확인** — payload 가 0 이 아닌 코드로 끝나면 `subprocess.run(check=True)` 가 `CalledProcessError` 를 던지고, `pipeline` 가 `member@commit` 을 단 에러를 run 로그에 남긴 뒤 다시 raise 해 run 이 **Failed** 로 표시됩니다. payload 의 stdout·stderr 는 실행 중 이 run 의 로그로 흘러 들어가므로, 팀원은 자기 이름이 붙은 run (`alice@a1b2c3d`) 의 **Logs** 에서 crash 원인을 봅니다. payload 가 `@task` 를 쓰면 자기 flow run ([§8](#8-prefect-ui)) 에서 **어느 단계** 가 깨졌는지까지 보입니다.
+  - **crash 확인** — payload 가 0 이 아닌 코드로 끝나면 `subprocess.run(check=True)` 가 `CalledProcessError` 를 던지고, `pipeline` 가 `submitter@commit` 을 단 에러를 run 로그에 남긴 뒤 다시 raise 해 run 이 **Failed** 로 표시됩니다. payload 의 stdout·stderr 는 실행 중 이 run 의 로그로 흘러 들어가므로, 팀원은 자기 이름이 붙은 run (`alice@a1b2c3d`) 의 **Logs** 에서 crash 원인을 봅니다. payload 가 `@task` 를 쓰면 자기 flow run ([§8](#8-prefect-ui)) 에서 **어느 단계** 가 깨졌는지까지 보입니다.
   - **이력 자동 저장** — `@flow` 진입 시 Prefect 가 run 의 상태·로그·파라미터를 자동 기록합니다. 지표·모델은 팀원 코드가 MLflow 로 로깅하면 함께 남습니다 ([Appendix I](#appendix-i-prefect-task)).
 
-  [§5.2](#52-deployment) 의 deployment 가 entrypoint 를 **`pipeline.py:pipeline`** 로 가리킵니다. 이 문자열은 server 의 deployment 레코드 (`prefect` DB) 에 저장되고, dispatcher 가 띄운 컨테이너 안에서 Prefect 런타임이 이미지 작업 디렉터리 (`/work`, `Dockerfile.pipeline_flow` 가 `pipeline.py` 를 COPY 한 곳) 기준으로 `pipeline.py` 를 import 해 콜론 뒤 **`@flow` 함수 `pipeline`** 을 run 파라미터 (`git_repo`·`git_commit_hash`·`minio_key`·`minio_bucket`·`member`·`payload`) 와 함께 호출합니다. 그래서 deployment entrypoint 가 곧 이 `pipeline.py` 입니다.
+  [§5.2](#52-deployment) 의 deployment 가 entrypoint 를 **`pipeline.py:pipeline`** 로 가리킵니다. 이 문자열은 server 의 deployment 레코드 (`prefect` DB) 에 저장되고, dispatcher 가 띄운 컨테이너 안에서 Prefect 런타임이 이미지 작업 디렉터리 (`/work`, `Dockerfile.pipeline_flow` 가 `pipeline.py` 를 COPY 한 곳) 기준으로 `pipeline.py` 를 import 해 콜론 뒤 **`@flow` 함수 `pipeline`** 을 run 파라미터 (`git_repo`·`git_commit_hash`·`minio_key`·`minio_bucket`·`submitter`·`prefect_block`·`payload`) 와 함께 호출합니다. 그래서 deployment entrypoint 가 곧 이 `pipeline.py` 입니다.
 
-  `pipeline` 함수에 전달한 run 파라미터 **값** 은 **trigger 할 때** 지정합니다 — trigger 주체는 보통 **팀원** (또는 스케줄·automation) 입니다. 팀원이 자기 머신·CI 에서 CLI `prefect deployment run "pipeline/pipelineflow-high" -p git_repo=… -p git_commit_hash=… -p minio_key=… -p member=…` 을 실행하거나 (CLI 는 [Appendix B](#appendix-b-prefect-cli)), server UI 의 Run 폼, 스케줄·automation, 또는 `run_deployment(name, parameters={…})` 로 ([§7.2](#72-python-sdk)) trigger 합니다.
+  `pipeline` 함수에 전달한 run 파라미터 **값** 은 **trigger 할 때** 지정합니다 — trigger 주체는 보통 **팀원** (또는 스케줄·automation) 입니다. 팀원이 자기 머신·CI 에서 CLI `prefect deployment run "pipeline/pipelineflow-high" -p git_repo=… -p git_commit_hash=… -p minio_key=… -p submitter=… -p prefect_block=…` 을 실행하거나 (CLI 는 [Appendix B](#appendix-b-prefect-cli)), server UI 의 Run 폼, 스케줄·automation, 또는 `run_deployment(name, parameters={…})` 로 ([§7.2](#72-python-sdk)) trigger 합니다.
 
   `pipeline.py` 가 **`pipeline_flow` 컨테이너 안에서** run 마다 만드는 폴더 구조입니다 (끝나면 통째로 삭제 — 컨테이너 자체가 일시적이라 함께 사라집니다).
 
@@ -758,7 +770,8 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
 
   ```powershell
   prefect deployment run "pipeline/pipelineflow-high" `
-    -p git_repo=https://github.com/team/repo.git -p git_commit_hash=a1b2c3d -p minio_key="SYDNEY/Bennelong Point" -p member=alice
+    -p git_repo=https://github.com/team/repo.git -p git_commit_hash=a1b2c3d `
+    -p minio_key="SYDNEY/Bennelong Point" -p submitter=alice -p prefect_block=yrocket
   ```
 
   - **파라미터** — `-p key=value` 로 하나씩 **문자열** 로 줍니다. server 가 `pipeline` 시그니처 스키마로 타입을 변환·검증합니다.

@@ -1,4 +1,4 @@
-# __version__ = "0.0.3"
+# __version__ = "0.0.9"
 
 # example/dry_run/my_flow_trigger.ps1 — verify the dry-run flow (my_flow.py) at three stages.
 #   -Mode local : run my_flow.py in-process here (fastest sanity check).
@@ -8,17 +8,18 @@
 #
 #   .\my_flow_trigger.ps1
 #   .\my_flow_trigger.ps1 -Mode serve
-#   .\my_flow_trigger.ps1 -Mode pool -GitRepo https://github.com/<u>/<repo>.git -Commit <sha> -MinioKey <key>
+#   .\my_flow_trigger.ps1 -Mode pool -PrefectBlock <block> -GitRepo https://github.com/<u>/<repo>.git -GitCommit <sha>
 param(
     [ValidateSet("local", "serve", "pool")]
-    [string]$Mode       = "local",
-    [string]$ApiUrl     = "http://localhost:4200/api",
-    [string]$Member     = "local",
-    [string]$Commit     = "dryrun",                    # git_commit_hash (all modes)
-    [string]$DataFolder = "",                          # local/serve; default <script>\data
-    [string]$GitRepo    = "",                          # pool: repo pipeline.py fetches
-    [string]$MinioKey   = "electric_power_consumption/v0",  # pool: dataset key pipeline.py downloads
-    [string]$Deployment = "pipeline/pipelineflow-low"  # pool: registered deployment (work pool)
+    [string]$Mode = "local",
+    [string]$PrefectApiUrl = "http://localhost:4200/api",
+    [string]$PrefectDeployment = "pipeline/pipelineflow-low",  # pool: registered deployment (work pool)
+    [string]$Submitter = "local",  # who launched it - dashboard label (all modes)
+    [string]$PrefectBlock = "",  # pool: Credentials block name for MinIO creds (e.g. yrocket)
+    [string]$GitCommit = "dryrun",  # git_commit_hash (all modes)
+    [string]$DataFolder = "",  # local/serve; default <script>\data
+    [string]$GitRepo = "",  # pool: repo pipeline.py fetches
+    [string]$MinioKey = "electric_power_consumption/v0/powerconsumption.csv"  # pool: full OBJECT key (not a prefix)
 )
 
 $ErrorActionPreference = "Stop"
@@ -26,13 +27,13 @@ $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 if (-not $DataFolder) { $DataFolder = Join-Path $here "data" }
 
 # Server Connection — all modes talk to this Prefect server (env var, current PowerShell only).
-$env:PREFECT_API_URL = $ApiUrl
+$env:PREFECT_API_URL = $PrefectApiUrl
 $env:PYTHONPATH = $here     # so `from my_flow import my_flow` resolves (serve mode)
 
 switch ($Mode) {
     "local" {
         # in-process: my_flow.py runs here, now; reports to the UI if the server is up.
-        python "$here\my_flow.py" --member $Member --git_commit_hash $Commit --data_folder $DataFolder
+        python "$here\my_flow.py" --submitter $Submitter --git_commit_hash $GitCommit --data_folder $DataFolder
     }
     "serve" {
         # serve mode: this process serves the deployment and runs my_flow.py (Ctrl+C to stop).
@@ -40,13 +41,18 @@ switch ($Mode) {
         python -c "from my_flow import my_flow; my_flow.serve(name='dry-run')"
     }
     "pool" {
-        # work-pool mode: pipeline.py (on a worker) git-fetches <GitRepo>@<Commit> and runs my_flow.py,
+        # work-pool mode: pipeline.py (on a worker) git-fetches <GitRepo>@<GitCommit> and runs my_flow.py,
         # downloading <MinioKey> to ./data - verifies the real code+data delivery path end to end.
+        # submitter = dashboard label; prefect_block = Credentials block pipeline.py loads for MinIO creds.
+        # -MinioKey is a single OBJECT key (pipeline.py downloads one file), not a catalog prefix.
         if (-not $GitRepo) {
-            throw "pool mode needs -GitRepo (pipeline.py git-fetches that repo at -Commit and runs my_flow.py)."
+            throw "pool mode needs -GitRepo (pipeline.py git-fetches that repo at -GitCommit and runs my_flow.py)."
         }
-        prefect deployment run "$Deployment" `
-            -p member=$Member -p git_repo=$GitRepo `
-            -p git_commit_hash=$Commit -p minio_key=$MinioKey
+        if (-not $PrefectBlock) {
+            throw "pool mode needs -PrefectBlock (Credentials block name pipeline.py loads, e.g. yrocket)."
+        }
+        prefect deployment run "$PrefectDeployment" `
+            -p submitter=$Submitter -p prefect_block=$PrefectBlock -p git_repo=$GitRepo `
+            -p git_commit_hash=$GitCommit -p minio_key=$MinioKey
     }
 }

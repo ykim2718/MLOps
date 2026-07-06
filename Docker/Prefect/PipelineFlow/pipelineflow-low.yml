@@ -1,4 +1,5 @@
 # pipelineflow-low.yml - low-tier deployment definition
+# __version__ = "0.0.2"    # Semantic Versioning : Major.Minor.Patch
 deployments:
   - name: pipelineflow-low
     entrypoint: pipeline.py:pipeline       # <file>:<@flow function>
@@ -8,3 +9,6 @@ deployments:
         image: pipeline-flow:latest
     parameters:
       payload: my_flow.py
+    pull:                                    # override Prefect's auto-injected /opt/prefect
+      - prefect.deployments.steps.set_working_directory:
+          directory: /work                   # pipeline.py lives at /work in pipeline-flow:latest (WORKDIR)
