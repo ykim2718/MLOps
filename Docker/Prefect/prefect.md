@@ -1,6 +1,6 @@
 # Prefect Pipeline Orchestration on Docker
 
-<sub>rev. 542</sub>
+<sub>rev. 544</sub>
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
@@ -528,7 +528,7 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
 
   #### Execution Command
 
-  `prefect deploy` 는 yaml 정의를 server 에 등록합니다.
+  `prefect deploy` 는 yaml 정의를 server 에 등록합니다. 실행 폴더에는 `pipeline.py` 와 `pipelineflow-high.yml` 가 있어야 합니다.
 
   ```powershell
   cd PipelineFlow                                      # the folder with pipeline.py and pipelineflow-high.yml
@@ -540,9 +540,9 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
   - `prefect CLI --name` — 등록할 deployment.
   - `prefect CLI --no-prompt` — 대화형 질문을 끄고 yaml 정의대로 등록합니다 (이미지 빌드·스케줄 프롬프트 안 뜸).
 
-  `prefect` 가 깔린 곳에서 `PREFECT_API_URL` 을 server 로 두고 돌립니다. `prefect deploy` 는 DB 에 직접 쓰지 않고 server API 로 등록을 보냅니다 (server 가 Postgres `prefect` DB 에 저장). 등급마다 `pipelineflow-high`·`pipelineflow-low` yaml 로 두 벌 등록합니다.
+  `prefect deploy` 는 DB 에 직접 쓰지 않고 server API 로 등록을 보냅니다 (server 가 Postgres `prefect` DB 에 저장). 등급마다 `pipelineflow-high`·`pipelineflow-low` yaml 로 두 벌 등록합니다.
 
-  > **중요** — `prefect deploy` 는 entrypoint 인 `pipeline.py` 의 `pipeline` 함수 **시그니처를 introspect** 해 파라미터 스키마를 server DB (`prefect`) 에 저장합니다. 그러므로 `pipeline` 함수가 바뀌면 이미지 `docker build` 와 함께 **`prefect deploy` 도 반드시** 다시 해야 합니다 (그래야 server 의 파라미터 스키마·UI Run 폼·trigger 검증이 새 시그니처와 맞습니다).
+  > **중요** — `prefect deploy` 는 entrypoint 인 `pipeline.py` 의 `pipeline` 함수 **시그니처를 introspect** 해 파라미터 스키마를 server DB (`prefect`) 에 저장합니다. 따라서 `prefect deploy` 는 `pipeline.py` 가 있는 폴더에서 실행하여야 하며, `pipeline` 함수가 바뀌면 이미지 `docker build` 와 함께 **`prefect deploy` 도 반드시** 다시 해야 합니다 (그래야 server 의 파라미터 스키마·UI Run 폼·trigger 검증이 새 시그니처와 맞습니다).
 
   #### Verification
 
