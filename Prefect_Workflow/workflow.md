@@ -31,6 +31,7 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
 |-----------|---------|------|-----------|-----------|
 | **Prefect** | `prefect_server` · `prefect_dispatcher` | 오케스트레이션 (파이프라인 실행/스케줄링). server 는 job 수집·UI, dispatcher (`prefect_dispatcher`) 는 job 마다 Pipeline Flow 컨테이너를 띄우며, 코드는 그 컨테이너가 실행합니다. | http://localhost:4200 | [prefect.md](../Docker/Prefect/prefect.md) |
 | **MinIO** | `minio` | 대용량 데이터/모델/아티팩트 저장 (S3 호환). 버킷은 `datasets`·`models`·`mlflow` 입니다. | http://localhost:9001 | [minio.md](../Docker/MinIO/minio.md) |
+| **Git** | git | 코드 배송·버전 고정. Pipeline Flow 컨테이너가 `git_repo`·`git_commit_hash` 을 shallow `git fetch --depth 1` + `git worktree` 로 펼쳐 실행하고, 공통 코드는 `git subtree` (nested repo) 로 심습니다. | GitHub | - |
 | **MLflow** | `mlflow` | 실험 (params·metrics) 추적, 모델 레지스트리. backend=`postgres`, artifact=`minio`. | http://localhost:5000 | [mlflow.md](../Docker/MLflow/mlflow.md) |
 | **PostgreSQL** | `postgres` · <br>`pgadmin` | 모든 도구의 메타데이터 DB. `prefect`·`mlflow`·`optuna`·`catalog` 4개 논리 DB 를 운영합니다. | http://localhost:5050 (pgAdmin)<br>localhost:5432 (DB) | [postgresql.md](../Docker/PostgreSQL/postgresql.md) |
 | **Optuna** | python script | 하이퍼파라미터 튜닝 (trial 탐색). study storage 로 `postgres` 의 `optuna` DB 를 씁니다. | http://localhost:8080 (필요 시 기동) | [Appendix C](#appendix-c-optuna) |

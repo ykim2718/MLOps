@@ -1,6 +1,6 @@
 # Prefect Pipeline Orchestration on Docker
 
-<sub>rev. 540</sub>
+<sub>rev. 541</sub>
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
@@ -438,7 +438,7 @@ dispatcher 는 **`docker` work pool** 을 polling 해 job 마다 `pipeline_flow`
 
   worker 가 뜨는 **그 순간** server 에 자기를 알리며 (heartbeat 시작) 해당 work pool 에 **자동 등록**됩니다 — **polling 시작 = 등록** 이라 별도 절차가 없습니다. heartbeat 가 끊기면 잠시 뒤 **OFFLINE** 으로 바뀝니다 (dispatcher 등록은 deployment 등록과 별개).
 
-  > **보안 주의** — 도커 소켓 마운트는 dispatcher 에 호스트 도커 전체 제어권 (사실상 root) 을 줍니다. 신뢰된 내부망·스터디 용도로 한정하고, 더 강한 격리는 Kubernetes work pool 을 고려합니다 ([Appendix H](#appendix-h-orchestrator-benchmarking)).
+  > **보안 주의** — 도커 소켓 마운트는 dispatcher 에 호스트 도커 전체 제어권 (사실상 root) 을 줍니다. 신뢰된 내부망·스터디 용도로 한정하고, 더 강한 격리는 Kubernetes work pool 을 고려합니다 ([Appendix I](#appendix-i-orchestrator-benchmarking)).
 
 ### 4.3 Scaling
 
@@ -627,7 +627,6 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
 
           # run the team's payload in script/; run identity passed as CLI args; output streams to this run's logs.
           subprocess.run(["python", payload, "--submitter", submitter,
-                          "--git_repo", git_repo, "--git_commit_hash", git_commit_hash,
                           "--data_folder", data], cwd=script, check=True)
       except subprocess.CalledProcessError as e:     # payload exited non-zero (crashed)
           # tag the failure with whose run + message; re-raise -> run marked Failed, logs kept in the UI.
@@ -637,10 +636,10 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
           shutil.rmtree(base, ignore_errors=True)    # one cleanup removes repo/ + script/ + data/
   ```
 
-  - **자유로운 코드** — `payload` 로 팀원이 자기 스크립트를 지정하므로 코드를 정해진 틀에 맞출 필요가 없습니다. 입력은 CLI 인자 (`--git_repo`·`--git_commit_hash`·`--submitter`·`--data_folder`) 로 받으므로, 팀원 스크립트는 `argparse` 로 그 값만 읽으면 됩니다.
+  - **자유로운 코드** — `payload` 로 팀원이 자기 스크립트를 지정하므로 코드를 정해진 틀에 맞출 필요가 없습니다. 입력은 CLI 인자 (`--submitter`·`--data_folder`) 로 받으므로, 팀원 스크립트는 `argparse` 로 그 값만 읽으면 됩니다. (payload 는 이미 체크아웃된 `script/` 안에서 돌므로 git 정보는 넘기지 않습니다.)
   - **데이터 이력** — `minio_bucket`·`minio_key` 가 **flow 파라미터** 라서 Prefect 가 run 마다 입력값을 `prefect` DB 에 자동 저장합니다 (어느 버킷·객체를 썼는지 lineage 로 남습니다).
   - **crash 확인** — payload 가 0 이 아닌 코드로 끝나면 `subprocess.run(check=True)` 가 `CalledProcessError` 를 던지고, `pipeline` 가 `submitter@commit` 을 단 에러를 run 로그에 남긴 뒤 다시 raise 해 run 이 **Failed** 로 표시됩니다. payload 의 stdout·stderr 는 실행 중 이 run 의 로그로 흘러 들어가므로, 팀원은 자기 이름이 붙은 run (`alice@a1b2c3d`) 의 **Logs** 에서 crash 원인을 봅니다. payload 가 `@task` 를 쓰면 자기 flow run ([§8](#8-prefect-ui)) 에서 **어느 단계** 가 깨졌는지까지 보입니다.
-  - **이력 자동 저장** — `@flow` 진입 시 Prefect 가 run 의 상태·로그·파라미터를 자동 기록합니다. 지표·모델은 팀원 코드가 MLflow 로 로깅하면 함께 남습니다 ([Appendix I](#appendix-i-prefect-task)).
+  - **이력 자동 저장** — `@flow` 진입 시 Prefect 가 run 의 상태·로그·파라미터를 자동 기록합니다. 지표·모델은 팀원 코드가 MLflow 로 로깅하면 함께 남습니다 ([Appendix J](#appendix-j-prefect-task)).
 
   [§5.2](#52-deployment) 의 deployment 가 entrypoint 를 **`pipeline.py:pipeline`** 로 가리킵니다. 이 문자열은 server 의 deployment 레코드 (`prefect` DB) 에 저장되고, dispatcher 가 띄운 컨테이너 안에서 Prefect 런타임이 이미지 작업 디렉터리 (`/work`, `Dockerfile.pipeline_flow` 가 `pipeline.py` 를 COPY 한 곳) 기준으로 `pipeline.py` 를 import 해 콜론 뒤 **`@flow` 함수 `pipeline`** 을 run 파라미터 (`git_repo`·`git_commit_hash`·`minio_key`·`minio_bucket`·`submitter`·`prefect_block`·`payload`) 와 함께 호출합니다. 그래서 deployment entrypoint 가 곧 이 `pipeline.py` 입니다.
 
@@ -655,7 +654,7 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
   │  ├─ my_flow.py                 # payload — my entry (run: python my_flow.py --data_folder ../data ...)
   │  └─ ...                        # the rest of my repo at <git_commit_hash>
   └─ data/                         # MinIO download target (bucket/key → here)
-     └─ <object>                   # e.g. Bennelong Point
+     └─ <object>                   # files or folders/files
   ```
 
   - **팀원별 repo** — `git_repo` 가 **flow 파라미터** 라 deployment 마다 다른 repo 를 기본값으로 등록할 수 있습니다. 팀원은 각자 repo·커밋을 쓰고, run 마다 사설 `script/` 에 펼쳐져 서로 간섭하지 않습니다. Prefect 가 `git_repo`·`git_commit_hash` 을 run 파라미터로 자동 기록해 재현·lineage 가 남습니다.
@@ -703,9 +702,23 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
 
   ```json
   {
-    "minio": {"endpoint": "http://minio:9000", "access_key": "<MINIO_ACCESS_KEY>", "secret_key": "<MINIO_SECRET_KEY>"},
-    "postgresql_catalog": {"endpoint": "postgres:5432", "username": "catalog_user", "password": "<CATALOG_DB_PASSWORD>", "database": "catalog"},
-    "postgresql_optuna": {"endpoint": "postgres:5432", "username": "optuna_user", "password": "<OPTUNA_DB_PASSWORD>", "database": "optuna"}
+    "minio": {
+      "endpoint": "http://minio:9000",
+      "access_key": "<MINIO_ACCESS_KEY>",
+      "secret_key": "<MINIO_SECRET_KEY>"
+    },
+    "postgresql_catalog": {
+      "endpoint": "postgres:5432",
+      "username": "catalog_user",
+      "password": "<CATALOG_DB_PASSWORD>",
+      "database": "catalog"
+    },
+    "postgresql_optuna": {
+      "endpoint": "postgres:5432",
+      "username": "optuna_user",
+      "password": "<OPTUNA_DB_PASSWORD>",
+      "database": "optuna"
+    }
   }
   ```
 
@@ -816,8 +829,8 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
 server 대시보드 (`http://<Host IP>:4200`) 에서 deployment·run·task 가 어떻게 보이는지입니다.
 
 - **Deployments** — `<flow_name>/<deployment_name>` 로 나열됩니다 (예: `pipeline/pipelineflow-high`·`pipeline/pipelineflow-low`). flow 이름은 `@flow(name="pipeline")`, deployment 이름은 yaml 의 `name` 입니다.
-- **Flow Runs** — trigger 된 run 이 `flow_run_name` 으로 나열됩니다. `member` 가 들어가 같은 deployment 아래에서 `alice@a1b2c3d` 처럼 **누구의 run 인지** 구분됩니다 ([§5.3](#53-pipelinepy) 의 `flow_run_name`). `pipeline.py` 가 `member`·`git_commit_hash` 을 payload 에 CLI 인자로 넘기므로 팀 flow run 도 같은 이름을 씁니다.
-- **Tasks** — 팀 payload 가 단계 (dp·fe·train·test) 를 **`@task`** 로 감싸고 `@flow` 로 묶으면, 컨테이너 env 의 `PREFECT_API_URL` 덕분에 그 subprocess 가 **자기 flow run 과 task** 를 보고해 단계가 보입니다 (orchestrator run 과 **별개 flow run**, subprocess 라 격리 유지 — [Appendix I](#appendix-i-prefect-task)).
+- **Flow Runs** — trigger 된 run 이 `flow_run_name` 으로 나열됩니다. `member` 가 들어가 같은 deployment 아래에서 `alice@a1b2c3d` 처럼 **누구의 run 인지** 구분됩니다 ([§5.3](#53-pipelinepy) 의 `flow_run_name`). `pipeline.py` 는 payload 에 실행자 이름 (`submitter`) 만 넘기고 git 정보는 넘기지 않으므로, 팀 payload 의 flow run 은 실행자 이름 (예: `alice`) 으로 나열됩니다 (orchestrator run 은 `alice@a1b2c3d`).
+- **Tasks** — 팀 payload 가 단계 (dp·fe·train·test) 를 **`@task`** 로 감싸고 `@flow` 로 묶으면, 컨테이너 env 의 `PREFECT_API_URL` 덕분에 그 subprocess 가 **자기 flow run 과 task** 를 보고해 단계가 보입니다 (orchestrator run 과 **별개 flow run**, subprocess 라 격리 유지 — [Appendix J](#appendix-j-prefect-task)).
 - **Parameters · State · Logs** — run 마다 입력 파라미터 (`git_repo`·`git_commit_hash`·`minio_key`·`member`)·상태·로그가 자동 기록되어 (UI 의 Flow Run → Parameters), 같은 파라미터로 재실행 (재현) 할 수 있습니다.
 
 job 하나가 trigger 되면 대시보드에 다음처럼 보입니다.
@@ -1161,7 +1174,95 @@ if __name__ == "__main__":
             sys.exit(1)
 ```
 
-## Appendix H. Orchestrator Benchmarking
+## Appendix H. requirements.txt
+
+Pipeline Flow 이미지에 설치하는 파이썬 의존성 목록입니다 ([§5.1](#51-image)). 팀 소스는 이미지에 굽지 않고 런타임에 git worktree 로 받으므로 여기에는 라이브러리만 고정합니다 (base: `python:3.11.15`). 카테고리로 나눠 두고 버전은 `numpy` 기준에 맞춥니다.
+
+```text
+# rev. 12
+# Python dependencies for the shared team Pipeline Flow image (base: python:3.11.15, see Dockerfile).
+# The team source is NOT baked; it is fetched into a git worktree at runtime, so only libraries are pinned here.
+
+# WorkFlow
+prefect>=3,<4                  # Prefect runtime (flow execution)
+pydantic>=2,<3                 # Prefect blocks are pydantic models (SecretDict in pipeline.py); pinned to Prefect 3
+boto3==1.34.131                # Object storage (MinIO, S3-compatible) access
+psycopg2-binary==2.9.9         # Catalog DB (PostgreSQL) access
+mlflow==2.14.1                 # Experiment tracking / model registry
+
+# --- Core ML / DL: model training / inference frameworks ---
+tensorflow==2.17.0             # Deep learning framework
+tensorflow-datasets==4.9.9     # Standard dataset loader
+keras==3.12.1                  # High-level neural network API
+torch==2.9.1                   # Deep learning framework (PyTorch)
+scikit-learn==1.4.2            # Classical machine learning algorithms
+lightgbm==4.6.0                # Gradient boosting (LightGBM)
+catboost==1.2.10               # Gradient boosting (CatBoost)
+imbalanced-learn==0.14.1       # Imbalanced-data resampling
+statsmodels==0.14.6            # Statistical models / tests
+prophet==1.1.5                 # Time-series forecasting
+bayesian-optimization==1.4.3   # Bayesian hyperparameter optimization
+keract==4.5.1                  # Neural network activation / gradient visualization
+optuna==4.8.0                  # Hyperparameter tuning
+
+# --- Numeric / data: array & tabular ops and parallel processing ---
+numpy==1.26.4                  # Numeric arrays (baseline version for all dependencies)
+scipy==1.13.1                  # Scientific computing
+pandas==2.0.3                  # Tabular data processing
+numba==0.61.2                  # JIT compilation acceleration
+numpy-ext==0.9.9               # numpy helper functions
+dask==2025.12.0                # Parallel / distributed computation
+h5py==3.15.1                   # HDF5 I/O
+
+# --- Time series: pattern / distance / event detection ---
+stumpy==1.14.1                 # Matrix Profile-based motif discovery
+pyts==0.13.0                   # Time-series classification / transformation
+dtaidistance==2.4.0            # DTW distance (C extension)
+fastdtw==0.3.4                 # Approximate DTW
+ucrdtw==0.201                  # UCR DTW (C extension)
+peakdetect==1.2                # Peak detection
+
+# --- Financial domain data: quotes / filings / calendars / technical indicators ---
+dart-fss==0.4.10               # DART electronic disclosure collection
+pandas-datareader==0.10.0      # External financial data loader
+pandas-market-calendars==4.4.0 # Exchange trading calendars
+ta==0.11.0                     # Technical analysis indicators (pure Python)
+TA-Lib==0.4.29                 # Technical analysis indicators (requires C library)
+
+# --- Visualization: graphs / plots ---
+matplotlib==3.8.4              # Basic plotting
+seaborn==0.11.2                # Statistical visualization
+plotly==6.6.0                  # Interactive charts
+mplcursors==0.6                # matplotlib cursors / tooltips
+mpld3==0.5.11                  # matplotlib -> D3 web output
+pydot==2.0.0                   # Graph (DOT) rendering
+cycler==0.12.1                 # Plot style cycling
+
+# --- File / IO / utils: storage / documents / crypto / general utils ---
+pymongo==4.6.3                 # MongoDB driver
+openpyxl==3.1.5                # Excel (xlsx) read / write
+PyMuPDF==1.27.2.3              # PDF processing
+Pillow==12.2.0                 # Image processing
+pycryptodome==3.20.0           # Cryptographic algorithms
+bcrypt==4.2.0                  # Password hashing
+xmltodict==0.12.0              # XML <-> dict conversion
+deepdiff==7.0.1                # Object diffing
+semver==3.0.4                  # Semantic version handling
+lockfile==0.12.2               # File locking
+click==8.4.2                   # CLI building
+rich==15.0.0                   # Terminal formatted output
+tqdm==4.68.3                   # Progress bars
+psutil==7.2.2                  # System / process info
+packaging==24.2                # Version / package metadata handling
+python-dateutil==2.9.0.post0   # Date parsing / arithmetic
+pytz==2024.2                   # Timezone data
+tzlocal==5.4.3                 # Local timezone detection
+typing-extensions==4.15.0      # Type hint backport
+protobuf==4.25.9               # Serialization (TensorFlow dependency)
+pyarrow==15.0.2                # parquet I/O; mlflow 2.14.1 requires pyarrow<16
+```
+
+## Appendix I. Orchestrator Benchmarking
 
 ### Prefect vs Dagster vs Airflow
 
@@ -1213,7 +1314,7 @@ if __name__ == "__main__":
 
   > granularity 는 **Workflow → Run/Job → Task → Step** 순으로 좁아지고, 실행을 감싸는 껍데기는 **컨테이너 (단일 호스트) / pod (클러스터)** 입니다. 세 단어를 하나로 통일하기보다 이 계층 안에서 구분해 쓰는 것이 업계 표준에 맞습니다.
 
-## Appendix I. Prefect @task
+## Appendix J. Prefect @task
 
 `@task` 를 쓰지 않아도 이력 관리와 재현 (reproducibility) 은 완전히 됩니다. Prefect 에서 실행 흐름을 묶는 핵심 단위는 `@task` 가 아니라 **`@flow`** 이기 때문입니다. `@flow` 데코레이터만 붙이면 그 안의 코드가 일반 함수든 클래스든 **실행 이력과 입력 파라미터가 Prefect Server 에 기록**됩니다.
 

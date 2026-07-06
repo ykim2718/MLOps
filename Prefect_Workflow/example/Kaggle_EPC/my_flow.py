@@ -3,7 +3,7 @@
 Predicts a Tetouan-city power-consumption zone (a continuous / regression target) from
 weather + calendar features with LightGBM. Run as the team payload that pipeline.py drives:
 
-    python my_flow.py --git_repo <r> --git_commit_hash <c> --member <m> --data_folder ./data --run-on server
+    python my_flow.py --member <m> --data_folder ./data --run-on server
 
 Pipeline (a small DAG): load_config -> train_prepare -> train_featurize -> train ->
 (validate || test); parity_plot AND publish_artifacts both fire right after each of
@@ -42,7 +42,7 @@ except Exception:
     Credentials = None
 
 
-__version__ = "0.0.14"
+__version__ = "0.0.15"
 
 HERE: Path = Path(__file__).resolve().parent
 OPTUNA_JSON: Path = HERE / "optuna.json"
@@ -563,17 +563,17 @@ def publish_artifacts(stage: str, metrics: dict, run_label: str,
         get_run_logger().warning(f"artifact publish skipped ({stage}): {e}")
 
 
-@flow(name="epc_power", flow_run_name="{member}@{git_commit_hash}", log_prints=True,
+@flow(name="epc_power", flow_run_name="{member}", log_prints=True,
       task_runner=ThreadPoolTaskRunner(max_workers=4))
-def my_flow(data_dir: Union[str, Path], member: str = "local", git_commit_hash: str = "dryrun",
-            git_repo: str = "", sample_rows: Optional[int] = None) -> dict:
+def my_flow(data_dir: Union[str, Path], member: str = "local",
+            sample_rows: Optional[int] = None) -> dict:
     """Electric Power Consumption regression: train_prepare -> train_featurize -> train ->
     (validate || test), parity after each. `sample_rows` (when given) overrides the config -
     a fast smoke test on the most-recent N rows; leave it None to use optuna.json."""
     log = get_run_logger()
     work = str(HERE / "work")
     Path(work).mkdir(parents=True, exist_ok=True)
-    log.info(f"start: member={member} commit={git_commit_hash} repo={git_repo or '-'} data={data_dir}")
+    log.info(f"start: member={member} data={data_dir}")
 
     cfg = load_config_json(OPTUNA_JSON, PREPARE_JSON)        # read fresh each run
     if sample_rows is not None:                             # CLI override for a fast smoke test
@@ -585,7 +585,7 @@ def my_flow(data_dir: Union[str, Path], member: str = "local", git_commit_hash: 
     log.info(f"optuna storage [{src}]: {_mask(storage)}")
 
     mlflow_uri = cfg.get("mlflow_uri") or "http://mlflow:5000"   # compose service; localhost:5000 on host
-    run_name = f"{member}@{git_commit_hash}"
+    run_name = f"{member}"
     log.info(f"mlflow uri: {mlflow_uri}")
 
     prep = train_prepare.submit(data_dir, work, cfg)
@@ -626,7 +626,7 @@ def my_flow(data_dir: Union[str, Path], member: str = "local", git_commit_hash: 
     for f in (p_train, p_val, p_test, a_train, a_val, a_test):
         f.result()
 
-    summary = {"member": member, "git_commit_hash": git_commit_hash, "target": target,
+    summary = {"member": member, "target": target,
                "n_train": prep_meta["n_train"], "n_val": prep_meta["n_val"],
                "n_features": prep_meta["n_features"],
                "best_cv_rmse": train_meta["best_cv_rmse"],
@@ -646,8 +646,6 @@ def parse_args(argv: list = None) -> argparse.Namespace:
     p = argparse.ArgumentParser()
     p.add_argument("--data_folder", type=Path, default=HERE / "data")
     p.add_argument("--member", type=str, default="local")
-    p.add_argument("--git_commit_hash", type=str, default="dryrun")
-    p.add_argument("--git_repo", type=str, default="")      # accepted for completeness; unused here
     p.add_argument("--sample_rows", type=int, default=None,
                    help="fast smoke test: use only the most-recent N rows (overrides optuna.json)")
     p.add_argument("--run-on", choices=["local", "server"], required=True,
@@ -658,8 +656,7 @@ def parse_args(argv: list = None) -> argparse.Namespace:
 
 if __name__ == "__main__":
     a = parse_args()
-    kw = dict(member=a.member, git_commit_hash=a.git_commit_hash, git_repo=a.git_repo,
-              sample_rows=a.sample_rows)
+    kw = dict(member=a.member, sample_rows=a.sample_rows)
     if a.run_on == "local":                                 # disable PREFECT_API_URL -> ephemeral local run
         from prefect.settings import PREFECT_API_URL, temporary_settings
         with temporary_settings({PREFECT_API_URL: ""}):

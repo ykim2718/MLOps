@@ -4,7 +4,7 @@ Predicts wafer AVG_REMOVAL_RATE (a scalar / regression target) from CMP tool
 sensor trajectories with LightGBM - the same Virtual Metrology shape as film
 thickness / etch-rate prediction. Run as the team payload that pipeline.py drives:
 
-    python my_flow.py --git_repo <r> --git_commit_hash <c> --member <m> --data_folder ./data
+    python my_flow.py --member <m> --data_folder ./data
 
 Pipeline (a small DAG): load_config -> train_prepare -> train_featurize -> train ->
 (validate || test); parity_plot AND publish_artifacts both fire right after each of
@@ -41,7 +41,7 @@ except Exception:
     Credentials = None
 
 
-__version__ = "0.0.23"
+__version__ = "0.0.24"
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OPTUNA_CFG = os.path.join(HERE, "optuna.json")
@@ -490,16 +490,15 @@ def parity_plot(y_true: list, y_pred: list, stage: str, work: str) -> dict:
     return {"stage": stage, "path": out, "r2": r2}
 
 
-@flow(name="cmp_vm", flow_run_name="{member}@{git_commit_hash}", log_prints=True,
+@flow(name="cmp_vm", flow_run_name="{member}", log_prints=True,
       task_runner=ThreadPoolTaskRunner(max_workers=4))
-def my_flow(data_dir: str, member: str = "local", git_commit_hash: str = "dryrun",
-            git_repo: str = ""):
+def my_flow(data_dir: str, member: str = "local"):
     """PHM 2016 CMP virtual metrology: train_prepare -> train_featurize -> train ->
     (validate || test), parity after each."""
     log = get_run_logger()
     work = os.path.join(HERE, "work")
     os.makedirs(work, exist_ok=True)
-    log.info(f"start: member={member} commit={git_commit_hash} repo={git_repo or '-'} data={data_dir}")
+    log.info(f"start: member={member} data={data_dir}")
 
     cfg = load_config(OPTUNA_CFG)                            # read fresh each run
     log.info(f"tuning {cfg['n_trials']} trials, metric={cfg['metric']}")
@@ -508,7 +507,7 @@ def my_flow(data_dir: str, member: str = "local", git_commit_hash: str = "dryrun
     log.info(f"optuna storage [{src}]: {_mask(storage)}")
 
     mlflow_uri = cfg.get("mlflow_uri") or "http://mlflow:5000"   # compose service; localhost:5000 on host
-    run_name = f"{member}@{git_commit_hash}"
+    run_name = f"{member}"
     log.info(f"mlflow uri: {mlflow_uri}")
 
     prep = train_prepare.submit(data_dir, work, cfg)
@@ -548,7 +547,7 @@ def my_flow(data_dir: str, member: str = "local", git_commit_hash: str = "dryrun
     for f in (p_train, p_val, p_test, a_train, a_val, a_test):
         f.result()
 
-    summary = {"member": member, "git_commit_hash": git_commit_hash,
+    summary = {"member": member,
                "n_train": prep_meta["n_train"], "n_val": prep_meta["n_val"],
                "n_features": prep_meta["n_features"],
                "best_cv_rmse": train_meta["best_cv_rmse"],
@@ -589,7 +588,5 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser()                           # pipeline.py passes these as CLI args
     p.add_argument("--data_folder", default=os.path.join(HERE, "data"))
     p.add_argument("--member", default="local")
-    p.add_argument("--git_commit_hash", default="dryrun")
-    p.add_argument("--git_repo", default="")                # accepted for completeness; unused here
     a = p.parse_args()
-    my_flow(a.data_folder, member=a.member, git_commit_hash=a.git_commit_hash, git_repo=a.git_repo)
+    my_flow(a.data_folder, member=a.member)
