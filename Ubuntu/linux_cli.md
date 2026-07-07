@@ -1,45 +1,82 @@
 # Linux CLI
 
-<sub>rev. 6</sub>
+<sub>rev. 9</sub>
 
-> 이 문서의 명령은 **Ubuntu** 기준으로 작성되었습니다.
+> Commands in this document are written for **Ubuntu**.
 
 ## 1. Users
 
-Ubuntu에서는 대화형 `adduser`/`deluser`가 권장 도구입니다. (`useradd`/`userdel`도 있지만 옵션을 일일이 지정해야 합니다.)
+On Ubuntu, the interactive `adduser`/`deluser` tools are recommended. (`useradd`/`userdel` also exist but require specifying each option manually.)
 
 ### 1.1 Create a user
 
 ```bash
-sudo adduser username    # 계정 + 홈 디렉터리 생성, 비번·이름을 프롬프트로 입력받음
+sudo adduser username    # Create account + home directory; prompts for password and details
 ```
 
-- 홈 디렉터리(`/home/username`), 기본 그룹, 로그인 셸을 자동 생성한다.
-- 실행하면 비밀번호와 이름 등을 대화형으로 물어본다.
+- Automatically creates the home directory (`/home/username`), a default group, and a login shell.
+- Prompts interactively for the password, full name, and other details.
 
-### 1.2 Verify a user
+### 1.2 List users
 
 ```bash
-id username              # UID, GID, 소속 그룹 확인
-getent passwd username   # /etc/passwd 항목 확인
-ls -ld /home/username    # 홈 디렉터리 소유자·권한 확인
+getent passwd                                     # List all accounts (system + human)
+cut -d: -f1 /etc/passwd                            # List just the usernames
+awk -F: '$3>=1000 && $3<65534 {print $1}' /etc/passwd   # Human users only (UID 1000-65533)
 ```
 
-### 1.3 Delete a user
+- On Ubuntu, regular (human) accounts start at UID 1000; lower UIDs are system accounts.
+- `who` / `w` — Show users currently logged in (not all accounts).
+
+### 1.3 Verify a user
 
 ```bash
-sudo deluser username                  # 계정만 삭제 (홈 디렉터리는 남음)
-sudo deluser --remove-home username    # 홈 디렉터리까지 함께 삭제
+id username              # Show UID, GID, and group membership
+getent passwd username   # Show the /etc/passwd entry
+ls -ld /home/username    # Show home directory owner and permissions
 ```
 
-- `--remove-home` — 홈 디렉터리(`/home/username`)를 같이 제거한다.
-- 삭제하려는 사용자가 실행 중인 프로세스를 갖고 있으면 거부될 수 있다. 프로세스를 먼저 종료한다.
-
-### 1.4 Grant sudo privileges
+### 1.4 Delete a user
 
 ```bash
-sudo usermod -aG sudo username   # sudo 그룹에 추가
+sudo deluser username                  # Delete account only (home directory remains)
+sudo deluser --remove-home username    # Delete account together with the home directory
 ```
 
-- Ubuntu의 관리자(sudo) 그룹 이름은 `sudo`이다.
-- `-aG` — 기존 그룹을 유지(`-a`)하면서 지정 그룹(`-G`)에 추가. `-a` 없이 `-G`만 쓰면 기존 보조 그룹이 모두 교체되니 주의.
+- `--remove-home` — Also removes the home directory (`/home/username`).
+- Deletion may be refused if the user still has running processes. Terminate those processes first.
+
+### 1.5 Grant sudo privileges
+
+```bash
+sudo usermod -aG sudo username   # Add the user to the sudo group
+```
+
+- On Ubuntu, the administrator (sudo) group is named `sudo`.
+- `-aG` — Adds to the given group (`-G`) while keeping existing groups (`-a`). Using `-G` without `-a` replaces all existing supplementary groups, so be careful.
+
+## 2. Files & Permissions
+
+### 2.1 Change ownership
+
+Change the owner of everything in the current directory (for example, from `root` to a specific user):
+
+```bash
+sudo chown -R username:username .    # Recursively set owner and group to username
+```
+
+- `-R` — Recursive; applies to all files and subdirectories underneath.
+- `username:username` — `owner:group` format; changes the group as well.
+- `.` — The current directory. Use an explicit path (`/path/to/dir`) if preferred.
+
+Variants:
+
+```bash
+sudo chown -R username .        # Change owner only (leave group unchanged)
+sudo chown -R username: .       # Change owner and set group to username's primary group
+sudo chown -R :groupname .      # Change group only
+```
+
+- Target `.` (not `./*`) to include the current directory itself and hidden dotfiles; `./*` skips names starting with `.`.
+- By default only the symlink itself is changed, not its target.
+- Check before and after with `ls -la`.
