@@ -1,6 +1,6 @@
 # Docker CLI (Command Line Interface)
 
-<sub>rev. 101</sub>
+<sub>rev. 102</sub>
 
 각 컴포넌트를 도커로 띄우고 운영할 때 공통으로 쓰는 명령을 모았습니다.
 
@@ -40,7 +40,24 @@ docker network connect mlops <container>       # 떠 있는 컨테이너를 네�
 docker network disconnect mlops <container>    # 네트워크에서 분리한다.
 ```
 
-## 2. Operations
+## 2. Run
+
+compose 없이 이미지에서 컨테이너를 직접 띄웁니다. `docker run` 은 이미지로 새 컨테이너를 만들어 시작합니다.
+
+```powershell
+docker run <image>                                     # 이미지로 컨테이너를 만들어 포그라운드로 실행한다.
+docker run -d <image>                                  # 백그라운드 (detached) 로 실행한다.
+docker run -d --name <container> <image>               # 이름을 붙여 실행한다.
+docker run -d -p <host>:<container> <image>            # 호스트↔컨테이너 포트를 잇는다 (예: 8080:80).
+docker run -d -v <host path>:<container path> <image>  # 호스트 폴더를 컨테이너에 마운트한다.
+docker run -d --network <network> <image>              # 지정 네트워크에 붙여 실행한다.
+docker run --rm -it <image> bash                       # 1회용으로 띄워 셸에 들어가고, 나오면 삭제한다.
+docker run -d --restart unless-stopped <image>         # 죽거나 재부팅돼도 자동 재시작한다 (직접 멈추기 전까지).
+```
+
+> `--restart` 정책 — `no` (기본), `on-failure[:N]` (비정상 종료 시만), `always` (항상, 재부팅 뒤에도 무조건), `unless-stopped` (always 와 같되 `docker stop` 으로 직접 멈춘 것은 재시작 안 함). 오래 떠 있어야 하는 서비스에는 `unless-stopped` 가 무난합니다. compose 에서는 서비스에 `restart: unless-stopped` 로 같은 정책을 겁니다.
+
+## 3. Operations
 
 ### Start & Stop
 
@@ -53,6 +70,9 @@ docker compose stop                # 컨테이너를 정지한다 (제거하지 
 docker compose start               # 정지된 컨테이너를 다시 시작한다.
 docker compose restart             # 스택의 컨테이너를 재시작한다.
 docker restart <container>         # 컨테이너 하나를 이름으로 재시작한다 (compose 밖에서).
+docker stop <container>            # docker ps 에서 본 컨테이너를 멈춘다 (이름/ID, 정상 종료).
+docker kill <container>            # 곧바로 강제 종료한다 (stop 이 안 먹을 때).
+docker rm -f <container>           # 멈추고 삭제까지 한다 (-f = 실행 중이어도).
 
 docker compose down                # 정지 + 컨테이너/네트워크 제거 (named volume 의 데이터는 유지).
 docker compose down -v             # named volume 까지 삭제하여 데이터를 초기화한다 (주의).
@@ -124,7 +144,7 @@ services:
 
 > 상한을 넘기면 도커가 그 컨테이너를 강제로 종료합니다 (OOM kill — `docker ps -a` 에서 `Exited` 로 보임). 메모리를 많이 쓰는 학습/추론 작업일수록 상한을 넉넉히 두되, 호스트 전체 메모리보다는 작게 잡아 다른 컨테이너의 몫을 남겨 둡니다.
 
-## 3. Compose
+## 4. Compose
 
 ### Multiple Compose Files
 
@@ -147,7 +167,7 @@ docker compose -p <Project Name> -f <file>.yml up -d --scale <service>=3
 
 > compose 가 만드는 컨테이너 이름은 `<Project Name>-<Service Name>-<Replica Number>` 형식입니다. Replica Number 는 보통 `1` 하나지만, `--scale <service>=3` 처럼 늘리면 `-2`·`-3` 이 추가로 생깁니다.
 
-## 4. Container Access
+## 5. Container Access
 
 ### Exec & One-off
 
@@ -185,7 +205,7 @@ docker run --rm -it --entrypoint /bin/bash <image>:<tag>  # entrypoint 를 bash 
 
 > `exec` 로 들어간 셸을 `exit` 하면 그 셸 세션만 끝나고 **컨테이너는 계속 실행** 됩니다. 컨테이너 자체를 멈추려면 [Start & Stop](#start--stop) 의 `docker compose stop` / `down` 을 씁니다. 셸이 없는 컨테이너에는 1회용 셸 컨테이너로 같은 네트워크에 붙어 접근합니다 (`docker run -it --rm --network <network> <image> sh`).
 
-## 5. Host
+## 6. Host
 
 ### Linux — docker without sudo
 
