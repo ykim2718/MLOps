@@ -1,6 +1,6 @@
 # Docker CLI (Command Line Interface)
 
-<sub>rev. 102</sub>
+<sub>rev. 103</sub>
 
 각 컴포넌트를 도커로 띄우고 운영할 때 공통으로 쓰는 명령을 모았습니다.
 
@@ -57,26 +57,30 @@ docker run -d --restart unless-stopped <image>         # 죽거나 재부팅돼�
 
 > `--restart` 정책 — `no` (기본), `on-failure[:N]` (비정상 종료 시만), `always` (항상, 재부팅 뒤에도 무조건), `unless-stopped` (always 와 같되 `docker stop` 으로 직접 멈춘 것은 재시작 안 함). 오래 떠 있어야 하는 서비스에는 `unless-stopped` 가 무난합니다. compose 에서는 서비스에 `restart: unless-stopped` 로 같은 정책을 겁니다.
 
-## 3. Operations
+## 3. Compose
 
-### Start & Stop
+### Multiple Compose Files
+
+한 폴더에 compose 파일이 여러 개일 때는 `-f` 로 대상을 지정합니다.
 
 ```powershell
-docker compose -p <Project Name> up -d           # 백그라운드 (detached) 실행 — 창을 닫아도 유지된다.
-docker compose -p <Project Name> up -d --build   # 이미지를 새로 빌드하면서 실행한다.
-docker compose ps                                # 컨테이너 상태를 확인한다.
-
-docker compose stop                # 컨테이너를 정지한다 (제거하지 않는다).
-docker compose start               # 정지된 컨테이너를 다시 시작한다.
-docker compose restart             # 스택의 컨테이너를 재시작한다.
-docker restart <container>         # 컨테이너 하나를 이름으로 재시작한다 (compose 밖에서).
-docker stop <container>            # docker ps 에서 본 컨테이너를 멈춘다 (이름/ID, 정상 종료).
-docker kill <container>            # 곧바로 강제 종료한다 (stop 이 안 먹을 때).
-docker rm -f <container>           # 멈추고 삭제까지 한다 (-f = 실행 중이어도).
-
-docker compose down                # 정지 + 컨테이너/네트워크 제거 (named volume 의 데이터는 유지).
-docker compose down -v             # named volume 까지 삭제하여 데이터를 초기화한다 (주의).
+docker compose -p <Project Name> -f <file>.yml up -d   # 지정한 compose 파일로 실행한다.
+docker compose -f <file>.yml logs -f      # 그 파일의 서비스 로그를 본다.
+docker compose -f <file>.yml down         # 그 파일의 스택을 내린다.
 ```
+
+### Scaling
+
+같은 서비스를 여러 개로 늘려 처리량을 높입니다.
+
+```powershell
+docker compose -p <Project Name> up -d --scale <service>=3              # 해당 서비스를 3개로 늘린다.
+docker compose -p <Project Name> -f <file>.yml up -d --scale <service>=3
+```
+
+> compose 가 만드는 컨테이너 이름은 `<Project Name>-<Service Name>-<Replica Number>` 형식입니다. Replica Number 는 보통 `1` 하나지만, `--scale <service>=3` 처럼 늘리면 `-2`·`-3` 이 추가로 생깁니다.
+
+## 4. Operations
 
 ### Status & Listing
 
@@ -104,6 +108,25 @@ docker compose ps -a               # 멈춘 것까지.
 ```
 
 > `docker ps` 는 **호스트 전체**, `docker compose ps` 는 **그 폴더의 compose 스택**만 봅니다. 자주 보는 열 — `STATUS` (`Up ...` = 실행 중, `Exited` = 종료), `PORTS` (`0.0.0.0:27017->27017/tcp` 처럼 호스트↔컨테이너 매핑), `NAMES` (컨테이너 이름).
+
+### Start & Stop
+
+```powershell
+docker compose -p <Project Name> up -d           # 백그라운드 (detached) 실행 — 창을 닫아도 유지된다.
+docker compose -p <Project Name> up -d --build   # 이미지를 새로 빌드하면서 실행한다.
+docker compose ps                                # 컨테이너 상태를 확인한다.
+
+docker compose stop                # 컨테이너를 정지한다 (제거하지 않는다).
+docker compose start               # 정지된 컨테이너를 다시 시작한다.
+docker compose restart             # 스택의 컨테이너를 재시작한다.
+docker restart <container>         # 컨테이너 하나를 이름으로 재시작한다 (compose 밖에서).
+docker stop <container>            # docker ps 에서 본 컨테이너를 멈춘다 (이름/ID, 정상 종료).
+docker kill <container>            # 곧바로 강제 종료한다 (stop 이 안 먹을 때).
+docker rm -f <container>           # 멈추고 삭제까지 한다 (-f = 실행 중이어도).
+
+docker compose down                # 정지 + 컨테이너/네트워크 제거 (named volume 의 데이터는 유지).
+docker compose down -v             # named volume 까지 삭제하여 데이터를 초기화한다 (주의).
+```
 
 ### Logs
 
@@ -143,29 +166,6 @@ services:
 ```
 
 > 상한을 넘기면 도커가 그 컨테이너를 강제로 종료합니다 (OOM kill — `docker ps -a` 에서 `Exited` 로 보임). 메모리를 많이 쓰는 학습/추론 작업일수록 상한을 넉넉히 두되, 호스트 전체 메모리보다는 작게 잡아 다른 컨테이너의 몫을 남겨 둡니다.
-
-## 4. Compose
-
-### Multiple Compose Files
-
-한 폴더에 compose 파일이 여러 개일 때는 `-f` 로 대상을 지정합니다.
-
-```powershell
-docker compose -p <Project Name> -f <file>.yml up -d   # 지정한 compose 파일로 실행한다.
-docker compose -f <file>.yml logs -f      # 그 파일의 서비스 로그를 본다.
-docker compose -f <file>.yml down         # 그 파일의 스택을 내린다.
-```
-
-### Scaling
-
-같은 서비스를 여러 개로 늘려 처리량을 높입니다.
-
-```powershell
-docker compose -p <Project Name> up -d --scale <service>=3              # 해당 서비스를 3개로 늘린다.
-docker compose -p <Project Name> -f <file>.yml up -d --scale <service>=3
-```
-
-> compose 가 만드는 컨테이너 이름은 `<Project Name>-<Service Name>-<Replica Number>` 형식입니다. Replica Number 는 보통 `1` 하나지만, `--scale <service>=3` 처럼 늘리면 `-2`·`-3` 이 추가로 생깁니다.
 
 ## 5. Container Access
 
