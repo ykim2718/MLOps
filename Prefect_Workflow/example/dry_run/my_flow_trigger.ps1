@@ -1,4 +1,4 @@
-# __version__ = "0.0.10"
+# __version__ = "0.0.12"
 
 # example/dry_run/my_flow_trigger.ps1 — verify the dry-run flow (my_flow.py) at three stages.
 #   -Mode local : run my_flow.py offline here (--run-on local: no Prefect server, no MLflow) - fastest sanity check.
@@ -33,7 +33,7 @@ $env:PYTHONPATH = $here     # so `from my_flow import my_flow` resolves (serve m
 
 switch ($Mode) {
     "local" {
-        # offline in-process: --run-on local runs ephemerally with no Prefect server and no MLflow.
+        # offline in-process: my_flow.py --run-on local runs ephemerally with no Prefect server and no MLflow.
         python "$here\my_flow.py" --submitter $Submitter --data_folder $DataFolder --run-on local
     }
     "serve" {

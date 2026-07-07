@@ -1,4 +1,4 @@
-# AI/ML Workflow Automation
+# Prefect AI/ML Workflow Automation
 
 <sub>rev. 92</sub>
 
@@ -232,11 +232,22 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
 
 ## 6. my_flow.py
 
-  Prefect orchestrator 가 `script/` 와 `data/` 를 미리 받아 두고 실행 정보 (`--git_repo`·`--git_commit_hash`·`--member`) 와 그 경로 (`--data_folder`) 를 CLI 인자로 넘기므로, payload 는 `argparse` 로 받아 씁니다. 아래는 각 단계 함수·설정 변수가 실제 파일 (`train_prepare.py` … `optuna.json`) 을 대신하는 **dry run** 으로, 실 ML 없이 workflow 배선만 검증합니다 (실제 파일은 [example/dry_run/my_flow.py](example/dry_run/my_flow.py)).
+  Prefect orchestrator (`pipeline.py`) 가 `script/` 와 `data/` 를 미리 받아 두고 실행 정보 (`--submitter`) 와 데이터 경로 (`--data_folder`) 를 CLI 인자로 넘기므로, payload 는 `argparse` 로 받아 씁니다. 서버·MLflow 없이 로컬에서 배선만 빠르게 확인할 땐 `--run-on local` 로 ephemeral 실행합니다. 아래는 각 단계 함수·설정 변수가 실제 파일 (`train_prepare.py` … `optuna.json`) 을 대신하는 **dry run** 으로, 실 ML 없이 workflow 배선만 검증합니다 (실제 파일은 [example/dry_run/my_flow.py](example/dry_run/my_flow.py)).
 
   ```python
-  # example/dry_run/my_flow.py — git-delivered ML payload, Prefect dry run.
-  __version__ = "0.0.14"
+  """example/dry_run/my_flow.py — git-delivered ML payload, Prefect dry run.
+
+  Validates workflow wiring only: each @task and config variable stands in for the
+  real example/ file (train_prepare.py … optuna.json). No real ML — every stage just
+  records that it ran, while train_prepare also counts the files under --data_folder.
+
+  Run by pipeline.py (orchestrator, prefect.md §4.3):
+      python my_flow.py --submitter <m> --data_folder <dir>
+
+  Local debugging — run ephemerally with no Prefect server (MLflow tracking also skipped):
+      python my_flow.py --run-on local --data_folder <dir>
+  """
+  __version__ = "0.0.18"
 
   import argparse
   from pathlib import Path
@@ -340,15 +351,14 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
       return f"publish_artifacts.{stage}"
 
 
-  @flow(name="my_flow", flow_run_name="{submitter}@{git_commit_hash}", log_prints=True)
-  def my_flow(*, submitter: str = "local", data_folder: str = "./data", git_commit_hash: str = "dryrun",
-              git_repo: str = "") -> State:
+  @flow(name="my_flow", flow_run_name="{submitter}", log_prints=True)
+  def my_flow(*, submitter: str = "local", data_folder: str = "./data") -> State:
       log = get_run_logger()
-      log.info(f"dry run: submitter={submitter} commit={git_commit_hash} "
+      log.info(f"dry run: submitter={submitter} "
                f"data={data_folder} prepare={prepare_json} optuna={optuna_json}")
 
       reports = []
-      with mlflow.start_run(run_name=f"{submitter}@{git_commit_hash}"):  # real run -> MLflow server
+      with mlflow.start_run(run_name=f"{submitter}"):  # real run -> MLflow server
           s = train_prepare({}, data_folder, prepare_json)           # train branch
           s = train_featurize(s)
           s = train(s, optuna_json)
@@ -374,15 +384,36 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
       p = argparse.ArgumentParser()
       p.add_argument("--submitter", default="local")
       p.add_argument("--data_folder", default="./data")
-      p.add_argument("--git_commit_hash", default="dryrun")
-      p.add_argument("--git_repo", default="")                   # accepted for completeness; unused here
+      # optional (default server) so pipeline.py's pool call (no --run-on) is unaffected;
+      # pass --run-on local for standalone debugging with no Prefect server.
+      p.add_argument("--run-on", choices=["local", "server"], default="server",
+                     help="local: run ephemerally with no server (local debugging); "
+                          "server: record the run on the Prefect server (PREFECT_API_URL)")
       return p.parse_args()
+
+
+  class _NoOpMLflow:
+      """No-op MLflow stand-in for --run-on local: skips all tracking calls.
+      start_run() returns a null context; log_metric / log_param / ... become no-ops."""
+      def start_run(self, *args, **kwargs):
+          from contextlib import nullcontext
+          return nullcontext()
+
+      def __getattr__(self, _name):
+          return lambda *args, **kwargs: None
 
 
   if __name__ == "__main__":
       a = parse_args()
-      my_flow(submitter=a.submitter, data_folder=a.data_folder,
-              git_commit_hash=a.git_commit_hash, git_repo=a.git_repo)
+      if a.run_on == "local":                                 # local debug: no Prefect server, no MLflow
+          import logging
+          logging.getLogger("prefect._internal.concurrency").setLevel(logging.CRITICAL)  # mute ephemeral EventsWorker noise
+          mlflow = _NoOpMLflow()                              # rebind module global -> every mlflow.* call is a no-op
+          from prefect.settings import PREFECT_API_URL, temporary_settings
+          with temporary_settings({PREFECT_API_URL: ""}):     # disable PREFECT_API_URL -> ephemeral run
+              my_flow(submitter=a.submitter, data_folder=a.data_folder)
+      else:                                                   # use the configured Prefect + MLflow servers
+          my_flow(submitter=a.submitter, data_folder=a.data_folder)
   ```
 
 ---
