@@ -120,7 +120,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
           files  : credentials.py · <member>.json (e.g. Jason.json)
           run    : python credentials.py --json-path Jason.json --block-name jason   # one block (lowercase name)
           config → run-code credentials (one block per member, nested)
-                   <member> { minio · postgresql_catalog · postgresql_optuna }   # block name = member (lowercase)
+                   <member> { minio · postgresql_catalog · postgresql_optuna · mlflow }   # block name = member (lowercase)
 
   shared : docker-compose.env                      # at Docker/Prefect/ root; server & dispatcher read ../docker-compose.env
   ```
@@ -570,23 +570,26 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
 
   ```python
   # pipeline.py — orchestrator; Prefect runs this as the deployment entrypoint.
+  import os
   import shutil
   import subprocess
   import tempfile
   from pathlib import Path
+  from typing import Optional
 
   import boto3
   from prefect import flow, get_run_logger
   from prefect.blocks.core import Block
   from prefect.blocks.fields import SecretDict
 
-  __version__ = "0.0.23"  # Semantic Versioning:  Version = Major.Minor.Patch
+  __version__ = "0.0.25"  # Semantic Versioning:  Version = Major.Minor.Patch
 
 
   class Credentials(Block):              # ONE block holds everything as nested dicts; values hidden
       minio: SecretDict                  # endpoint, access_key, secret_key
       postgresql_catalog: SecretDict     # endpoint, username, password, database
       postgresql_optuna: SecretDict      # endpoint, username, password, database
+      mlflow: Optional[SecretDict] = None  # endpoint (MLflow tracking URI); optional so old blocks still load
 
 
   # flow_run_name shows who submitted the run (e.g. alice@a1b2c3d).
@@ -607,8 +610,9 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
           subprocess.run(["git", "-C", repo, "worktree", "add", "--detach", script, git_commit_hash], check=True)
 
           data.mkdir(parents=True, exist_ok=True)  # data/: MinIO download target (git didn't create it)
-          # this run's prefect_block -> its minio credentials (§6).
-          minio = Credentials.load(prefect_block).minio.get_secret_value()
+          # this run's prefect_block -> its credentials (§6): minio for data, mlflow URI for the payload.
+          creds = Credentials.load(prefect_block)
+          minio = creds.minio.get_secret_value()
           s3 = boto3.client("s3", endpoint_url=minio["endpoint"],
                             aws_access_key_id=minio["access_key"],
                             aws_secret_access_key=minio["secret_key"])
@@ -627,9 +631,16 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
               raise FileNotFoundError(f"no objects under s3://{minio_bucket}/{minio_key}")
           log.info(f"downloaded {n} object(s) from s3://{minio_bucket}/{minio_key} to {data}")
 
+          # bridge the block's MLflow tracking URI to the payload via env, so my_flow.py logs to the
+          # MLflow server instead of a local ./mlruns. set only when the block carries an mlflow endpoint.
+          env = os.environ.copy()
+          if creds.mlflow is not None:
+              mlflow_endpoint = creds.mlflow.get_secret_value().get("endpoint")
+              if mlflow_endpoint:
+                  env["MLFLOW_TRACKING_URI"] = mlflow_endpoint
           # run the team's payload in script/; run identity passed as CLI args; output streams to this run's logs.
           subprocess.run(["python", payload, "--submitter", submitter,
-                          "--data_folder", data], cwd=script, check=True)
+                          "--data_folder", data], cwd=script, env=env, check=True)
       except subprocess.CalledProcessError as e:     # payload exited non-zero (crashed)
           # tag the failure with whose run + message; re-raise -> run marked Failed, logs kept in the UI.
           log.error(f"payload {payload} crashed (exit {e.returncode}) for {submitter}@{git_commit_hash}: {e}")
@@ -638,10 +649,10 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
           shutil.rmtree(base, ignore_errors=True)    # one cleanup removes repo/ + script/ + data/
   ```
 
-  - **자유로운 코드** — `payload` 로 팀원이 자기 스크립트를 지정하므로 코드를 정해진 틀에 맞출 필요가 없습니다. 입력은 CLI 인자 (`--submitter`·`--data_folder`) 로 받으므로, 팀원 스크립트는 `argparse` 로 그 값만 읽으면 됩니다. (payload 는 이미 체크아웃된 `script/` 안에서 돌므로 git 정보는 넘기지 않습니다.)
+  - **자유로운 코드** — `payload` 로 팀원이 자기 스크립트를 지정하므로 코드를 정해진 틀에 맞출 필요가 없습니다. 입력은 CLI 인자 (`--submitter`·`--data_folder`) 로 받으므로, 팀원 스크립트는 `argparse` 로 그 값만 읽으면 됩니다. (payload 는 이미 체크아웃된 `script/` 안에서 돌므로 git 정보는 넘기지 않고, MLflow 서버 주소만 블록의 `mlflow` endpoint 를 `MLFLOW_TRACKING_URI` 환경변수로 넘깁니다.)
   - **데이터 이력** — `minio_bucket`·`minio_key` 가 **flow 파라미터** 라서 Prefect 가 run 마다 입력값을 `prefect` DB 에 자동 저장합니다 (어느 버킷·객체를 썼는지 lineage 로 남습니다).
   - **crash 확인** — payload 가 0 이 아닌 코드로 끝나면 `subprocess.run(check=True)` 가 `CalledProcessError` 를 던지고, `pipeline` 가 `submitter@commit` 을 단 에러를 run 로그에 남긴 뒤 다시 raise 해 run 이 **Failed** 로 표시됩니다. payload 의 stdout·stderr 는 실행 중 이 run 의 로그로 흘러 들어가므로, 팀원은 자기 이름이 붙은 run (`alice@a1b2c3d`) 의 **Logs** 에서 crash 원인을 봅니다. payload 가 `@task` 를 쓰면 자기 flow run ([§8](#8-prefect-ui)) 에서 **어느 단계** 가 깨졌는지까지 보입니다.
-  - **이력 자동 저장** — `@flow` 진입 시 Prefect 가 run 의 상태·로그·파라미터를 자동 기록합니다. 지표·모델은 팀원 코드가 MLflow 로 로깅하면 함께 남습니다 ([Appendix J](#appendix-j-prefect-task)).
+  - **이력 자동 저장** — `@flow` 진입 시 Prefect 가 run 의 상태·로그·파라미터를 자동 기록합니다. 지표·모델은 팀원 코드가 MLflow 로 로깅하면 함께 남습니다 — pipeline.py 가 블록의 `mlflow` endpoint 를 `MLFLOW_TRACKING_URI` env 로 넘기므로 payload 는 그 tracking 서버로 로깅합니다 (없으면 로컬 `./mlruns` 로 빠지니 블록에 `mlflow` 를 채워야 대시보드에 뜹니다) ([Appendix J](#appendix-j-prefect-task)).
 
   [§5.2](#52-deployment) 의 deployment 가 entrypoint 를 **`pipeline.py:pipeline`** 로 가리킵니다. 이 문자열은 server 의 deployment 레코드 (`prefect` DB) 에 저장되고, dispatcher 가 띄운 컨테이너 안에서 Prefect 런타임이 이미지 작업 디렉터리 (`/work`, `Dockerfile.pipeline_flow` 가 `pipeline.py` 를 COPY 한 곳) 기준으로 `pipeline.py` 를 import 해 콜론 뒤 **`@flow` 함수 `pipeline`** 을 run 파라미터 (`git_repo`·`git_commit_hash`·`minio_key`·`minio_bucket`·`submitter`·`prefect_block`·`payload`) 와 함께 호출합니다. 그래서 deployment entrypoint 가 곧 이 `pipeline.py` 입니다.
 
@@ -687,15 +698,16 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
 
 ### Credential Blocks
 
-  코드가 **MinIO** 와 PostgreSQL 의 `catalog`·`optuna` DB 에 접속할 자격증명을 **한 블록** 에 모읍니다 — `minio`·`postgresql_catalog`·`postgresql_optuna` 세 묶음을 셋으로 쪼개지 않고 한 블록의 **nested dict** 로 담고, 비밀 값은 `SecretDict` 로 가립니다. server 에 한 번 저장하면 컨테이너·머신마다 따로 넣지 않아도 됩니다.
+  코드가 **MinIO** · **MLflow** · PostgreSQL 의 `catalog`·`optuna` DB 에 접속할 자격증명·엔드포인트를 **한 블록** 에 모읍니다 — `minio`·`postgresql_catalog`·`postgresql_optuna`·`mlflow` 네 묶음을 쪼개지 않고 한 블록의 **nested dict** 로 담고, 비밀 값은 `SecretDict` 로 가립니다 (`mlflow` 는 optional — endpoint 하나). server 에 한 번 저장하면 컨테이너·머신마다 따로 넣지 않아도 됩니다.
 
-  블록 클래스는 `Credentials` **하나** (`minio`·`postgresql_catalog`·`postgresql_optuna` 세 `SecretDict` 필드) 이고, **블록 이름은 팀원 이름** 입니다 — 팀원마다 자기 이름의 블록을 하나 갖습니다 (예시 `Jason` 은 팀원 이름). **`pipeline.py`** 와 **`catalog.py`** (모든 팀원이 쓰는 공통 라이브러리) 가 같은 클래스를 정의해 쓰므로 한쪽 `save`, 다른 쪽 `load` 가 맞물립니다. 코드는 run 의 팀원 이름으로 `Credentials.load(<member>)` 해 그 팀원의 자격증명을 받습니다.
+  블록 클래스는 `Credentials` **하나** (`minio`·`postgresql_catalog`·`postgresql_optuna` + optional `mlflow`, `SecretDict` 필드) 이고, **블록 이름은 팀원 이름** 입니다 — 팀원마다 자기 이름의 블록을 하나 갖습니다 (예시 `Jason` 은 팀원 이름). **`pipeline.py`** 와 **`catalog.py`** (모든 팀원이 쓰는 공통 라이브러리) 가 같은 클래스를 정의해 쓰므로 한쪽 `save`, 다른 쪽 `load` 가 맞물립니다. 코드는 run 의 팀원 이름으로 `Credentials.load(<member>)` 해 그 팀원의 자격증명을 받습니다.
 
   ```text
   Jason                       # block name = a team member's name (e.g. Jason); load it -> everything
   ├─ minio              : endpoint, access_key, secret_key
   ├─ postgresql_catalog : endpoint, username, password, database
-  └─ postgresql_optuna  : endpoint, username, password, database
+  ├─ postgresql_optuna  : endpoint, username, password, database
+  └─ mlflow             : endpoint            # MLflow tracking URI (optional)
   ```
 
   팀원별 자격증명을 **JSON 파일** 로 적고 `credentials.py` 로 등록합니다 — 블록 이름은 Prefect 규칙상 **소문자·숫자·하이픈만** 가능하므로 `--block-name` 으로 소문자 이름을 지정합니다 (파일명은 `Jason.json` 그대로 두고 블록 이름만 `jason`). `credentials.py` 코드는 [Appendix G](#appendix-g-credentialspy).
@@ -720,6 +732,9 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
       "username": "optuna_user",
       "password": "<OPTUNA_DB_PASSWORD>",
       "database": "optuna"
+    },
+    "mlflow": {
+      "endpoint": "http://mlflow:5000"
     }
   }
   ```
@@ -736,13 +751,13 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
   ```powershell
   prefect config view                       # PREFECT_API_URL 이 server 를 가리키는지 확인
   prefect block ls                          # Name=jason, Type=Credentials (Slug 열에 credentials/jason)
-  prefect block inspect credentials/jason   # 세 섹션 확인 (SecretDict 라 비밀 값은 *** 로 가려짐)
+  prefect block inspect credentials/jason   # 네 섹션 확인 (SecretDict 라 비밀 값은 *** 로 가려짐)
   python -c "from credentials import Credentials as cr; print(cr.load('jason').minio.get_secret_value())"
   ```
 
   UI 로는 `http://<Host IP>:4200` → **Blocks** 에서도 같은 블록이 보입니다.
 
-  `pipeline.py` 는 그 run 의 팀원 블록에서 `minio` 섹션만, `catalog.py` 는 세 섹션을 모두 씁니다 (실제 load 예시는 [§5.3](#53-pipelinepy) 의 `pipeline.py`).
+  `pipeline.py` 는 그 run 의 팀원 블록에서 `minio` (+ optional `mlflow`) 를, `catalog.py` 는 `minio`·`postgresql_catalog`·`postgresql_optuna` 세 섹션을 씁니다 (실제 load 예시는 [§5.3](#53-pipelinepy) 의 `pipeline.py`).
 
   > flow 컨테이너는 base job template 의 `PREFECT_API_URL` 로 server 에 연결돼야 블록을 받습니다 ([§3 Work Pool Registration](#work-pool-registration)). `mlflow`·`prefect` DB 는 사용자 코드가 직접 접속하지 않으므로, 사용자 role 에는 `catalog`·`optuna` 권한만 있으면 됩니다.
 
@@ -1106,7 +1121,7 @@ from typing import List, Optional, Union
 from prefect.blocks.core import Block
 from prefect.blocks.fields import SecretDict
 
-__version__ = "0.0.18"  # Semantic Versioning:  Version = Major.Minor.Patch
+__version__ = "0.0.19"  # Semantic Versioning:  Version = Major.Minor.Patch
 
 # Prefect block document names allow lowercase letters, numbers, and dashes only (no upper/underscore/space/dot).
 _BLOCK_NAME_RE = re.compile(r"^[a-z0-9-]+$")
@@ -1116,6 +1131,7 @@ class Credentials(Block):              # must match pipeline.py exactly (class n
     minio: SecretDict                  # endpoint, access_key, secret_key
     postgresql_catalog: SecretDict     # endpoint, username, password, database
     postgresql_optuna: SecretDict      # endpoint, username, password, database
+    mlflow: Optional[SecretDict] = None  # endpoint (MLflow tracking URI); optional so old blocks still load
 
 
 def register(spec_path: Union[str, Path], name: Optional[str] = None) -> None:

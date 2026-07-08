@@ -21,7 +21,7 @@ from typing import List, Optional, Union
 from prefect.blocks.core import Block
 from prefect.blocks.fields import SecretDict
 
-__version__ = "0.0.18"  # Semantic Versioning:  Version = Major.Minor.Patch
+__version__ = "0.0.19"  # Semantic Versioning:  Version = Major.Minor.Patch
 
 # Prefect block document names allow lowercase letters, numbers, and dashes only (no upper/underscore/space/dot).
 _BLOCK_NAME_RE = re.compile(r"^[a-z0-9-]+$")
@@ -31,6 +31,7 @@ class Credentials(Block):              # must match pipeline.py exactly (class n
     minio: SecretDict                  # endpoint, access_key, secret_key
     postgresql_catalog: SecretDict     # endpoint, username, password, database
     postgresql_optuna: SecretDict      # endpoint, username, password, database
+    mlflow: Optional[SecretDict] = None  # endpoint (MLflow tracking URI); optional so old blocks still load
 
 
 def register(spec_path: Union[str, Path], name: Optional[str] = None) -> None:

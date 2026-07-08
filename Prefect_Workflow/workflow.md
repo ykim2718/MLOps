@@ -247,9 +247,10 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
   Local debugging — run ephemerally with no Prefect server (MLflow tracking also skipped):
       python my_flow.py --run-on local --data_folder <dir>
   """
-  __version__ = "0.0.18"
+  __version__ = "0.0.19"
 
   import argparse
+  import os
   from pathlib import Path
   from typing import Any, Dict, Literal
 
@@ -358,7 +359,11 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
                f"data={data_folder} prepare={prepare_json} optuna={optuna_json}")
 
       reports = []
-      with mlflow.start_run(run_name=f"{submitter}"):  # real run -> MLflow server
+      # point MLflow at the tracking server, else it logs to a local ./mlruns and never reaches
+      # the dashboard. container: http://mlflow:5000; host: set MLFLOW_TRACKING_URI. local -> no-op shim.
+      mlflow.set_tracking_uri(os.environ.get("MLFLOW_TRACKING_URI", "http://mlflow:5000"))
+      mlflow.set_experiment("dry_run")                 # named experiment (else lands in "Default")
+      with mlflow.start_run(run_name=f"{submitter}"):  # -> experiment "dry_run" on the MLflow server
           s = train_prepare({}, data_folder, prepare_json)           # train branch
           s = train_featurize(s)
           s = train(s, optuna_json)
@@ -559,15 +564,16 @@ python catalog.py remove <minio_key> -b <block> --pg-host localhost --minio-host
 
 ### Credentials (Prefect block)
 
-  catalog.py 가 읽는 자격증명은 **팀원마다 하나인 `Credentials` 블록** (블록 이름 = 팀원 이름, 소문자·숫자·대시) 에 담겨 있고, 관리자가 `credentials.py` 로 1회 등록합니다 (`python credentials.py --json-path <member>.json --block-name <member>` — [prefect.md](../Docker/Prefect/prefect.md) §5 Credentials). 한 블록 안에 세 섹션 (nested dict, `SecretDict` 로 가림) 이 들어 있습니다.
+  catalog.py 가 읽는 자격증명은 **팀원마다 하나인 `Credentials` 블록** (블록 이름 = 팀원 이름, 소문자·숫자·대시) 에 담겨 있고, 관리자가 `credentials.py` 로 1회 등록합니다 (`python credentials.py --json-path <member>.json --block-name <member>` — [prefect.md](../Docker/Prefect/prefect.md) §5 Credentials). 한 블록 안에 네 섹션 (nested dict, `SecretDict` 로 가림; `mlflow` 는 optional) 이 들어 있습니다.
 
   | Section | Fields | Target |
   |---|---|---|
   | `minio` | `endpoint` · `access_key` · `secret_key` | MinIO |
   | `postgresql_catalog` | `endpoint` · `username` · `password` · `database` | PostgreSQL (`catalog` DB) |
   | `postgresql_optuna` | `endpoint` · `username` · `password` · `database` | PostgreSQL (`optuna` DB, flow·Optuna 용) |
+  | `mlflow` (optional) | `endpoint` | MLflow (tracking URI; flow 로깅용) |
 
-  - **`-b <block>`** 가 어느 팀원 블록을 읽을지 정합니다. catalog.py 는 그중 `minio` + `postgresql_catalog` 두 섹션만 씁니다 (`postgresql_optuna` 는 flow 용). `-b` 를 **안 주면** default (localhost) 로 돌고 배너에 `[creds: default (localhost)]`, 주면 `[creds: prefect-block (block=…)]` 로 출처가 표시됩니다. `-b` 를 **줬는데** credentials.py import 실패나 블록 로드 실패(서버 미연결·블록 없음)면 조용히 default 로 안 떨어지고 오류로 즉시 중단합니다 (silent-default 방지 — `credentials.py` 는 catalog.py 옆이나 `PYTHONPATH` 에 있어야 함).
+  - **`-b <block>`** 가 어느 팀원 블록을 읽을지 정합니다. catalog.py 는 그중 `minio` + `postgresql_catalog` 두 섹션만 씁니다 (`postgresql_optuna`·`mlflow` 는 flow 용 — pipeline.py 가 `mlflow` endpoint 를 payload 에 `MLFLOW_TRACKING_URI` 로 넘김). `-b` 를 **안 주면** default (localhost) 로 돌고 배너에 `[creds: default (localhost)]`, 주면 `[creds: prefect-block (block=…)]` 로 출처가 표시됩니다. `-b` 를 **줬는데** credentials.py import 실패나 블록 로드 실패(서버 미연결·블록 없음)면 조용히 default 로 안 떨어지고 오류로 즉시 중단합니다 (silent-default 방지 — `credentials.py` 는 catalog.py 옆이나 `PYTHONPATH` 에 있어야 함).
   - **`--pg-host` / `--minio-host`** 는 블록 endpoint 의 host 만 덮어씁니다 (creds·port 불변). 컨테이너용 블록 (endpoint 가 `postgres`·`minio` 서비스명) 을 host 에서 쓸 때 `--pg-host localhost --minio-host localhost` 로 붙입니다.
   - `PREFECT_API_URL` (Prefect 프로필) 은 이 블록을 받기 위한 **접속점** 일 뿐 catalog 데이터가 아닙니다. 프로세스 환경변수·`docker-compose.env` 는 쓰지 않습니다.
 
