@@ -1,6 +1,6 @@
 # Docker CLI (Command Line Interface)
 
-<sub>rev. 103</sub>
+<sub>rev. 104</sub>
 
 각 컴포넌트를 도커로 띄우고 운영할 때 공통으로 쓰는 명령을 모았습니다.
 
@@ -112,9 +112,10 @@ docker compose ps -a               # 멈춘 것까지.
 ### Start & Stop
 
 ```powershell
-docker compose -p <Project Name> up -d           # 백그라운드 (detached) 실행 — 창을 닫아도 유지된다.
-docker compose -p <Project Name> up -d --build   # 이미지를 새로 빌드하면서 실행한다.
-docker compose ps                                # 컨테이너 상태를 확인한다.
+docker compose -p <Project Name> up -d                  # 백그라운드 (detached) 실행 — 창을 닫아도 유지된다.
+docker compose -p <Project Name> up -d --build          # 이미지를 새로 빌드하면서 실행한다.
+docker compose -p <Project Name> up -d --force-recreate # 설정이 그대로여도 컨테이너를 새로 만들어 다시 띄운다.
+docker compose ps                                       # 컨테이너 상태를 확인한다.
 
 docker compose stop                # 컨테이너를 정지한다 (제거하지 않는다).
 docker compose start               # 정지된 컨테이너를 다시 시작한다.
