@@ -1,6 +1,6 @@
 # Docker Hub (Image Registry)
 
-<sub>rev. 1</sub>
+<sub>rev. 2</sub>
 
 이미지를 Docker Hub 에 올리고 받는 명령을 모았습니다. `<user>` 는 Docker Hub 계정, `<repo>` 는 저장소 이름, `<tag>` 는 버전표 (예: `1.0`, `latest`) 입니다.
 
@@ -16,9 +16,21 @@ docker logout                      # 저장된 로그인 정보를 지운다.
 
 > 비밀번호 대신 **Access Token** 을 권장합니다 (Docker Hub → Account Settings → Security 에서 발급). CI 나 공용 머신에서는 특히 토큰을 씁니다. 토큰을 stdin 으로 넘기려면 `echo <token> | docker login -u <user> --password-stdin` 을 씁니다.
 
-## 2. Upload — tag · push
+## 2. Upload — commit · tag · push
 
-올리려면 먼저 로컬 이미지에 `<user>/<repo>:<tag>` 형식의 **이름표 (tag)** 를 붙이고 push 합니다.
+올릴 이미지를 만들고 (`commit` 하거나 Dockerfile 로 빌드), `<user>/<repo>:<tag>` 형식의 **이름표 (tag)** 를 붙여 push 합니다.
+
+### Commit — container to image
+
+떠 있거나 멈춘 컨테이너의 현재 상태를 그대로 이미지로 굳힙니다. 컨테이너 안에서 손본 내용을 이미지로 남길 때 씁니다.
+
+```powershell
+docker ps -a                                    # commit 할 컨테이너의 이름/ID 를 확인한다.
+docker commit <container> <user>/<repo>:<tag>   # 컨테이너의 현재 상태를 이미지로 만든다.
+docker commit -m "<message>" -a "<author>" <container> <user>/<repo>:<tag>  # 커밋 메시지·작성자를 남긴다.
+```
+
+> `commit` 은 컨테이너의 파일시스템 변경을 통째로 이미지로 굳힙니다 (이력이 남는 Dockerfile 빌드와 달리 재현은 안 됨). 급히 스냅샷을 남길 땐 편하지만, 계속 관리할 이미지는 Dockerfile 로 빌드하는 편이 낫습니다. 만든 이미지는 아래 Tag·Push 로 올립니다.
 
 ### Tag
 
