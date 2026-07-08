@@ -46,7 +46,7 @@ MLflow 는 도커 컨테이너로 실행됩니다. backend 인 PostgreSQL (`mlfl
 
 ```yaml
 # docker-compose.yml
-# __version__ = "0.0.11"  # Semantic Versioning: Major.Minor.Patch
+# __version__ = "0.0.15"  # Semantic Versioning: Major.Minor.Patch
 name: mlflow                        # Fix the project name (prefix of container and volume names).
 
 services:
@@ -61,7 +61,7 @@ services:
       mlflow server --host 0.0.0.0 --port 5000
       --backend-store-uri postgresql://$$POSTGRES_USER:$$POSTGRES_PASSWORD@postgres:5432/mlflow
       --artifacts-destination s3://mlflow
-      --allowed-hosts mlflow:5000,localhost:5000,127.0.0.1:5000
+      --allowed-hosts '*'
       --cors-allowed-origins '*'
       "
     env_file:
@@ -80,7 +80,7 @@ networks:
 - `name: mlflow` 는 프로젝트명을 파일에 굳혀 둡니다. 이 값이 컨테이너·볼륨 이름의 앞가지가 되어, `-p` 를 붙이지 않아도 (다른 폴더에서 띄워도) 늘 같은 프로젝트·같은 볼륨에 붙으므로 쌓아 둔 데이터가 어긋나지 않습니다.
 - `image: ghcr.io/mlflow/mlflow:latest` 는 MLflow 공식 이미지를 씁니다.
 - `command` 는 컨테이너가 뜰 때 PostgreSQL/S3 드라이버를 설치한 뒤 MLflow server 를 띄웁니다. backend 는 `postgres` 서비스명으로 `mlflow` DB 에, artifact 는 `s3://mlflow` 에 연결합니다.
-- `--allowed-hosts` 는 MLflow 3.x 의 DNS-rebinding 보호(요청의 `Host` 헤더 검사) 에서 **허용할 Host 를 지정** 합니다. 기본 허용은 **localhost · 사설 IP (`10.*`·`192.168.*`·`172.16–31.*`)** 라, host LAN IP (`http://<host IP>:5000`) 로 붙으면 그냥 됩니다. 다만 **도커 서비스명 `mlflow` 는 호스트네임이라 기본 허용이 아니므로**, 다른 컨테이너 (예: pipeline_flow) 가 `http://mlflow:5000` 으로 붙으려면 여기에 **`mlflow:5000` 을 명시** 해야 합니다 (검사는 정확 일치/ fnmatch 이고 포트를 안 뗌). `*` 하나로 열려던 이전 값은 이 스택의 `>` + `bash -c "..."` 작은따옴표 중첩에서 깨끗한 와일드카드로 안 넘어가 `mlflow:5000` 을 못 잡았으므로, **실제 `host:port` 를 나열** 합니다. `--cors-allowed-origins '*'` 는 브라우저 CORS 용으로 별개입니다.
+- `--allowed-hosts '*'` 는 MLflow 3.x 의 DNS-rebinding 보호(요청의 `Host` 헤더 검사) 를 **전체 허용** 으로 엽니다 (`*` 는 fnmatch 와일드카드라 모든 Host 통과 — 플로우의 `mlflow:5000`, UI 의 `localhost`·host IP 모두). 신뢰된 내부망·스터디 전제라 `*` 로 둡니다. **주의: 이 플래그는 위 `command` 가 (모든 줄 같은 들여쓰기의 `>` 폴딩으로) 한 줄로 이어져야만 실제 적용됩니다** — continuation 줄을 더 깊이 들여쓰면 YAML 이 줄바꿈을 보존해 명령이 `--port 5000` 뒤에서 잘리고, 그러면 이 플래그가 통째로 유실되어 MLflow 가 **기본 허용(localhost · 사설 IP)** 만 쓰므로 서비스명 `mlflow` 는 403 으로 막힙니다 (그게 이전 증상이었음). 더 좁히려면 `*` 대신 `host:port` 를 나열하되, 지정 시 **기본값을 덮어쓰므로** UI 용 `localhost:5000` 도 반드시 함께 넣습니다. `--cors-allowed-origins '*'` 는 브라우저 CORS 용으로 별개입니다.
 - `env_file` 은 backend 계정 (`POSTGRES_USER`/`POSTGRES_PASSWORD`) 과 artifact 접속 키 (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`), 그리고 MinIO endpoint (`MLFLOW_S3_ENDPOINT_URL`) 를 주입합니다.
 - `networks: mlops` 로 같은 호스트의 `postgres` · `minio` 와 서비스명으로 통신합니다. 그 둘은 별도 compose 라 `depends_on` 을 걸 수 없으므로, `restart: unless-stopped` 로 준비될 때까지 자동 재시도합니다.
 
