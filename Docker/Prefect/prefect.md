@@ -1,6 +1,6 @@
 # Prefect Pipeline Orchestration on Docker
 
-<sub>rev. 544</sub>
+<sub>rev. 545</sub>
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
@@ -438,7 +438,7 @@ dispatcher 는 **`docker` work pool** 을 polling 해 job 마다 `pipeline_flow`
 
   worker 가 뜨는 **그 순간** server 에 자기를 알리며 (heartbeat 시작) 해당 work pool 에 **자동 등록**됩니다 — **polling 시작 = 등록** 이라 별도 절차가 없습니다. heartbeat 가 끊기면 잠시 뒤 **OFFLINE** 으로 바뀝니다 (dispatcher 등록은 deployment 등록과 별개).
 
-  > **보안 주의** — 도커 소켓 마운트는 dispatcher 에 호스트 도커 전체 제어권 (사실상 root) 을 줍니다. 신뢰된 내부망·스터디 용도로 한정하고, 더 강한 격리는 Kubernetes work pool 을 고려합니다 ([Appendix I](#appendix-i-orchestrator-benchmarking)).
+  > **보안 주의** — 도커 소켓 마운트는 dispatcher 에 호스트 도커 전체 제어권 (사실상 root) 을 줍니다. 신뢰된 내부망·스터디 용도로 한정하고, 더 강한 격리는 Kubernetes work pool 을 고려합니다 ([Appendix J](#appendix-j-orchestrator-benchmarking)).
 
 ### 4.3 Scaling
 
@@ -582,7 +582,7 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
   from prefect.blocks.core import Block
   from prefect.blocks.fields import SecretDict
 
-  __version__ = "0.0.25"  # Semantic Versioning:  Version = Major.Minor.Patch
+  __version__ = "0.0.26"  # Semantic Versioning:  Version = Major.Minor.Patch
 
 
   class Credentials(Block):              # ONE block holds everything as nested dicts; values hidden
@@ -638,6 +638,11 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
               mlflow_endpoint = creds.mlflow.get_secret_value().get("endpoint")
               if mlflow_endpoint:
                   env["MLFLOW_TRACKING_URI"] = mlflow_endpoint
+          # bridge the postgresql_optuna DSN too, so a payload using Optuna hits the shared study DB.
+          opt = creds.postgresql_optuna.get_secret_value()
+          opt_host, _, opt_port = opt["endpoint"].partition(":")
+          env["POSTGRESQL_OPTUNA_DSN"] = (f"postgresql://{opt['username']}:{opt['password']}"
+                                          f"@{opt_host}:{opt_port or '5432'}/{opt['database']}")
           # run the team's payload in script/; run identity passed as CLI args; output streams to this run's logs.
           subprocess.run(["python", payload, "--submitter", submitter,
                           "--data_folder", data], cwd=script, env=env, check=True)
@@ -652,7 +657,7 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
   - **자유로운 코드** — `payload` 로 팀원이 자기 스크립트를 지정하므로 코드를 정해진 틀에 맞출 필요가 없습니다. 입력은 CLI 인자 (`--submitter`·`--data_folder`) 로 받으므로, 팀원 스크립트는 `argparse` 로 그 값만 읽으면 됩니다. (payload 는 이미 체크아웃된 `script/` 안에서 돌므로 git 정보는 넘기지 않고, MLflow 서버 주소만 블록의 `mlflow` endpoint 를 `MLFLOW_TRACKING_URI` 환경변수로 넘깁니다.)
   - **데이터 이력** — `minio_bucket`·`minio_key` 가 **flow 파라미터** 라서 Prefect 가 run 마다 입력값을 `prefect` DB 에 자동 저장합니다 (어느 버킷·객체를 썼는지 lineage 로 남습니다).
   - **crash 확인** — payload 가 0 이 아닌 코드로 끝나면 `subprocess.run(check=True)` 가 `CalledProcessError` 를 던지고, `pipeline` 가 `submitter@commit` 을 단 에러를 run 로그에 남긴 뒤 다시 raise 해 run 이 **Failed** 로 표시됩니다. payload 의 stdout·stderr 는 실행 중 이 run 의 로그로 흘러 들어가므로, 팀원은 자기 이름이 붙은 run (`alice@a1b2c3d`) 의 **Logs** 에서 crash 원인을 봅니다. payload 가 `@task` 를 쓰면 자기 flow run ([§8](#8-prefect-ui)) 에서 **어느 단계** 가 깨졌는지까지 보입니다.
-  - **이력 자동 저장** — `@flow` 진입 시 Prefect 가 run 의 상태·로그·파라미터를 자동 기록합니다. 지표·모델은 팀원 코드가 MLflow 로 로깅하면 함께 남습니다 — pipeline.py 가 블록의 `mlflow` endpoint 를 `MLFLOW_TRACKING_URI` env 로 넘기므로 payload 는 그 tracking 서버로 로깅합니다 (없으면 로컬 `./mlruns` 로 빠지니 블록에 `mlflow` 를 채워야 대시보드에 뜹니다) ([Appendix J](#appendix-j-prefect-task)).
+  - **이력 자동 저장** — `@flow` 진입 시 Prefect 가 run 의 상태·로그·파라미터를 자동 기록합니다. 지표·모델은 팀원 코드가 MLflow 로 로깅하면 함께 남습니다 — pipeline.py 가 블록의 `mlflow` endpoint 를 `MLFLOW_TRACKING_URI` env 로 넘기므로 payload 는 그 tracking 서버로 로깅합니다 (없으면 로컬 `./mlruns` 로 빠지니 블록에 `mlflow` 를 채워야 대시보드에 뜹니다). 마찬가지로 블록의 `postgresql_optuna` 를 DSN 으로 조립해 `POSTGRESQL_OPTUNA_DSN` env 로 넘기므로, Optuna 를 쓰는 payload 는 공유 postgres study 에 연결합니다 ([Appendix K](#appendix-k-prefect-task)).
 
   [§5.2](#52-deployment) 의 deployment 가 entrypoint 를 **`pipeline.py:pipeline`** 로 가리킵니다. 이 문자열은 server 의 deployment 레코드 (`prefect` DB) 에 저장되고, dispatcher 가 띄운 컨테이너 안에서 Prefect 런타임이 이미지 작업 디렉터리 (`/work`, `Dockerfile.pipeline_flow` 가 `pipeline.py` 를 COPY 한 곳) 기준으로 `pipeline.py` 를 import 해 콜론 뒤 **`@flow` 함수 `pipeline`** 을 run 파라미터 (`git_repo`·`git_commit_hash`·`minio_key`·`minio_bucket`·`submitter`·`prefect_block`·`payload`) 와 함께 호출합니다. 그래서 deployment entrypoint 가 곧 이 `pipeline.py` 입니다.
 
@@ -847,7 +852,7 @@ server 대시보드 (`http://<Host IP>:4200`) 에서 deployment·run·task 가 �
 
 - **Deployments** — `<flow_name>/<deployment_name>` 로 나열됩니다 (예: `pipeline/pipelineflow-high`·`pipeline/pipelineflow-low`). flow 이름은 `@flow(name="pipeline")`, deployment 이름은 yaml 의 `name` 입니다.
 - **Flow Runs** — trigger 된 run 이 `flow_run_name` 으로 나열됩니다. `member` 가 들어가 같은 deployment 아래에서 `alice@a1b2c3d` 처럼 **누구의 run 인지** 구분됩니다 ([§5.3](#53-pipelinepy) 의 `flow_run_name`). `pipeline.py` 는 payload 에 실행자 이름 (`submitter`) 만 넘기고 git 정보는 넘기지 않으므로, 팀 payload 의 flow run 은 실행자 이름 (예: `alice`) 으로 나열됩니다 (orchestrator run 은 `alice@a1b2c3d`).
-- **Tasks** — 팀 payload 가 단계 (dp·fe·train·test) 를 **`@task`** 로 감싸고 `@flow` 로 묶으면, 컨테이너 env 의 `PREFECT_API_URL` 덕분에 그 subprocess 가 **자기 flow run 과 task** 를 보고해 단계가 보입니다 (orchestrator run 과 **별개 flow run**, subprocess 라 격리 유지 — [Appendix J](#appendix-j-prefect-task)).
+- **Tasks** — 팀 payload 가 단계 (dp·fe·train·test) 를 **`@task`** 로 감싸고 `@flow` 로 묶으면, 컨테이너 env 의 `PREFECT_API_URL` 덕분에 그 subprocess 가 **자기 flow run 과 task** 를 보고해 단계가 보입니다 (orchestrator run 과 **별개 flow run**, subprocess 라 격리 유지 — [Appendix K](#appendix-k-prefect-task)).
 - **Parameters · State · Logs** — run 마다 입력 파라미터 (`git_repo`·`git_commit_hash`·`minio_key`·`member`)·상태·로그가 자동 기록되어 (UI 의 Flow Run → Parameters), 같은 파라미터로 재실행 (재현) 할 수 있습니다.
 
 job 하나가 trigger 되면 대시보드에 다음처럼 보입니다.
@@ -1280,7 +1285,56 @@ protobuf==4.25.9               # Serialization (TensorFlow dependency)
 pyarrow==15.0.2                # parquet I/O; mlflow 2.14.1 requires pyarrow<16
 ```
 
-## Appendix I. Orchestrator Benchmarking
+## Appendix I. Mounting a remote data folder
+
+같은 LAN 의 remote Ubuntu 머신에 있는 data 폴더를 dispatcher 호스트의 docker 에 **NFS 로 mount** 해, `pipeline_flow` 컨테이너가 MinIO 다운로드 없이 그 폴더를 직접 읽게 하는 방법입니다. payload 는 `--data_folder` 로 경로만 받으므로 (`pipeline.py` [§5.3](#53-pipelinepy)) 다운로드든 mount 든 **무변경** 입니다.
+
+**1) 데이터 호스트 (remote Ubuntu) — NFS export.** 폴더를 LAN 서브넷에 읽기전용으로 내보냅니다.
+
+```bash
+# on the data host (e.g. 192.168.0.50)
+sudo apt-get install -y nfs-kernel-server
+sudo mkdir -p /srv/datasets
+# export read-only to the LAN subnet
+echo "/srv/datasets 192.168.0.0/24(ro,sync,no_subtree_check)" | sudo tee -a /etc/exports
+sudo exportfs -ra
+sudo systemctl enable --now nfs-kernel-server
+```
+
+**2) dispatcher 호스트 — export 를 mount.** 두 방식 중 하나.
+
+```bash
+# option A: mount on the host, then bind-mount into the container (step 3)
+sudo apt-get install -y nfs-common
+sudo mkdir -p /mnt/datasets
+sudo mount -t nfs 192.168.0.50:/srv/datasets /mnt/datasets        # ad-hoc
+echo "192.168.0.50:/srv/datasets /mnt/datasets nfs ro,_netdev 0 0" | sudo tee -a /etc/fstab   # persistent
+
+# option B: a docker NFS volume (no host mount needed)
+docker volume create --driver local \
+  --opt type=nfs --opt o=addr=192.168.0.50,ro \
+  --opt device=:/srv/datasets datasets_nfs
+```
+
+**3) pool base job template 에 `volumes` 추가.** dispatcher 가 띄우는 모든 `pipeline_flow` 컨테이너에 마운트를 겁니다 (docker-pool-template-*.json 의 job 변수 → register_pool 재실행). option A 는 호스트 경로, option B 는 볼륨 이름.
+
+```json
+"volumes": ["/mnt/datasets:/datasets:ro"]
+```
+
+**4) pipeline.py — 다운로드 대신 마운트 경로 사용.** MinIO 다운로드 블록을 마운트 하위 경로로 바꿉니다.
+
+```python
+# instead of downloading from MinIO, point at the mounted folder
+data = Path("/datasets") / minio_key
+```
+
+- **읽기전용 (`ro`) 권장** — 여러 run 이 공유하는 불변 데이터. 각 run 의 쓰기 산출물은 컨테이너 내부 임시 경로로.
+- **다중 머신** — dispatcher 가 여러 대면 **모든 호스트에 같은 mount·같은 컨테이너 경로** (`/datasets`) 여야 payload 가 어디서 뜨든 동일하게 읽습니다.
+- **lineage** — `minio_key` 를 경로 키로 재사용하면 "어느 데이터" 기록이 유지됩니다.
+- **Windows/Docker Desktop dispatcher** 라면 NFS 대신 **SMB/CIFS** 가 편합니다 (대안: SSHFS·CIFS). 권한은 컨테이너 안에서 읽기 가능한 UID/GID 인지 확인합니다.
+
+## Appendix J. Orchestrator Benchmarking
 
 ### Prefect vs Dagster vs Airflow
 
@@ -1332,7 +1386,7 @@ pyarrow==15.0.2                # parquet I/O; mlflow 2.14.1 requires pyarrow<16
 
   > granularity 는 **Workflow → Run/Job → Task → Step** 순으로 좁아지고, 실행을 감싸는 껍데기는 **컨테이너 (단일 호스트) / pod (클러스터)** 입니다. 세 단어를 하나로 통일하기보다 이 계층 안에서 구분해 쓰는 것이 업계 표준에 맞습니다.
 
-## Appendix J. Prefect @task
+## Appendix K. Prefect @task
 
 `@task` 를 쓰지 않아도 이력 관리와 재현 (reproducibility) 은 완전히 됩니다. Prefect 에서 실행 흐름을 묶는 핵심 단위는 `@task` 가 아니라 **`@flow`** 이기 때문입니다. `@flow` 데코레이터만 붙이면 그 안의 코드가 일반 함수든 클래스든 **실행 이력과 입력 파라미터가 Prefect Server 에 기록**됩니다.
 
