@@ -1,6 +1,6 @@
 # Docker CLI (Command Line Interface)
 
-<sub>rev. 104</sub>
+<sub>rev. 105</sub>
 
 각 컴포넌트를 도커로 띄우고 운영할 때 공통으로 쓰는 명령을 모았습니다.
 
@@ -9,8 +9,8 @@
 ### Version
 
 ```powershell
-docker compose version             # Compose v2 설치 여부와 버전을 확인한다.
-docker version                     # Docker Engine/CLI 버전을 확인한다.
+docker compose version             # check whether Compose v2 is installed, and its version.
+docker version                     # check the Docker Engine/CLI version.
 ```
 
 > 신버전은 `docker compose` (공백), 구버전은 `docker-compose` (하이픈) 입니다. `docker compose version` 이 정상 출력되면 v2 환경입니다.
@@ -22,11 +22,11 @@ docker version                     # Docker Engine/CLI 버전을 확인한다.
 #### Create / Check / Remove
 
 ```powershell
-docker network create mlops        # 공유 네트워크 생성 (최초 1회).
-docker network ls                  # 네트워크 목록 확인 — NAME 열에 mlops 가 보이면 준비 완료.
-docker network inspect mlops       # 상세 정보 — Containers 항목에서 붙어 있는 컨테이너를 확인한다.
-docker network rm mlops            # 네트워크 삭제 (붙은 컨테이너가 없을 때만 가능).
-docker network prune               # 어디에도 붙지 않은 네트워크를 일괄 정리한다 (주의).
+docker network create mlops        # create the shared network (once).
+docker network ls                  # list networks — ready when mlops shows in the NAME column.
+docker network inspect mlops       # details — check attached containers under Containers.
+docker network rm mlops            # remove the network (only when no container is attached).
+docker network prune               # bulk-remove networks attached nowhere (careful).
 ```
 
 > 이미 있는 네트워크를 다시 `create` 하면 `already exists` 에러가 납니다. 무시해도 되며, `docker network ls` 로 존재 여부를 먼저 확인하면 깔끔합니다.
@@ -36,8 +36,8 @@ docker network prune               # 어디에도 붙지 않은 네트워크를 
 보통은 compose 의 `networks:` 가 자동으로 연결하므로 수동 명령은 거의 쓰지 않습니다. 임시로 붙이거나 뗄 때만 사용합니다.
 
 ```powershell
-docker network connect mlops <container>       # 떠 있는 컨테이너를 네트워크에 연결한다.
-docker network disconnect mlops <container>    # 네트워크에서 분리한다.
+docker network connect mlops <container>       # attach a running container to the network.
+docker network disconnect mlops <container>    # detach it from the network.
 ```
 
 ## 2. Run
@@ -45,14 +45,14 @@ docker network disconnect mlops <container>    # 네트워크에서 분리한다
 compose 없이 이미지에서 컨테이너를 직접 띄웁니다. `docker run` 은 이미지로 새 컨테이너를 만들어 시작합니다.
 
 ```powershell
-docker run <image>                                     # 이미지로 컨테이너를 만들어 포그라운드로 실행한다.
-docker run -d <image>                                  # 백그라운드 (detached) 로 실행한다.
-docker run -d --name <container> <image>               # 이름을 붙여 실행한다.
-docker run -d -p <host>:<container> <image>            # 호스트↔컨테이너 포트를 잇는다 (예: 8080:80).
-docker run -d -v <host path>:<container path> <image>  # 호스트 폴더를 컨테이너에 마운트한다.
-docker run -d --network <network> <image>              # 지정 네트워크에 붙여 실행한다.
-docker run --rm -it <image> bash                       # 1회용으로 띄워 셸에 들어가고, 나오면 삭제한다.
-docker run -d --restart unless-stopped <image>         # 죽거나 재부팅돼도 자동 재시작한다 (직접 멈추기 전까지).
+docker run <image>                                     # create a container from the image and run in the foreground.
+docker run -d <image>                                  # run in the background (detached).
+docker run -d --name <container> <image>               # run with a given name.
+docker run -d -p <host>:<container> <image>            # map a host<->container port (e.g. 8080:80).
+docker run -d -v <host path>:<container path> <image>  # mount a host folder into the container.
+docker run -d --network <network> <image>              # run attached to the given network.
+docker run --rm -it <image> bash                       # run a throwaway container, enter a shell, delete on exit.
+docker run -d --restart unless-stopped <image>         # auto-restart on crash or reboot (until stopped by hand).
 ```
 
 > `--restart` 정책 — `no` (기본), `on-failure[:N]` (비정상 종료 시만), `always` (항상, 재부팅 뒤에도 무조건), `unless-stopped` (always 와 같되 `docker stop` 으로 직접 멈춘 것은 재시작 안 함). 오래 떠 있어야 하는 서비스에는 `unless-stopped` 가 무난합니다. compose 에서는 서비스에 `restart: unless-stopped` 로 같은 정책을 겁니다.
@@ -64,9 +64,9 @@ docker run -d --restart unless-stopped <image>         # 죽거나 재부팅돼�
 한 폴더에 compose 파일이 여러 개일 때는 `-f` 로 대상을 지정합니다.
 
 ```powershell
-docker compose -p <Project Name> -f <file>.yml up -d   # 지정한 compose 파일로 실행한다.
-docker compose -f <file>.yml logs -f      # 그 파일의 서비스 로그를 본다.
-docker compose -f <file>.yml down         # 그 파일의 스택을 내린다.
+docker compose -p <Project Name> -f <file>.yml up -d   # run with the specified compose file.
+docker compose -f <file>.yml logs -f      # view that file's service logs.
+docker compose -f <file>.yml down         # bring down that file's stack.
 ```
 
 ### Scaling
@@ -74,7 +74,7 @@ docker compose -f <file>.yml down         # 그 파일의 스택을 내린다.
 같은 서비스를 여러 개로 늘려 처리량을 높입니다.
 
 ```powershell
-docker compose -p <Project Name> up -d --scale <service>=3              # 해당 서비스를 3개로 늘린다.
+docker compose -p <Project Name> up -d --scale <service>=3              # scale the service to 3 replicas.
 docker compose -p <Project Name> -f <file>.yml up -d --scale <service>=3
 ```
 
@@ -87,11 +87,11 @@ docker compose -p <Project Name> -f <file>.yml up -d --scale <service>=3
 #### Host-wide
 
 ```powershell
-docker ps                          # 현재 실행 중인 컨테이너만 표시.
-docker ps -a                       # 멈춘 것까지 전부 표시 (Exited 포함).
-docker ps -q                       # 컨테이너 ID 만 표시 (스크립트용).
-docker ps --filter "name=mongo"    # 이름으로 거른다.
-docker ps --filter "network=mlops" # mlops 네트워크에 붙은 것만.
+docker ps                          # show only running containers.
+docker ps -a                       # show all, including stopped (Exited too).
+docker ps -q                       # show container IDs only (for scripts).
+docker ps --filter "name=mongo"    # filter by name.
+docker ps --filter "network=mlops" # only those attached to the mlops network.
 ```
 
 보기 좋게 컬럼을 골라 한 줄로:
@@ -103,8 +103,8 @@ docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 #### Compose Stack
 
 ```powershell
-docker compose ps                  # 해당 docker-compose.yml 의 컨테이너 상태만.
-docker compose ps -a               # 멈춘 것까지.
+docker compose ps                  # only this docker-compose.yml's containers.
+docker compose ps -a               # including stopped ones.
 ```
 
 > `docker ps` 는 **호스트 전체**, `docker compose ps` 는 **그 폴더의 compose 스택**만 봅니다. 자주 보는 열 — `STATUS` (`Up ...` = 실행 중, `Exited` = 종료), `PORTS` (`0.0.0.0:27017->27017/tcp` 처럼 호스트↔컨테이너 매핑), `NAMES` (컨테이너 이름).
@@ -112,29 +112,29 @@ docker compose ps -a               # 멈춘 것까지.
 ### Start & Stop
 
 ```powershell
-docker compose -p <Project Name> up -d                  # 백그라운드 (detached) 실행 — 창을 닫아도 유지된다.
-docker compose -p <Project Name> up -d --build          # 이미지를 새로 빌드하면서 실행한다.
-docker compose -p <Project Name> up -d --force-recreate # 설정이 그대로여도 컨테이너를 새로 만들어 다시 띄운다.
-docker compose ps                                       # 컨테이너 상태를 확인한다.
+docker compose -p <Project Name> up -d                  # run in the background (detached) — survives closing the window.
+docker compose -p <Project Name> up -d --build          # rebuild the image while starting.
+docker compose -p <Project Name> up -d --force-recreate # recreate containers even if config is unchanged.
+docker compose ps                                       # check container status.
 
-docker compose stop                # 컨테이너를 정지한다 (제거하지 않는다).
-docker compose start               # 정지된 컨테이너를 다시 시작한다.
-docker compose restart             # 스택의 컨테이너를 재시작한다.
-docker restart <container>         # 컨테이너 하나를 이름으로 재시작한다 (compose 밖에서).
-docker stop <container>            # docker ps 에서 본 컨테이너를 멈춘다 (이름/ID, 정상 종료).
-docker kill <container>            # 곧바로 강제 종료한다 (stop 이 안 먹을 때).
-docker rm -f <container>           # 멈추고 삭제까지 한다 (-f = 실행 중이어도).
+docker compose stop                # stop containers (without removing).
+docker compose start               # start stopped containers again.
+docker compose restart             # restart the stack's containers.
+docker restart <container>         # restart a single container by name (outside compose).
+docker stop <container>            # stop a container seen in docker ps (name/ID, graceful).
+docker kill <container>            # force-kill immediately (when stop won't work).
+docker rm -f <container>           # stop and remove it (-f = even if running).
 
-docker compose down                # 정지 + 컨테이너/네트워크 제거 (named volume 의 데이터는 유지).
-docker compose down -v             # named volume 까지 삭제하여 데이터를 초기화한다 (주의).
+docker compose down                # stop + remove containers/networks (named-volume data kept).
+docker compose down -v             # also delete named volumes, resetting data (careful).
 ```
 
 ### Logs
 
 ```powershell
-docker compose logs -f                  # 전체 로그를 실시간으로 본다.
-docker compose logs -f <service>        # 특정 서비스의 로그만 본다.
-docker compose -f <file>.yml logs -f    # 특정 compose 파일의 로그를 본다 (앞 -f = 파일 지정, 뒤 -f = follow).
+docker compose logs -f                  # follow all logs in real time.
+docker compose logs -f <service>        # follow only a specific service's logs.
+docker compose -f <file>.yml logs -f    # follow a specific compose file's logs (first -f = pick file, second -f = follow).
 ```
 
 ### Resource Limits
@@ -142,17 +142,17 @@ docker compose -f <file>.yml logs -f    # 특정 compose 파일의 로그를 본
 컨테이너 하나가 호스트 메모리를 과도하게 먹으면 서버 전체가 멈출 수 있습니다. 실행할 때 상한을 걸어 한 컨테이너가 자원을 독차지하지 못하게 막습니다.
 
 ```powershell
-docker run -d --name <container> -m <size> <image>                   # 메모리를 <size> 로 묶어 백그라운드 실행 (-m = --memory, 예: 4g).
-docker run -d --name <container> -m <size> --memory-swap <size> <image>  # swap 까지 <size> 로 묶어 초과 사용을 차단한다.
-docker run -d --name <container> --cpus <n> <image>                   # CPU 를 <n> 코어로 제한한다.
+docker run -d --name <container> -m <size> <image>                   # cap memory at <size> and run detached (-m = --memory, e.g. 4g).
+docker run -d --name <container> -m <size> --memory-swap <size> <image>  # also cap swap at <size> to block overuse.
+docker run -d --name <container> --cpus <n> <image>                   # limit CPU to <n> cores.
 ```
 
 떠 있는 컨테이너의 상한을 바꾸거나 실제 사용량을 살핍니다.
 
 ```powershell
-docker update -m <size> <container>  # 실행 중인 컨테이너의 메모리 상한을 바꾼다.
-docker stats                       # 컨테이너별 메모리/CPU 사용량을 실시간으로 본다.
-docker stats --no-stream           # 한 번만 찍고 끝낸다 (스크립트용).
+docker update -m <size> <container>  # change a running container's memory cap.
+docker stats                       # watch per-container memory/CPU usage in real time.
+docker stats --no-stream           # print once and exit (for scripts).
 ```
 
 compose 에서는 서비스에 같은 상한을 걸어 둡니다.
@@ -160,10 +160,10 @@ compose 에서는 서비스에 같은 상한을 걸어 둡니다.
 다음은 docker compose 를 위한 yaml 입니다.
 
 ```yaml
-# docker-compose.yml — 서비스에 메모리 상한 걸기
+# docker-compose.yml — cap a service's memory
 services:
   <service>:
-    mem_limit: <size>              # 이 서비스의 컨테이너를 <size> 로 제한한다 (예: 4g).
+    mem_limit: <size>              # limit this service's container to <size> (e.g. 4g).
 ```
 
 > 상한을 넘기면 도커가 그 컨테이너를 강제로 종료합니다 (OOM kill — `docker ps -a` 에서 `Exited` 로 보임). 메모리를 많이 쓰는 학습/추론 작업일수록 상한을 넉넉히 두되, 호스트 전체 메모리보다는 작게 잡아 다른 컨테이너의 몫을 남겨 둡니다.
@@ -173,8 +173,8 @@ services:
 ### Exec & One-off
 
 ```powershell
-docker compose exec <service> <command>            # 떠 있는 컨테이너 안에서 명령을 1회 실행한다.
-docker compose run --rm <service> <command>        # 1회용 컨테이너로 명령을 실행하고 종료한다.
+docker compose exec <service> <command>            # run a command once inside a running container.
+docker compose run --rm <service> <command>        # run a command in a throwaway container, then exit.
 ```
 
 ### Container Shell — Enter / Exit
@@ -182,26 +182,26 @@ docker compose run --rm <service> <command>        # 1회용 컨테이너로 명
 떠 있는 컨테이너 안으로 **셸을 띄워 직접 들어가** 파일을 확인하거나 명령을 실행할 수 있습니다.
 
 ```powershell
-# 들어가기 — 떠 있는 컨테이너의 대화형 셸에 접속한다 (-it = 입력 가능한 터미널).
-docker compose exec -it <service> bash             # bash 가 없는 경우 sh 로 대체한다.
-docker compose exec -it <service> sh               # alpine 등 경량 이미지 (bash 미포함)
+# Enter — attach to a running container's interactive shell (-it = input-capable terminal).
+docker compose exec -it <service> bash             # fall back to sh if bash is absent.
+docker compose exec -it <service> sh               # alpine and other slim images (no bash)
 
-# 컨테이너 이름으로 직접 접속 (compose 밖에서 — docker ps 로 이름 확인).
+# Attach directly by container name (outside compose — get the name from docker ps).
 docker exec -it <container> bash
 ```
 
 나오기는 컨테이너를 멈추지 않고 셸만 빠져나옵니다.
 
 ```text
-exit            # 셸 종료 후 호스트로 복귀 (또는 Ctrl-D). 컨테이너는 계속 떠 있다.
-Ctrl-P, Ctrl-Q  # docker attach 로 붙은 경우, 컨테이너를 멈추지 않고 분리 (detach) 한다.
+exit            # leave the shell back to the host (or Ctrl-D). the container keeps running.
+Ctrl-P, Ctrl-Q  # if attached via docker attach, detach without stopping the container.
 ```
 
 떠 있는 컨테이너가 없을 때는, 이미지에서 바로 1회용 셸을 띄워 안을 들여다봅니다. 이미지에 entrypoint 가 걸려 있으면 `--entrypoint` 로 덮어 bash 를 띄웁니다.
 
 ```powershell
-docker run --rm -it <image>:<tag> bash                    # 이미지로 1회용 컨테이너를 띄워 셸에 들어간다 (--rm = 나오면 삭제).
-docker run --rm -it --entrypoint /bin/bash <image>:<tag>  # entrypoint 를 bash 로 덮어 띄운다 (entrypoint 가 막을 때).
+docker run --rm -it <image>:<tag> bash                    # run a throwaway container from the image and enter a shell (--rm = delete on exit).
+docker run --rm -it --entrypoint /bin/bash <image>:<tag>  # override the entrypoint with bash (when an entrypoint blocks it).
 ```
 
 > `exec` 로 들어간 셸을 `exit` 하면 그 셸 세션만 끝나고 **컨테이너는 계속 실행** 됩니다. 컨테이너 자체를 멈추려면 [Start & Stop](#start--stop) 의 `docker compose stop` / `down` 을 씁니다. 셸이 없는 컨테이너에는 1회용 셸 컨테이너로 같은 네트워크에 붙어 접근합니다 (`docker run -it --rm --network <network> <image> sh`).
@@ -215,30 +215,30 @@ docker run --rm -it --entrypoint /bin/bash <image>:<tag>  # entrypoint 를 bash 
 먼저 시스템에 어떤 그룹이 있는지, `docker` 그룹이 이미 있는지 확인합니다.
 
 ```bash
-getent group                    # 시스템의 전체 그룹 목록을 본다.
-getent group docker             # docker 그룹만 조회 — 한 줄이 나오면 이미 존재 (없으면 출력 없음).
-cut -d: -f1 /etc/group | sort   # 그룹 이름만 정렬해서 본다 (가독성).
+getent group                    # list all groups on the system.
+getent group docker             # query only the docker group — one line means it exists (no output if not).
+cut -d: -f1 /etc/group | sort   # show group names sorted (readability).
 ```
 
 `docker` 그룹이 없을 때만 만들고, 내 계정을 그 그룹에 추가합니다.
 
 ```bash
-sudo groupadd docker            # docker 그룹 생성 (보통 설치 시 이미 있다 — 없을 때만).
-sudo usermod -aG docker $USER   # 현재 사용자를 docker 그룹에 추가한다.
+sudo groupadd docker            # create the docker group (usually present after install — only if missing).
+sudo usermod -aG docker $USER   # add the current user to the docker group.
 ```
 
 그룹 변경은 **새 로그인 세션부터** 적용됩니다. 다음 중 하나로 반영합니다.
 
 ```bash
-newgrp docker                   # 현재 셸에 즉시 적용 (재로그인 대신 임시 적용).
-# 또는 로그아웃 후 다시 로그인 (SSH 면 연결을 끊고 재접속). 확실한 방법.
+newgrp docker                   # apply immediately in the current shell (temporary, instead of re-login).
+# or log out and back in (over SSH, disconnect and reconnect). the sure way.
 ```
 
 적용됐는지 확인:
 
 ```bash
-groups                          # 출력에 docker 가 보이면 적용됨.
-docker ps                       # sudo 없이 정상 동작하면 완료.
+groups                          # applied if docker shows in the output.
+docker ps                       # done if it works without sudo.
 ```
 
 > **보안 주의** — `docker` 그룹은 사실상 root 권한과 같습니다 (컨테이너로 호스트 파일시스템을 마운트할 수 있음). 신뢰하는 1인 개발 머신에서만 쓰고, 공용 서버에서는 `sudo` 를 유지하는 편이 안전합니다.

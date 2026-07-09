@@ -1,6 +1,6 @@
 # Git CLI (Command Line Interface)
 
-<sub>rev. 102</sub>
+<sub>rev. 104</sub>
 
 자주 쓰는 git 명령을 **작업 영역**과 **역할**로 분류했습니다. `<branch>` · `<remote>` · `<commit>` · `<file>` 은 실제 이름으로 바꿔 씁니다. 문법은 PowerShell · bash 공통입니다.
 
@@ -46,8 +46,8 @@ Creation → Publish (→ remote) → Track (← remote) → Management → Dele
 빈 폴더를 새 저장소로 만들어 `.git` 을 깔아 둡니다.
 
 ```bash
-git init                                   # 현재 폴더를 새 git 저장소로 만든다(.git 생성).
-git init -b main                           # 기본 가지 이름을 main 으로 정해 시작한다.
+git init                                   # turn the current folder into a new git repo (.git created).
+git init -b main                           # start with the default branch named main.
 ```
 
 ### Publish — upload to remote
@@ -55,8 +55,8 @@ git init -b main                           # 기본 가지 이름을 main 으로
 로컬 저장소를 원격에 이어 처음 올립니다.
 
 ```bash
-git remote add origin <url>                # 'origin' 이라는 이름으로 원격을 잇는다.
-git push -u origin main                     # 첫 업로드 — 추적 관계를 맺는다(이후엔 git push 만).
+git remote add origin <url>                # link a remote under the name 'origin'.
+git push -u origin main                    # first upload — set the tracking link (later just git push).
 ```
 
 ### Track — download from remote
@@ -64,9 +64,9 @@ git push -u origin main                     # 첫 업로드 — 추적 관계를
 원격 저장소를 통째로 받아 로컬에 복제합니다.
 
 ```bash
-git clone <url>                            # 원격 저장소를 통째로 내려받아 복제한다.
-git clone -b <branch> <url>                # 특정 가지를 받아 복제한다.
-git clone --depth 1 <url>                  # 최근 이력만 얕게 받는다(빠름).
+git clone <url>                            # copy a remote repo down in full.
+git clone -b <branch> <url>                # clone a specific branch.
+git clone --depth 1 <url>                  # shallow clone, recent history only (fast).
 ```
 
 ### Management
@@ -74,10 +74,10 @@ git clone --depth 1 <url>                  # 최근 이력만 얕게 받는다(�
 원격 연결과 설정을 살피고 손봅니다.
 
 ```bash
-git remote -v                              # 연결된 원격 목록을 본다(fetch/push 주소).
-git remote set-url origin <url>            # origin 의 주소를 바꾼다.
-git remote rename <old> <new>              # 원격 이름을 바꾼다.
-git config --list                          # 적용 중인 설정을 본다(user.name 등).
+git remote -v                              # list linked remotes (fetch/push URLs).
+git remote set-url origin <url>            # change origin's URL.
+git remote rename <old> <new>              # rename a remote.
+git config --list                          # show the active config (user.name, etc.).
 ```
 
 ### Delete
@@ -85,8 +85,8 @@ git config --list                          # 적용 중인 설정을 본다(user
 저장소나 원격 연결을 치웁니다.
 
 ```bash
-git remote remove origin                   # 원격 연결만 끊는다(로컬 저장소는 유지).
-rm -rf .git                                # .git 을 지워 일반 폴더로 되돌린다(이력 사라짐, 주의).
+git remote remove origin                   # drop only the remote link (local repo stays).
+rm -rf .git                                # delete .git to revert to a plain folder (history lost, careful).
 ```
 
 > 원격 저장소 자체 (GitHub 등) 는 호스팅 사이트 설정에서 지웁니다 — git 명령으로는 지워지지 않습니다.
@@ -104,9 +104,9 @@ Creation → Publish (→ remote) → Track (← remote) → Management → Dele
 새 가지를 만들고 그 위에서 작업을 시작합니다.
 
 ```bash
-git switch -c <branch>                     # 새 가지를 만들면서 바로 이동한다(권장).
-git branch <branch>                        # 만들기만 하고 이동은 하지 않는다.
-git switch -c <branch> <start-point>       # 특정 커밋·가지에서 갈라져 나온다.
+git switch -c <branch>                     # create a branch and switch to it (recommended).
+git branch <branch>                        # create only, do not switch.
+git switch -c <branch> <start-point>       # branch off a specific commit/branch.
 ```
 
 ### Publish — upload to remote
@@ -114,8 +114,8 @@ git switch -c <branch> <start-point>       # 특정 커밋·가지에서 갈라�
 로컬 가지를 원격에 올려 공유합니다. 처음 올릴 때 추적 관계를 맺습니다.
 
 ```bash
-git push -u origin <branch>                # 처음 올리며 추적 관계를 맺는다(이후엔 git push 만).
-git push                                   # 추적 관계가 있으면 현재 가지를 올린다.
+git push -u origin <branch>                # first upload, set the tracking link (later just git push).
+git push                                   # push the current branch once tracking is set.
 ```
 
 ### Track — download from remote
@@ -123,9 +123,9 @@ git push                                   # 추적 관계가 있으면 현재 �
 원격에만 있는 가지를 내 쪽으로 받아 그 위에서 작업합니다.
 
 ```bash
-git fetch                                  # 원격 가지 정보를 받아만 온다(작업 트리는 그대로).
-git switch <branch>                        # 같은 이름의 원격 가지를 추적하며 새로 만든다.
-git switch -c <local> origin/<branch>      # 원격 가지를 명시해 추적 가지를 만든다.
+git fetch                                  # fetch remote branch info only (working tree untouched).
+git switch <branch>                        # create and track a remote branch of the same name.
+git switch -c <local> origin/<branch>      # make a tracking branch from a named remote branch.
 ```
 
 ### Management
@@ -133,11 +133,11 @@ git switch -c <local> origin/<branch>      # 원격 가지를 명시해 추적 �
 가지를 살피고, 이름을 바꾸고, 최신으로 맞춥니다.
 
 ```bash
-git branch                                 # 로컬 가지 목록을 본다(현재 가지에 *).
-git branch -a                              # 원격 추적 가지까지 함께 본다.
-git branch -m <old> <new>                  # 가지 이름을 바꾼다.
-git pull                                   # 현재 가지를 원격 최신으로 맞춘다(fetch + merge).
-git merge <branch>                         # 다른 가지를 현재 가지에 합친다.
+git branch                                 # list local branches (* marks current).
+git branch -a                              # include remote-tracking branches.
+git branch -m <old> <new>                  # rename a branch.
+git pull                                   # bring the current branch up to remote (fetch + merge).
+git merge <branch>                         # merge another branch into the current one.
 ```
 
 ### Delete
@@ -145,9 +145,9 @@ git merge <branch>                         # 다른 가지를 현재 가지에 �
 일이 끝난 가지를 양쪽에서 치웁니다.
 
 ```bash
-git branch -d <branch>                     # 병합 끝난 로컬 가지를 지운다(-D 는 강제).
-git push origin --delete <branch>          # 원격 가지를 지운다.
-git fetch --prune                          # 원격에서 사라진 가지의 추적 정보를 정리한다.
+git branch -d <branch>                     # delete a merged local branch (-D to force).
+git push origin --delete <branch>          # delete the remote branch.
+git fetch --prune                          # clean up tracking refs for branches gone from remote.
 ```
 
 ## 4. Nested Repositories
@@ -174,16 +174,16 @@ git fetch --prune                          # 원격에서 사라진 가지의 �
 하위 폴더에 다른 저장소를 **특정 커밋 포인터** 로 둡니다. 메인에는 주소와 커밋 해시만 적히고, 실제 파일은 각자의 저장소가 관리합니다.
 
 ```bash
-git submodule add <url> <path>             # <path> 에 다른 저장소를 하위 모듈로 더한다(.gitmodules 생성).
-git submodule add -b <branch> <url> <path> # 특정 가지를 기준으로 더한다.
-git submodule status                       # 각 하위 모듈이 가리키는 커밋을 본다.
+git submodule add <url> <path>             # add another repo as a submodule at <path> (.gitmodules created).
+git submodule add -b <branch> <url> <path> # add based on a specific branch.
+git submodule status                       # show which commit each submodule points to.
 ```
 
 버전을 올릴 때는 하위 모듈을 원하는 커밋으로 옮긴 뒤, 메인에서 그 포인터 변화를 커밋합니다.
 
 ```bash
-cd <path> && git checkout <commit>         # 하위 모듈을 원하는 커밋으로 맞춘다.
-cd .. && git add <path> && git commit -m "bump submodule"  # 메인에 새 포인터를 기록한다.
+cd <path> && git checkout <commit>         # set the submodule to the wanted commit.
+cd .. && git add <path> && git commit -m "bump submodule"  # record the new pointer in the main repo.
 ```
 
 > 메인에는 하위 모듈의 **커밋 해시만** 담깁니다. 받는 쪽은 실제 파일을 따로 받아 채워야 합니다 (아래 Track).
@@ -193,8 +193,8 @@ cd .. && git add <path> && git commit -m "bump submodule"  # 메인에 새 포�
 다른 저장소의 파일을 **메인 이력 안으로 통째로 합쳐** 하위 폴더에 둡니다. 받는 사람은 별도 명령 없이 보통 폴더처럼 바로 씁니다 (`.gitmodules` 없음).
 
 ```bash
-git subtree add --prefix=<path> <url> <branch> --squash   # <path> 에 다른 저장소를 합친다(이력은 한 커밋으로 압축).
-git subtree push --prefix=<path> <url> <branch>           # <path> 의 변경을 그 원격으로 되돌려 보낸다.
+git subtree add --prefix=<path> <url> <branch> --squash   # add a repo at <path> (path from repo root); squash history into one commit.
+git subtree push --prefix=<path> <url> <branch>           # push <path> (path from repo root) changes back to that remote.
 ```
 
 > `--squash` 는 끌어온 이력을 한 커밋으로 눌러 메인 이력을 깔끔하게 둡니다. 빼면 원본 커밋이 그대로 섞여 들어옵니다.
@@ -208,9 +208,9 @@ git subtree push --prefix=<path> <url> <branch>           # <path> 의 변경을
 submodule 은 복제 직후 폴더가 비어 있습니다. 내용을 받아 채우고, 원격 최신으로 맞춥니다.
 
 ```bash
-git clone --recurse-submodules <url>       # 메인을 복제하면서 하위 모듈까지 함께 받는다.
-git submodule update --init --recursive    # 이미 복제했다면 하위 모듈 내용을 받아 채운다.
-git submodule update --remote <path>       # 하위 모듈을 원격 최신 커밋으로 갱신한다.
+git clone --recurse-submodules <url>       # clone the main repo and fetch submodules together.
+git submodule update --init --recursive    # if already cloned, populate submodule contents.
+git submodule update --remote <path>       # update the submodule to the remote's latest commit.
 ```
 
 #### Subtree — pull from remote
@@ -218,7 +218,7 @@ git submodule update --remote <path>       # 하위 모듈을 원격 최신 커�
 subtree 는 `clone` 으로 이미 따라옵니다. 원본 저장소의 새 변경만 끌어와 갱신합니다.
 
 ```bash
-git subtree pull --prefix=<path> <url> <branch> --squash  # 원격의 새 변경을 끌어와 갱신한다.
+git subtree pull --prefix=<path> <url> <branch> --squash  # pull the remote's new changes into <path> (path from repo root).
 ```
 
 #### Worktree — pin a version
@@ -226,9 +226,9 @@ git subtree pull --prefix=<path> <url> <branch> --squash  # 원격의 새 변경
 submodule·subtree 없이, 다른 저장소의 특정 커밋만 하위 폴더로 펼쳐 고정해 씁니다.
 
 ```bash
-git clone <url> <dep>                       # 다른 저장소를 <dep> 에 한 번 복제한다.
-git -C <dep> worktree add <path> <commit>   # <dep> 의 특정 커밋을 <path> 폴더로 펼친다(고정 버전).
-git -C <dep> worktree remove <path>         # 다 쓰면 펼친 폴더를 거둔다.
+git clone <url> <dep>                       # clone the other repo once into <dep>.
+git -C <dep> worktree add <path> <commit>   # unfold <dep>'s commit into <path> (pinned version).
+git -C <dep> worktree remove <path>         # remove the unfolded folder when done.
 ```
 
 > worktree 로 펼친 폴더는 다른 저장소의 사본이라, 메인 저장소에서는 보통 `.gitignore` 로 빼 두어 메인 이력에 담지 않습니다.
@@ -242,14 +242,14 @@ git -C <dep> worktree remove <path>         # 다 쓰면 펼친 폴더를 거둔
 변경을 골라 담고 (stage) 이력으로 굳힙니다 (commit).
 
 ```bash
-git status                                 # 변경·스테이징 상태를 한눈에 본다.
-git add <file>                             # 특정 파일을 stage 에 담는다.
-git add .                                  # 현재 폴더의 모든 변경을 담는다.
-git restore --staged <file>               # stage 에서 내린다(작업 내용은 그대로 둔다).
+git status                                 # see changes and staging at a glance.
+git add <file>                             # stage a specific file.
+git add .                                  # stage all changes in the current folder.
+git restore --staged <file>               # unstage (keep the working-tree changes).
 
-git commit -m "메시지"                     # 담아 둔 변경을 이력으로 굳힌다.
-git commit -am "메시지"                    # 추적 중인 파일을 add + commit 한 번에(새 파일 제외).
-git commit --amend -m "메시지"             # 직전 커밋을 고쳐 다시 쓴다(아직 push 전일 때).
+git commit -m "<message>"                  # record staged changes into history.
+git commit -am "<message>"                 # add + commit tracked files at once (excludes new files).
+git commit --amend -m "<message>"          # rewrite the last commit (before it is pushed).
 ```
 
 ### History — log · rev-list
@@ -257,9 +257,9 @@ git commit --amend -m "메시지"             # 직전 커밋을 고쳐 다시 �
 이력을 훑고 커밋 수를 셉니다.
 
 ```bash
-git log --oneline                          # 커밋을 한 줄씩 간추려 본다.
-git rev-list --count HEAD                  # HEAD 까지의 전체 커밋 수를 센다.
-git rev-list --count HEAD <file>           # 그 파일을 건드린 커밋 수만 센다.
+git log --oneline                          # browse commits, one line each.
+git rev-list --count HEAD                  # count all commits up to HEAD.
+git rev-list --count HEAD <file>           # count only commits that touched that file.
 ```
 
 ### Stash
@@ -267,15 +267,15 @@ git rev-list --count HEAD <file>           # 그 파일을 건드린 커밋 수�
 커밋하기 이른 변경을 잠시 치워 두고, 깨끗한 상태에서 다른 일을 합니다.
 
 ```bash
-git stash                                  # 작업 중 변경을 보관함에 치우고 작업 트리를 비운다.
-git stash -u                               # 추적 안 되는 새 파일까지 함께 치운다.
-git stash list                             # 보관해 둔 목록을 본다(stash@{0}, stash@{1} ...).
-git stash show -p stash@{0}                # 특정 보관본의 변경 내용을 본다.
+git stash                                  # shelve working changes and clear the working tree.
+git stash -u                               # shelve untracked new files too.
+git stash list                             # list shelved entries (stash@{0}, stash@{1} ...).
+git stash show -p stash@{0}                # show a specific entry's changes.
 
-git stash pop                              # 가장 최근 보관본을 꺼내 되살리고 목록에서 지운다.
-git stash apply stash@{1}                  # 지정 보관본을 되살리되 목록에는 남겨 둔다.
-git stash drop stash@{0}                   # 특정 보관본을 버린다.
-git stash clear                            # 보관본을 모두 비운다(주의).
+git stash pop                              # restore the latest entry and drop it from the list.
+git stash apply stash@{1}                  # restore a chosen entry but keep it in the list.
+git stash drop stash@{0}                   # discard a specific entry.
+git stash clear                            # clear all entries (careful).
 ```
 
 ### Branch & Switch — branch · switch · checkout
@@ -283,15 +283,15 @@ git stash clear                            # 보관본을 모두 비운다(주�
 가지를 만들고 오갑니다. `switch` 는 가지 이동 전용, `checkout` 은 이동·복원을 겸하던 옛 명령입니다.
 
 ```bash
-git branch                                 # 로컬 가지 목록을 본다(현재 가지에 *).
-git branch -a                              # 원격 추적 가지까지 함께 본다.
-git branch <branch>                        # 새 가지를 만든다(이동은 하지 않는다).
-git branch -d <branch>                     # 병합 끝난 가지를 지운다(-D 는 강제).
-git branch -m <old> <new>                  # 가지 이름을 바꾼다.
+git branch                                 # list local branches (* marks current).
+git branch -a                              # include remote-tracking branches.
+git branch <branch>                        # create a branch (does not switch).
+git branch -d <branch>                     # delete a merged branch (-D to force).
+git branch -m <old> <new>                  # rename a branch.
 
-git switch <branch>                        # 가지로 이동한다(권장).
-git switch -c <branch>                     # 새 가지를 만들면서 바로 이동한다.
-git checkout <branch>                      # 가지 이동(옛 방식, switch 와 같은 동작).
+git switch <branch>                        # switch to a branch (recommended).
+git switch -c <branch>                     # create a branch and switch to it.
+git checkout <branch>                      # switch branch (old way, same as switch).
 ```
 
 ### Sync — fetch · pull · push
@@ -299,15 +299,15 @@ git checkout <branch>                      # 가지 이동(옛 방식, switch �
 원격과 주고받습니다. `fetch` 는 받기만, `pull` 은 받아 합치기, `push` 는 올리기입니다.
 
 ```bash
-git fetch                                  # 원격의 최신 이력을 받아만 온다(작업 트리는 건드리지 않는다).
-git fetch --prune                          # 원격에서 사라진 가지 추적 정보를 함께 정리한다.
+git fetch                                  # fetch the latest remote history only (working tree untouched).
+git fetch --prune                          # also clean tracking refs for branches gone from remote.
 
-git pull                                   # fetch + merge — 받아서 현재 가지에 합친다.
-git pull --rebase                          # fetch 후 merge 대신 rebase 로 합친다(이력이 깔끔).
+git pull                                   # fetch + merge — bring changes into the current branch.
+git pull --rebase                          # fetch, then rebase instead of merge (cleaner history).
 
-git push                                   # 현재 가지를 원격에 올린다.
-git push -u origin <branch>                # 처음 올리며 추적 관계를 맺는다(이후엔 git push 만).
-git push --force-with-lease                # 다시 쓴 이력을 올린다(남의 작업은 덮지 않도록 안전장치).
+git push                                   # push the current branch to the remote.
+git push -u origin <branch>                # first upload, set the tracking link (later just git push).
+git push --force-with-lease                # push rewritten history (guarded so others' work is not overwritten).
 ```
 
 방향에 따라 **바뀌는 대상**이 다릅니다.
@@ -320,12 +320,12 @@ git push --force-with-lease                # 다시 쓴 이력을 올린다(남�
 두 가지의 이력을 합칩니다. `merge` 는 합친 자국 (merge commit) 을 남기고, `rebase` 는 커밋을 옮겨 붙여 한 줄로 폅니다.
 
 ```bash
-git merge <branch>                         # 지정 가지를 현재 가지에 합친다(병합 커밋 생성).
-git merge --abort                          # 충돌로 멈춘 병합을 되돌려 합치기 전으로 복귀한다.
+git merge <branch>                         # merge the given branch into the current one (creates a merge commit).
+git merge --abort                          # undo a conflict-stalled merge, back to before merging.
 
-git rebase <branch>                        # 현재 가지의 커밋을 <branch> 끝으로 옮겨 붙인다.
-git rebase --continue                      # 충돌을 해결한 뒤 rebase 를 이어 간다.
-git rebase --abort                         # rebase 를 멈추고 시작 전으로 되돌린다.
+git rebase <branch>                        # replay the current branch's commits onto <branch>'s tip.
+git rebase --continue                      # after resolving conflicts, continue the rebase.
+git rebase --abort                         # stop the rebase and return to the start.
 ```
 
 ### Undo — restore · checkout · reset · revert
@@ -343,21 +343,21 @@ git rebase --abort                         # rebase 를 멈추고 시작 전으�
 | `revert <commit>` | 특정 커밋의 효과 | 새 committed 추가 | 갱신 | 새 커밋으로 상쇄 |
 
 ```bash
-# 작업 트리 되돌리기 — 편집한 내용을 마지막 커밋 상태로 돌린다.
-git restore <file>                         # 한 파일을 되돌린다(checkout -- <file> 의 새 방식).
-git restore .                              # 작업 트리의 모든 변경을 버린다(주의).
+# Restore the working tree — return edits to the last commit state.
+git restore <file>                         # restore one file (new form of checkout -- <file>).
+git restore .                              # discard all working-tree changes (careful).
 
-# HEAD 옮기기 — 작업 트리째 다른 커밋 상태로 맞춘다.
-git checkout <commit>                      # 그 커밋으로 작업 트리를 맞춘다(HEAD 가 detached 된다).
-git checkout -- <file>                     # 한 파일의 변경만 버린다(restore <file> 의 옛 방식).
+# Move HEAD — set the whole working tree to another commit.
+git checkout <commit>                      # set the working tree to that commit (HEAD goes detached).
+git checkout -- <file>                     # discard one file's changes (old form of restore <file>).
 
-# 커밋 위치 옮기기 — HEAD 를 뒤로 물린다.
-git reset --soft HEAD~1                    # 커밋만 취소, 변경은 stage 에 남긴다.
-git reset --mixed HEAD~1                   # 커밋·stage 취소, 변경은 작업 트리에 남긴다(기본값).
-git reset --hard HEAD~1                    # 커밋·stage·작업 트리까지 버린다(되돌리기 어려움, 주의).
+# Move the commit position — step HEAD back.
+git reset --soft HEAD~1                    # undo the commit only, keep changes staged.
+git reset --mixed HEAD~1                   # undo commit and staging, keep changes in the working tree (default).
+git reset --hard HEAD~1                    # discard commit, staging, and working tree (hard to undo, careful).
 
-# 커밋 상쇄 — 이미 공유한 이력을 안전하게 뒤집는다.
-git revert <commit>                        # 그 커밋을 취소하는 새 커밋을 만든다(이력은 보존).
+# Offset a commit — safely reverse already-shared history.
+git revert <commit>                        # make a new commit that undoes that one (history preserved).
 ```
 
 > **고르는 법** — 안 올린 작업 정리는 `reset`, 이미 push 한 커밋 뒤집기는 `revert`, 편집만 버리기는 `restore`.
@@ -371,15 +371,15 @@ git revert <commit>                        # 그 커밋을 취소하는 새 커�
   한 저장소에 작업 트리를 여러 개 두어, 가지마다 별도 폴더에서 동시에 작업합니다. 각 폴더가 같은 `.git` 이력을 공유합니다.
 
   ```bash
-  git worktree list                          # 딸려 있는 작업 트리를 모두 본다(경로·가지·커밋).
-  git worktree add ../feat <branch>          # <branch> 를 ../feat 폴더에 새 작업 트리로 펼친다.
-  git worktree add -b <branch> ../feat       # 새 가지를 만들면서 ../feat 에 펼친다.
-  git worktree add --detach ../tmp <commit>  # 특정 커밋을 가지 없이(detached) 꺼내 본다.
+  git worktree list                          # list all attached working trees (path, branch, commit).
+  git worktree add ../feat <branch>          # unfold <branch> into ../feat as a new working tree.
+  git worktree add -b <branch> ../feat       # create a branch and unfold it into ../feat.
+  git worktree add --detach ../tmp <commit>  # check out a commit without a branch (detached).
 
-  git worktree remove ../feat                # 작업 트리를 걷어 낸다(변경이 남아 있으면 막힌다).
-  git worktree prune                         # .git 포인터가 깨진 worktree 등록 정보를 자동 정리한다.
-  git worktree prune --verbose               # 무엇이 정리됐는지 함께 보여 준다.
-  git worktree prune --dry-run               # 지우지 않고 미리 보여 준다.
+  git worktree remove ../feat                # remove a working tree (blocked if changes remain).
+  git worktree prune                         # auto-clean worktree records whose .git pointer is broken.
+  git worktree prune --verbose               # also show what was cleaned.
+  git worktree prune --dry-run               # preview without deleting.
   ```
 
   > 같은 가지는 두 작업 트리에 동시에 펼칠 수 없습니다. 한 커밋만 잠깐 볼 때는 `--detach` 가 깔끔합니다.
@@ -389,11 +389,11 @@ git revert <commit>                        # 그 커밋을 취소하는 새 커�
   가지나 커밋의 한 시점을 `.git` 이력 없이 압축 파일로 내보냅니다. 소스만 묶어 배포할 때 씁니다.
 
   ```bash
-  git archive -o src.zip HEAD                  # 현재 시점을 zip 으로 묶는다(.git 은 빠진다).
-  git archive --format=tar.gz -o src.tgz HEAD  # tar.gz 형식으로 묶는다.
-  git archive -o src.zip <branch>              # 특정 가지의 시점을 묶는다.
-  git archive -o sub.zip HEAD:<path>           # 하위 폴더만 골라 묶는다.
-  git archive --prefix=app/ -o src.zip HEAD    # 압축 안 파일을 app/ 아래로 모아 담는다.
+  git archive -o src.zip HEAD                  # bundle the current snapshot as zip (.git excluded).
+  git archive --format=tar.gz -o src.tgz HEAD  # bundle as tar.gz.
+  git archive -o src.zip <branch>              # bundle a specific branch's snapshot.
+  git archive -o sub.zip HEAD:<path>           # bundle only a subfolder.
+  git archive --prefix=app/ -o src.zip HEAD    # place bundled files under app/.
   ```
 
   > `git archive` 는 추적 중인 파일만 담습니다. `.gitignore` 제외 파일과 `.git` 폴더는 빠지므로, 배포용 스냅샷에 알맞습니다.
@@ -403,8 +403,8 @@ git revert <commit>                        # 그 커밋을 취소하는 새 커�
 Windows 는 경로를 260자로 제한합니다. 폴더가 깊어 경로가 길면 git 작업이 막히므로, 확장 경로 API 를 켭니다.
 
 ```bash
-git config --global core.longpaths true    # 모든 저장소에서 긴 경로를 허용한다(한 번만).
-git config --get core.longpaths            # 적용 여부를 확인한다(true 가 나오면 켜짐).
+git config --global core.longpaths true    # allow long paths in all repos (once).
+git config --get core.longpaths            # check whether it is on (true = enabled).
 ```
 
 > `--global` 은 현재 사용자 전체에 적용합니다. 한 저장소만 켜려면 그 폴더에서 `--global` 을 뺍니다. Windows 자체 제한도 풀려면 관리자 권한으로 레지스트리의 `LongPathsEnabled` 를 1 로 둡니다.
@@ -412,8 +412,8 @@ git config --get core.longpaths            # 적용 여부를 확인한다(true 
 Git for Windows 배포판 자체를 최신으로 올립니다.
 
 ```bash
-git update-git-for-windows                 # Git for Windows 를 최신 버전으로 올린다.
-git version                                # 설치된 git 버전을 확인한다.
+git update-git-for-windows                 # update Git for Windows to the latest version.
+git version                                # check the installed git version.
 ```
 
 > Git for Windows 전용 명령입니다 (Git Bash·CMD 에서 실행). 새 버전이 있으면 받아서 설치하고, 없으면 최신이라고 알려 줍니다.
