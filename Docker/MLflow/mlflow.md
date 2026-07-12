@@ -1,6 +1,6 @@
 # MLflow — Experiment Tracking & Model Registry
 
-<sub>rev. 101</sub>
+<sub>rev. 53</sub>
 
 MLflow 는 실험의 **파라미터·지표를 추적** 하고, 학습된 **모델을 레지스트리로 관리·배포·서빙** 하는 도구입니다. 이 스택에서는 저장소를 두 곳으로 나눠, 가벼운 메타데이터는 메타데이터 DB 에, 실제 산출물은 오브젝트 스토리지에 둡니다.
 
@@ -46,7 +46,7 @@ MLflow 는 도커 컨테이너로 실행됩니다. backend 인 PostgreSQL (`mlfl
 
 ```yaml
 # docker-compose.yml
-# __version__ = "0.0.15"  # Semantic Versioning: Major.Minor.Patch
+# __version__ = "0.0.16"  # Semantic Versioning: Major.Minor.Patch
 name: mlflow                        # Fix the project name (prefix of container and volume names).
 
 services:
@@ -65,7 +65,7 @@ services:
       --cors-allowed-origins '*'
       "
     env_file:
-      - docker-compose.env          # POSTGRES_USER/PASSWORD, AWS_ACCESS_KEY_ID/SECRET, MLFLOW_S3_ENDPOINT_URL
+      - docker-compose.env_example          # POSTGRES_USER/PASSWORD, AWS_ACCESS_KEY_ID/SECRET, MLFLOW_S3_ENDPOINT_URL
     ports:
       - "5000:5000"
     networks:
@@ -87,12 +87,11 @@ networks:
 #### Execution Command
 
 ```powershell
-# create the shared network mlops (ignore the error if it already exists), then start the container in the background.
-docker network create mlops
+# the shared overlay network mlops must already exist (created once via Docker Swarm), then start the container in the background.
 docker compose up -d
 ```
 
-- `docker network create mlops` — 컨테이너가 붙을 공유 외부 네트워크 `mlops` 를 만듭니다 (이미 있으면 에러는 무시되어 무해합니다).
+- 공유 네트워크 `mlops` 는 **Docker Swarm 의 overlay** 로 미리 만들어져 있어야 합니다 — 여기서 `docker network create` 로 만들지 않습니다 (bridge 를 만들면 overlay 를 가립니다). 이 컨테이너는 그 overlay 에 붙습니다.
 - `docker compose up -d` — 컨테이너를 띄웁니다. 프로젝트명은 `name: mlflow` 로 파일에 굳혀져 있어 `-p` 가 필요 없습니다.
 - `-d` — 백그라운드 (detached) 로 실행합니다.
 

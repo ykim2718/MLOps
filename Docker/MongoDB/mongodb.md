@@ -1,6 +1,6 @@
 # MongoDB — Document Database
 
-<sub>rev. 100</sub>
+<sub>rev. 55</sub>
 
 MongoDB 는 이 스택에서 **document 데이터베이스**로 쓰입니다. [DB-Engines 랭킹](https://db-engines.com/en/ranking) 기준 **2026년 현재 관계형 (relational) DB 를 제외하면 가장 인기 있는 DB 엔진** 으로, 비관계형 (NoSQL) 계열에서 1위입니다. 데이터를 행·열의 테이블이 아니라 **document (JSON 형태의 BSON)** 로 저장하며, 한 인스턴스 안에서 `yControl` · `yImprove` 같은 여러 **논리 DB** 를 함께 운영합니다. 각 DB 는 **collection** (관계형 DB 의 테이블에 해당) 을 담고, collection 은 document 를 담습니다. PostgreSQL 과 달리 빈 DB·collection 을 미리 만들지 않고, **첫 쓰기 (insert) 시점에 자동 생성** 됩니다.
 
@@ -17,7 +17,7 @@ MongoDB 는 schema 가 고정되지 않은 애플리케이션 document 를 저�
 
 ## 2. Docker Setup
 
-MongoDB 는 도커 컨테이너로 실행됩니다. `docker compose -p <Project Name> up -d` 를 실행하면 도커가 `mongo:7` 이미지를 내려받아 컨테이너로 띄우므로, **MongoDB 를 호스트에 따로 설치할 필요가 없습니다.** 컨테이너가 **데이터 볼륨이 빈 최초 기동** 일 때 `MONGO_INITDB_ROOT_USERNAME` / `MONGO_INITDB_ROOT_PASSWORD` 로 `admin` DB 에 루트 계정을 만들고 인증을 켭니다.
+MongoDB 는 도커 컨테이너로 실행됩니다. `docker compose up -d` 를 실행하면 도커가 `mongo:7` 이미지를 내려받아 컨테이너로 띄우므로, **MongoDB 를 호스트에 따로 설치할 필요가 없습니다.** 컨테이너가 **데이터 볼륨이 빈 최초 기동** 일 때 `MONGO_INITDB_ROOT_USERNAME` / `MONGO_INITDB_ROOT_PASSWORD` 로 `admin` DB 에 루트 계정을 만들고 인증을 켭니다.
 
 이 컨테이너는 같은 호스트의 다른 서비스 (예: REST API) 가 `mongo` 라는 **서비스명으로 접속** 하도록 공유 네트워크 `mlops` 에 붙습니다. 따라서 컨테이너를 띄우기 전에 그 네트워크가 있어야 합니다.
 
@@ -25,13 +25,15 @@ MongoDB 는 도커 컨테이너로 실행됩니다. `docker compose -p <Project 
 
 ```yaml
 # docker-compose.yml
+# __version__ = "0.0.10"
+
 name: mongodb                       # Fix the project name (prefix of container and volume names).
 
 services:
   mongo:
     image: mongo:7
     env_file:
-      - docker-compose.env          # injects MONGO_INITDB_ROOT_USERNAME / MONGO_INITDB_ROOT_PASSWORD
+      - docker-compose.env_example          # injects MONGO_INITDB_ROOT_USERNAME / MONGO_INITDB_ROOT_PASSWORD
     ports:
       - "27017:27017"               # expose for host python/tools and other machines to connect
     volumes:
@@ -69,15 +71,24 @@ networks:
 
 #### Execution Command
 
+컨테이너는 공유 네트워크 `mlops` 에 붙습니다. 그 네트워크를 준비하는 방법이 구성에 따라 둘로 갈립니다.
+
+**(A) 단일 호스트 (bridge)** — 모든 컨테이너가 한 머신에 있으면 로컬 bridge `mlops` 를 만들어 씁니다.
+
 ```powershell
-# create the shared network mlops (ignore the error if it already exists), then start the container in the background.
+# create the shared bridge network (ignore the error if it already exists), then start the container.
 docker network create mlops
-docker compose -p <Project Name> up -d
+docker compose up -d
 ```
 
-- `docker network create mlops` — 컨테이너가 붙을 공유 외부 네트워크 `mlops` 를 만듭니다 (이미 있으면 에러는 무시되어 무해합니다).
-- `docker compose -p <Project Name> up -d` — 컨테이너를 띄웁니다.
-- `-p <Project Name>` — 프로젝트명을 지정합니다.
+**(B) 다중 머신 (Swarm overlay)** — 여러 머신에 나뉘면 `mlops` 를 **Docker Swarm 의 overlay** 로 미리 (클러스터 구성 시 1회) 만들어 두고, 여기서는 `docker network create` 로 만들지 않습니다 (bridge 를 만들면 overlay 를 가립니다).
+
+```powershell
+# the overlay network mlops must already exist (created once via Docker Swarm); just start the container.
+docker compose up -d
+```
+
+- `docker compose up -d` — 컨테이너를 띄웁니다. 프로젝트명은 yml 의 `name: mongodb` 로 고정돼 있어 `-p` 가 필요 없습니다.
 - `-d` — 백그라운드 (detached) 로 실행합니다.
 
 `docker compose up` 으로 뜬 컨테이너 이름은 `<Project Name>-<Service Name>-<Replica Number>` 형식이며, Replica Number 는 보통 `1` 이지만 `--scale <service>=3` 처럼 늘리면 `-2`·`-3` 이 추가됩니다.

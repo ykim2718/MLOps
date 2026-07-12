@@ -1,4 +1,5 @@
 #docker-compose.yml
+# __version__ = "0.0.10"
 
 name: python                        # Fix the project name (prefix of container and volume names).
 

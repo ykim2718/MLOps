@@ -1,4 +1,5 @@
 # docker-compose.yml
+# __version__ = "0.0.10"
 
 name: minio                         # Fix the project name (prefix of container and volume names).
 
@@ -6,16 +7,13 @@ services:
   minio:
     image: minio/minio
     env_file:
-      - docker-compose.env          # MINIO_ROOT_USER / MINIO_ROOT_PASSWORD 를 주입한다.
+      - docker-compose.env_example          # injects MINIO_ROOT_USER / MINIO_ROOT_PASSWORD
     ports:
-      - "9000:9000"                 # S3 API — 코드/boto3/mc 가 데이터를 읽고 쓰는 엔드포인트.
-      - "9001:9001"                 # 웹 콘솔 — 사람이 브라우저로 접속하는 GUI.
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # web console
     volumes:
-      - minio-data:/data            # 데이터를 named volume 에 영속 저장한다(컨테이너를 지워도 보존).
-    # 서버를 백그라운드로 띄우고 → 준비되면 mc 로 버킷 생성 + 버저닝 → wait 로 서버를 포그라운드 유지.
-    # until ... 로 서버가 뜰 때까지 재시도한다(컨테이너 안이라 엔드포인트는 localhost:9000).
-    # --ignore-existing 으로 이미 있으면 통과(멱등). mlflow 버킷은 run_id 로 격리되어 버저닝이 불필요하다.
-    # $$VAR 는 compose 가 $ 로 바꿔 컨테이너 셸이 env_file 값으로 확장한다.
+      - minio-data:/data
+    # start the server in the background → once ready, create buckets + versioning with mc → wait keeps the server in the foreground.
     entrypoint: >
       /bin/sh -c "
       minio server /data --console-address ':9001' &
@@ -36,7 +34,6 @@ services:
 volumes:
   minio-data:
 
-# 제어 노드 서비스들이 공유하는 외부 네트워크. 미리 docker network create mlops 로 만든다.
 networks:
   mlops:
     external: true

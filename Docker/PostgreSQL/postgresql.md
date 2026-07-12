@@ -1,6 +1,6 @@
 # PostgreSQL — Backend Metadata Store
 
-<sub>rev. 100</sub>
+<sub>rev. 52</sub>
 
 PostgreSQL 은 Prefect Automation Workflow stack의 **Backend Metadata Store** 역할을 합니다. 한 인스턴스 안에서 `prefect` · `mlflow` · `optuna` · `catalog` **4개의 논리 DB** 를 함께 운영하며, 각 도구가 자기 DB 에만 접속합니다 — **Prefect** (오케스트레이터) → `prefect`, **MLflow** (실험 추적·모델 레지스트리) → `mlflow`, **Optuna** (하이퍼파라미터 튜닝) → `optuna`, **Python** (데이터 catalog 접근 계층) → `catalog`. 실제 대용량 데이터·모델·아티팩트는 여기 두지 않고 오브젝트 스토리지에 보관하며, PostgreSQL 에는 **메타데이터 (상태·기록·catalog) 만** 저장합니다.
 
@@ -27,6 +27,8 @@ PostgreSQL 은 도커 컨테이너로 실행됩니다. `docker compose up -d` �
 
 ```yaml
 # docker-compose.yml
+# __version__ = "0.0.10"
+
 name: postgresql                    # Fix the project name (prefix of container and volume names).
 
 services:
@@ -94,12 +96,11 @@ networks:
 #### Execution Command
 
 ```powershell
-# create the shared network (ignore the error if it already exists), then start the container in the background.
-docker network create mlops
+# the shared overlay network mlops must already exist (created once via Docker Swarm), then start the container in the background.
 docker compose up -d
 ```
 
-- `docker network create mlops` — 컨테이너가 붙을 공유 외부 네트워크 `mlops` 를 만듭니다 (이미 있으면 에러는 무시되어 무해합니다).
+- 공유 네트워크 `mlops` 는 **Docker Swarm 의 overlay** 로 미리 만들어져 있어야 합니다 — 여기서 `docker network create` 로 만들지 않습니다 (bridge 를 만들면 overlay 를 가립니다). 이 컨테이너는 그 overlay 에 붙습니다.
 - `docker compose up -d` — 컨테이너를 띄웁니다. 프로젝트명은 yml 의 `name: postgresql` 로 고정돼 있어 `-p` 가 필요 없습니다.
 - `-d` — 백그라운드 (detached) 로 실행합니다.
 

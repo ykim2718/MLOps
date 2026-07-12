@@ -1,5 +1,5 @@
 # docker-compose.yml
-# __version__ = "0.0.15"  # Semantic Versioning: Major.Minor.Patch
+# __version__ = "0.0.16"  # Semantic Versioning: Major.Minor.Patch
 
 name: mlflow                        # Fix the project name (prefix of container and volume names).
 
@@ -19,7 +19,7 @@ services:
       --cors-allowed-origins '*'
       "
     env_file:
-      - docker-compose.env          # POSTGRES_USER/PASSWORD, AWS_ACCESS_KEY_ID/SECRET, MLFLOW_S3_ENDPOINT_URL
+      - docker-compose.env_example          # POSTGRES_USER/PASSWORD, AWS_ACCESS_KEY_ID/SECRET, MLFLOW_S3_ENDPOINT_URL
     ports:
       - "5000:5000"
     networks:

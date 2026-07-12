@@ -1,4 +1,5 @@
 # docker-compose.yml
+# __version__ = "0.0.10"
 
 name: postgresql                    # Fix the project name (prefix of container and volume names).
 
@@ -6,7 +7,7 @@ services:
   postgres:
     image: postgres:16
     env_file:
-      - docker-compose.env          # injects POSTGRES_USER / POSTGRES_PASSWORD
+      - docker-compose.env_example  # injects POSTGRES_USER / POSTGRES_PASSWORD
     ports:
       - "5432:5432"                 # expose for host python and remote workers to connect
     volumes:
@@ -25,7 +26,7 @@ services:
   pgadmin:
     image: dpage/pgadmin4
     env_file:
-      - docker-compose.env          # injects PGADMIN_DEFAULT_EMAIL / PGADMIN_DEFAULT_PASSWORD
+      - docker-compose.env_example  # injects PGADMIN_DEFAULT_EMAIL / PGADMIN_DEFAULT_PASSWORD
     ports:
       - "5050:80"                   # browse the web UI at http://localhost:5050
     volumes:

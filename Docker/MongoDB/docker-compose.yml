@@ -1,4 +1,5 @@
 # docker-compose.yml
+# __version__ = "0.0.10"
 
 name: mongodb                       # Fix the project name (prefix of container and volume names).
 
@@ -6,13 +7,12 @@ services:
   mongo:
     image: mongo:7
     env_file:
-      - docker-compose.env          # MONGO_INITDB_ROOT_USERNAME / MONGO_INITDB_ROOT_PASSWORD 를 주입한다.
+      - docker-compose.env_example          # injects MONGO_INITDB_ROOT_USERNAME / MONGO_INITDB_ROOT_PASSWORD
     ports:
-      - "27017:27017"
+      - "27017:27017"               # expose for host python/tools and other machines to connect
     volumes:
       - mongo-data:/data/db
     healthcheck:
-      # mongosh 로 ping 을 보내 기동 완료를 확인한다. $$VAR 는 compose 가 $ 로 바꿔 컨테이너 셸이 env_file 값으로 확장한다.
       test: ["CMD-SHELL", "mongosh -u $$MONGO_INITDB_ROOT_USERNAME -p $$MONGO_INITDB_ROOT_PASSWORD --quiet --eval 'db.adminCommand({ ping: 1 })'"]
       interval: 5s
       retries: 10
@@ -20,10 +20,10 @@ services:
       - mlops
     restart: unless-stopped
     logging:
-      driver: json-file             # 기본 드라이버. stdout 로그를 JSON 파일로 저장한다.
+      driver: json-file             # default driver. stores stdout logs as JSON files.
       options:
-        max-size: "10m"             # 파일 하나가 10MB 를 넘으면 회전한다.
-        max-file: "10"              # 최대 10개까지 보관하고 오래된 것부터 삭제한다.
+        max-size: "10m"             # rotate when a single file exceeds 10MB.
+        max-file: "10"              # keep up to 10 files, deleting the oldest first.
 
 volumes:
   mongo-data:

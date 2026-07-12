@@ -1,12 +1,12 @@
 # Prefect Pipeline Orchestration on Docker
 
-<sub>rev. 550</sub>
+<sub>rev. 552</sub>
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
 > 공식 사이트: [https://www.prefect.io/](https://www.prefect.io/)
 
-Prefect stack 을 한 호스트에서 **세 구성요소 (Prefect Server · Prefect Dispatcher · Pipeline Flow)** 로 나눠 도커로 실행합니다. **AI/ML flow 의 실행은 하나의 python docker 이미지** (`pipeline-flow:latest`) **로만 하고, 그 flow 이미지는 dispatcher 이미지와 분리** 합니다. job 마다 그 이미지로 **일시적 컨테이너 (ephemeral)** 를 띄웠다 파괴하며, **여러 팀원이 동시에 다수 job 을 trigger** 하는 환경을 전제로 Prefect 의 **Docker work pool** 로 구현합니다.
+Prefect stack 을 한 호스트에서 **세 구성요소 (Prefect Server · Prefect Dispatcher · Pipeline Flow)** 로 나눠 도커로 실행합니다. Prefect stack 의 backing service 는 PostgreSQL · MinIO · MLflow 가 있습니다. **AI/ML flow 의 실행은 하나의 python docker 이미지** (`pipeline-flow:latest`) **로만 하고, 그 flow 이미지는 dispatcher 이미지와 분리** 합니다. job 마다 그 이미지로 **일시적 컨테이너 (ephemeral)** 를 띄웠다 파괴하며, **여러 팀원이 동시에 다수 job 을 trigger** 하는 환경을 전제로 Prefect 의 **Docker work pool** 로 구현합니다.
 
 Prefect work pool 의 type 은 `process` · `docker` · `kubernetes` 가 있는데 ([Appendix C](#appendix-c-execution-architecture)), 이 스택은 **`docker`** 를 씁니다 — flow 를 dispatcher 와 **분리된 별도 컨테이너** 에서 실행하기 위함입니다.
 
@@ -206,79 +206,25 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
 
 ## 3. Docker Network
 
-Prefect stack 의 컨테이너들은 **docker network** 로 서로 통신합니다. **한 머신 안**에서는 같은 network 에 붙은 컨테이너끼리 **docker 서비스 이름** (`prefect_server`·`minio`·`postgres`·`mlflow`) 으로 바로 찾습니다.
+Prefect stack 의 컨테이너들은 docker network `mlops` 로 통신합니다. 접근 방식은 컨테이너가 **같은 머신**인지 **다른 머신**인지에 따라 갈립니다 (**LAN IP 모델**):
 
-그러나 역할별 컨테이너가 **여러 머신에 분산**되면 (예: prefect_server machine · prefect_dispatcher machine · MinIO machine · PostgreSQL machine · MLflow machine 이 서로 다른 호스트), **각 머신에 같은 이름의 docker network 를 만들어도 서로 연결되지 않습니다.** 기본 `bridge` network 는 **호스트 로컬**이라, 이름만 같을 뿐 별개의 network 이기 때문입니다. docker 서비스 이름이 **머신을 넘어** 해석되게 하려면 **Docker Swarm 의 overlay network** 로 여러 호스트를 **하나의 가상 network** 로 묶어야 합니다.
+- **같은 머신** → docker **서비스 이름** (`prefect_server`·`minio`·`postgres`·`mlflow`). 같은 호스트의 `mlops` 에 붙은 컨테이너끼리 이름으로 바로 찾습니다.
+- **다른 머신** → 그 서비스가 있는 **호스트의 LAN IP + 게시 포트** (예: `http://192.168.0.13:4200/api`, `<MinIO 호스트 IP>:9000`).
 
-이 절은 그 overlay network 를 세 단계로 구성합니다 — **Firewall** (노드 간 포트 개방·검증), **Swarm Configuration** (매니저·워커 구성), **Overlay Network** (attachable overlay 생성). 이후 절의 server·dispatcher·pipeline_flow·backing service 는 모두 이 overlay `mlops` 에 붙어 이름으로 통신합니다.
+왜 다른 머신은 이름이 안 되나 — 기본 `bridge` network 는 **호스트 로컬**이라, 각 머신에 같은 이름 `mlops` 를 만들어도 **이름만 같을 뿐 별개의 network** 입니다. docker 서비스 이름은 그 호스트의 network 안에서만 해석되므로 **머신을 넘지 못합니다.** 그래서 크로스머신 접근은 LAN IP 로 합니다.
 
-### Firewall
+> docker 이름을 **머신을 넘어** 쓰려면 Docker Swarm 의 **overlay network** 가 필요하지만, 전 노드가 **LAN-native Linux** 여야 동작합니다 (Windows/macOS 의 Docker Desktop 노드는 불가 — [Appendix L](#appendix-l-swarm-overlay-network)). 이 스택은 OS 혼합·단순성을 위해 기본적으로 **LAN IP 모델** 을 씁니다.
 
-  Swarm 노드끼리 아래 포트가 서로 열려 있어야 합니다.
+### Create the Network
 
-  | Port | Protocol | Purpose |
-  |------|----------|---------|
-  | 2377 | tcp | cluster management (manager only) |
-  | 7946 | tcp + udp | node-to-node communication (gossip / discovery) |
-  | 4789 | udp | overlay data plane (VXLAN) |
-
-  보통 Swarm join 뒤 `docker node ls` (Swarm Configuration) 에 노드가 모두 보이면 방화벽은 문제없는 것입니다. 워커가 안 보이거나 join 이 막히면, 각 노드의 **ufw** 로 위 포트를 엽니다.
+  컨테이너를 띄울 **각 호스트**에서 로컬 bridge `mlops` 를 한 번 만듭니다 (이미 있으면 무해).
 
   ```bash
-  # check whether ufw is active (inactive -> not blocking, no action needed)
-  sudo ufw status verbose
-
-  # if active, open the swarm ports
-  #   manager (prefect_server machine): 2377 + 7946 + 4789
-  sudo ufw allow 2377/tcp        # cluster management (manager only)
-  sudo ufw allow 7946            # node-to-node gossip (tcp + udp)
-  sudo ufw allow 4789/udp        # overlay data plane (VXLAN)
-  #   worker machines: 7946 + 4789 only (2377 not needed inbound)
-
-  # confirm the rules landed
-  sudo ufw status numbered       # 2377/tcp, 7946, 4789/udp should show ALLOW
+  docker network create mlops        # local bridge; run once per host
+  docker network ls | grep mlops     # DRIVER = bridge, SCOPE = local
   ```
 
-  > ufw 를 새로 켤 때는 잠금 방지를 위해 SSH 부터 허용합니다 — `sudo ufw allow OpenSSH` 후 `sudo ufw enable`.
-
-### Swarm Configuration
-
-  한 머신 (예: prefect_server machine) 을 **매니저**로 초기화하고, 나머지 머신 (prefect_dispatcher machine · backing service machine 들) 을 **워커**로 조인합니다.
-
-  ```bash
-  # on the manager (e.g. the prefect_server machine)
-  docker swarm init --advertise-addr <manager LAN IP>
-  #   -> prints a "docker swarm join --token <TOKEN> <manager IP>:2377" command
-
-  # on each worker machine — run that printed join command
-  docker swarm join --token <TOKEN> <manager IP>:2377
-  ```
-
-  검증 — 매니저에서 모든 노드가 `Ready` 로 보이는지 확인합니다.
-
-  ```bash
-  docker node ls          # manager (Leader) + every joined worker, STATUS = Ready
-  ```
-
-### Overlay Network
-
-  전 노드가 공유할 **attachable overlay** network 를 매니저에서 한 번 만듭니다. `--attachable` 이라야 compose / `docker run` 으로 뜨는 **일반 컨테이너** (이 스택은 swarm service 가 아님) 와 dispatcher 가 소켓으로 띄우는 `pipeline_flow` 컨테이너도 붙을 수 있습니다.
-
-  ```bash
-  # on the manager
-  docker network create --driver overlay --attachable mlops
-  ```
-
-  overlay network 는 매니저에서 생성되고, 워커에는 **컨테이너가 처음 attach 될 때** 나타납니다 (그 전에는 워커의 `docker network ls` 에 안 보여도 정상). 생성 직후 확인은 매니저에서 driver·scope 만 봅니다.
-
-  ```bash
-  # on the manager: confirm it is an overlay on the swarm scope
-  docker network ls | grep mlops        # DRIVER = overlay, SCOPE = swarm
-  ```
-
-  이 시점엔 overlay 위에 아직 서비스가 없어 **이름 해석은 검증할 대상이 없습니다** — 서비스 이름 해석은 이후 절에서 server·backing service 가 overlay 에 뜬 뒤 healthcheck·테스트 run 으로 확인합니다.
-
-  이후 절의 모든 compose 는 이 `mlops` 를 external network 로 참조하고, 주소는 LAN IP 가 아니라 **서비스 이름** (`prefect_server`·`minio`·`postgres`·`mlflow`) 으로 통일합니다.
+  이후 절의 모든 compose 는 이 `mlops` 를 external network 로 참조합니다. 같은 호스트의 컨테이너는 **서비스 이름**으로, 다른 호스트의 서비스는 **LAN IP** 로 접근합니다 (`PREFECT_API_URL`·credential endpoint 등에서 지정).
 
 ## 4. Prefect Server Container
 
@@ -1520,3 +1466,89 @@ data = Path("/datasets") / minio_key
 ### Summary
 
   이력 관리와 과거 재현은 **`@flow` 에 파라미터 (git 커밋·MinIO 버전) 를 넘기는 것만으로 작동**합니다. 학습 소스가 클래스 덩어리라 `@task` 를 일일이 붙이기 번거롭다면, `@task` 를 생략하고 `@flow` 만 씌워도 MLOps 재현 목적에는 지장이 없습니다.
+
+## Appendix L. Swarm Overlay Network
+
+여러 머신에서 LAN IP 대신 **docker 서비스 이름을 그대로** 쓰고 싶으면, **Docker Swarm 의 overlay network** 로 전 호스트를 하나의 가상 network 로 묶습니다. [§3](#3-docker-network) 의 LAN IP 모델 대신 쓰는 **멀티 머신·all-Linux 대안** 입니다.
+
+> ⚠️ **제약** — overlay 데이터플레인 (VXLAN) 은 각 노드가 **LAN 에 직접 붙은 native Linux Docker** 일 때만 흐릅니다. **Windows/macOS 의 Docker Desktop 노드는 VM (WSL2 등) NAT 뒤라 크로스호스트 overlay 가 동작하지 않습니다** — 그 경우 §3 의 LAN IP 모델을 씁니다. overlay 로 가려면 모든 노드가 LAN-native Linux (베어메탈 또는 bridged Linux VM) 여야 합니다.
+
+세 단계로 구성합니다 — **Firewall** (노드 간 포트) · **Swarm Configuration** (매니저·워커) · **Overlay Network** (attachable overlay 생성). 성공하면 이후 절의 compose 는 `mlops` 를 external network 로 참조하고, 주소를 LAN IP 대신 **서비스 이름** 으로 통일합니다.
+
+### Firewall
+
+  Swarm 노드끼리 아래 포트가 서로 열려 있어야 합니다.
+
+  | Port | Protocol | Purpose |
+  |------|----------|---------|
+  | 2377 | tcp | cluster management (manager only) |
+  | 7946 | tcp + udp | node-to-node communication (gossip / discovery) |
+  | 4789 | udp | overlay data plane (VXLAN) |
+
+  보통 Swarm join 뒤 `docker node ls` (Swarm Configuration) 에 노드가 모두 보이면 방화벽은 문제없는 것입니다. 워커가 안 보이거나 join 이 막히면, 각 노드의 **ufw** 로 위 포트를 엽니다.
+
+  ```bash
+  # check whether ufw is active (inactive -> not blocking, no action needed)
+  sudo ufw status verbose
+
+  # if active, open the swarm ports
+  #   manager (prefect_server machine): 2377 + 7946 + 4789
+  sudo ufw allow 2377/tcp        # cluster management (manager only)
+  sudo ufw allow 7946            # node-to-node gossip (tcp + udp)
+  sudo ufw allow 4789/udp        # overlay data plane (VXLAN)
+  #   worker machines: 7946 + 4789 only (2377 not needed inbound)
+
+  # confirm the rules landed
+  sudo ufw status numbered       # 2377/tcp, 7946, 4789/udp should show ALLOW
+  ```
+
+  > ufw 를 새로 켤 때는 잠금 방지를 위해 SSH 부터 허용합니다 — `sudo ufw allow OpenSSH` 후 `sudo ufw enable`.
+
+### Swarm Configuration
+
+  한 머신 (예: prefect_server machine) 을 **매니저**로 초기화하고, 나머지 머신 (prefect_dispatcher machine · backing service machine 들) 을 **워커**로 조인합니다.
+
+  ```bash
+  # on the manager (e.g. the prefect_server machine)
+  docker swarm init --advertise-addr <manager LAN IP>
+  #   -> prints a "docker swarm join --token <TOKEN> <manager IP>:2377" command
+
+  # on each worker machine — run that printed join command
+  docker swarm join --token <TOKEN> <manager IP>:2377
+  ```
+
+  검증 — 매니저에서 모든 노드가 `Ready` 로 보이는지 확인합니다.
+
+  ```bash
+  docker node ls          # manager (Leader) + every joined worker, STATUS = Ready
+  ```
+
+  > ⚠️ 워커가 **Docker Desktop (Windows/macOS)** 이면 `Ready` 로 보여도 overlay 데이터플레인이 안 흘러, 아래 Overlay Network 의 관통 테스트에서 실패합니다 (`context deadline exceeded`). all-Linux 노드여야 합니다.
+
+### Overlay Network
+
+  전 노드가 공유할 **attachable overlay** network 를 매니저에서 한 번 만듭니다. `--attachable` 이라야 compose / `docker run` 으로 뜨는 **일반 컨테이너** (이 스택은 swarm service 가 아님) 와 dispatcher 가 소켓으로 띄우는 `pipeline_flow` 컨테이너도 붙을 수 있습니다.
+
+  ```bash
+  # on the manager
+  docker network create --driver overlay --attachable mlops
+  ```
+
+  overlay network 는 매니저에서 생성되고, 워커에는 **컨테이너가 처음 attach 될 때** 나타납니다 (그 전에는 워커의 `docker network ls` 에 안 보여도 정상). 생성 직후 확인은 매니저에서 driver·scope 만 봅니다.
+
+  ```bash
+  # on the manager: confirm it is an overlay on the swarm scope
+  docker network ls | grep mlops        # DRIVER = overlay, SCOPE = swarm
+  ```
+
+  **관통 테스트** — 워커에 테스트 컨테이너를 붙여 매니저에서 이름으로 ping 되면 크로스호스트 데이터플레인이 정상입니다 (이게 통과해야 overlay 를 실제로 쓸 수 있습니다).
+
+  ```bash
+  # on a worker: attach a test container to the overlay
+  docker run -d --name t1 --network mlops nginx
+  # on the manager: resolve + reach it by name across hosts
+  docker run --rm --network mlops busybox ping -c2 t1
+  #   -> replies => overlay OK.  timeout/'context deadline exceeded' => a node is not LAN-native (e.g. Docker Desktop)
+  ```
+
+  성공하면 이후 절의 compose 는 `mlops` 를 external network 로 참조하고, 주소를 LAN IP 대신 **서비스 이름** (`prefect_server`·`minio`·`postgres`·`mlflow`) 으로 통일합니다.

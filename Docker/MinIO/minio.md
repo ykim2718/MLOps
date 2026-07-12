@@ -1,6 +1,6 @@
 # MinIO — Object Storage
 
-<sub>rev. 104</sub>
+<sub>rev. 107</sub>
 
 **MinIO**는 **AWS S3 (Amazon Simple Storage Service) 와 100% 호환되는 오픈소스 오브젝트 스토리지**입니다. 클라우드 (AWS) 없이 사내 server 나 로컬 도커에 띄워 "내 S3"처럼 쓸 수 있어, 데이터셋·모델·MLflow artifact 등 **실제 대용량 데이터의 보관 위치**로 사용합니다.
 
@@ -10,7 +10,7 @@
 
 ## 1. MinIO Installation
 
-MinIO 는 도커 컨테이너로 실행됩니다. 아래는 MinIO 의 `docker-compose.yml` 입니다. `docker compose -p <Project Name> up -d` 를 실행하면 도커가 `minio/minio` 이미지를 자동으로 내려받아 컨테이너로 띄우므로 **MinIO 를 호스트에 따로 설치할 필요가 없습니다.** `minio/minio` 이미지에는 `mc` 클라이언트가 함께 들어 있어, **한 서비스가 server 기동과 버킷 생성·버저닝까지 모두 처리** 합니다.
+MinIO 는 도커 컨테이너로 실행됩니다. 아래는 MinIO 의 `docker-compose.yml` 입니다. `docker compose up -d` 를 실행하면 도커가 `minio/minio` 이미지를 자동으로 내려받아 컨테이너로 띄우므로 **MinIO 를 호스트에 따로 설치할 필요가 없습니다.** `minio/minio` 이미지에는 `mc` 클라이언트가 함께 들어 있어, **한 서비스가 server 기동과 버킷 생성·버저닝까지 모두 처리** 합니다.
 
 이 컨테이너는 같은 호스트의 다른 서비스 (예: 실험 추적 server) 가 `minio` 라는 **서비스명으로 접속** 하도록 공유 네트워크 `mlops` 에 붙습니다. 따라서 컨테이너를 띄우기 전에 그 네트워크가 있어야 합니다.
 
@@ -18,13 +18,15 @@ MinIO 는 도커 컨테이너로 실행됩니다. 아래는 MinIO 의 `docker-co
 
 ```yaml
 # docker-compose.yml
+# __version__ = "0.0.10"
+
 name: minio                         # Fix the project name (prefix of container and volume names).
 
 services:
   minio:
     image: minio/minio
     env_file:
-      - docker-compose.env          # injects MINIO_ROOT_USER / MINIO_ROOT_PASSWORD
+      - docker-compose.env_example          # injects MINIO_ROOT_USER / MINIO_ROOT_PASSWORD
     ports:
       - "9000:9000"   # S3 API
       - "9001:9001"   # web console
@@ -71,14 +73,12 @@ networks:
 
 ```powershell
 # CLI
-# create the shared network mlops (ignore the error if it already exists), then start the container in the background.
-docker network create mlops
-docker compose -p <Project Name> up -d
+# the shared overlay network mlops must already exist (created once via Docker Swarm), then start the container in the background.
+docker compose up -d
 ```
 
-- `docker network create mlops` — 컨테이너가 붙을 공유 외부 네트워크 `mlops` 를 만듭니다 (이미 있으면 에러는 무시되어 무해합니다).
-- `docker compose -p <Project Name> up -d` — 컨테이너를 띄웁니다.
-- `-p <Project Name>` — 프로젝트명을 지정합니다.
+- 공유 네트워크 `mlops` 는 **Docker Swarm 의 overlay** 로 미리 만들어져 있어야 합니다 — 여기서 `docker network create` 로 만들지 않습니다 (bridge 를 만들면 overlay 를 가립니다). 이 컨테이너는 그 overlay 에 붙습니다.
+- `docker compose up -d` — 컨테이너를 띄웁니다. 프로젝트명은 yml 의 `name: minio` 로 고정돼 있어 `-p` 가 필요 없습니다.
 - `-d` — 백그라운드 (detached) 로 실행합니다.
 
 `entrypoint` 의 `mc` 명령은 컨테이너 **안** 에서 도므로 endpoint 가 서비스명이 아니라 `http://localhost:9000` 입니다. 커뮤니티 웹 console 에는 버킷/버저닝 관리 메뉴가 없어 이렇게 `mc` 로 자동 처리하므로, 보통 `mc` 를 따로 설치하지 않아도 버킷·버저닝이 준비됩니다.
