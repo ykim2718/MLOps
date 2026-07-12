@@ -1,6 +1,6 @@
 # Prefect Pipeline Orchestration on Docker
 
-<sub>rev. 546</sub>
+<sub>rev. 547</sub>
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
@@ -222,14 +222,24 @@ Prefect stack 의 컨테이너들은 **docker network** 로 서로 통신합니�
   | 7946 | tcp + udp | node-to-node communication (gossip / discovery) |
   | 4789 | udp | overlay data plane (VXLAN) |
 
-  검증 — 각 노드에서 상대 노드의 포트가 열렸는지 확인합니다 (`nc` / `nmap` 은 필요 시 설치).
+  보통 Swarm join 뒤 `docker node ls` (Swarm Configuration) 에 노드가 모두 보이면 방화벽은 문제없는 것입니다. 워커가 안 보이거나 join 이 막히면, 각 노드의 **ufw** 로 위 포트를 엽니다.
 
   ```bash
-  # from one node, probe the ports on another node
-  nc -zv  <other node IP> 2377          # tcp 2377 (management) reachable?
-  nc -zv  <other node IP> 7946          # tcp 7946 (gossip)
-  nc -zvu <other node IP> 4789          # udp 4789 (overlay data plane)
+  # check whether ufw is active (inactive -> not blocking, no action needed)
+  sudo ufw status verbose
+
+  # if active, open the swarm ports
+  #   manager (prefect_server machine): 2377 + 7946 + 4789
+  sudo ufw allow 2377/tcp        # cluster management (manager only)
+  sudo ufw allow 7946            # node-to-node gossip (tcp + udp)
+  sudo ufw allow 4789/udp        # overlay data plane (VXLAN)
+  #   worker machines: 7946 + 4789 only (2377 not needed inbound)
+
+  # confirm the rules landed
+  sudo ufw status numbered       # 2377/tcp, 7946, 4789/udp should show ALLOW
   ```
+
+  > ufw 를 새로 켤 때는 잠금 방지를 위해 SSH 부터 허용합니다 — `sudo ufw allow OpenSSH` 후 `sudo ufw enable`.
 
 ### Swarm Configuration
 
