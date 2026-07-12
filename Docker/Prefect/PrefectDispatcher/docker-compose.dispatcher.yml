@@ -9,12 +9,13 @@
 #
 # Build (once):  docker build -f Dockerfile.dispatcher -t prefect-dispatcher:latest .
 # Start:         .\run_dispatcher.ps1 -WorkPool high_performance
+# __version__ = "0.0.10"
 name: prefect-dispatcher   # compose project name baked in (replaces -p); run_dispatcher.ps1 relies on it
 services:
   prefect_dispatcher:
     image: prefect-dispatcher:latest   # built once from Dockerfile.dispatcher (prefect + prefect-docker)
     env_file:
-      - ../docker-compose.env       # PREFECT_API_URL (shared, kept at Docker/Prefect root)
+      - ../docker-compose.env_example       # PREFECT_API_URL (shared, kept at Docker/Prefect root)
     command: prefect worker start --type docker --pool ${WORK_POOL:-high_performance} --limit ${WORKER_LIMIT:-8} --no-create-pool-if-not-found
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock   # host docker socket, to spawn sibling containers

@@ -1,6 +1,6 @@
 # Prefect Pipeline Orchestration on Docker
 
-<sub>rev. 547</sub>
+<sub>rev. 550</sub>
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
@@ -269,12 +269,14 @@ Prefect stack 의 컨테이너들은 **docker network** 로 서로 통신합니�
   docker network create --driver overlay --attachable mlops
   ```
 
-  overlay network 는 매니저에서 생성되고, 워커에는 **컨테이너가 처음 attach 될 때** 나타납니다. 검증 — 임의의 워커에서 붙여 서비스 이름 해석을 확인합니다 (server 기동 후).
+  overlay network 는 매니저에서 생성되고, 워커에는 **컨테이너가 처음 attach 될 때** 나타납니다 (그 전에는 워커의 `docker network ls` 에 안 보여도 정상). 생성 직후 확인은 매니저에서 driver·scope 만 봅니다.
 
   ```bash
-  # on a worker: attach a throwaway container and resolve a service name
-  docker run --rm --network mlops busybox nslookup prefect_server
+  # on the manager: confirm it is an overlay on the swarm scope
+  docker network ls | grep mlops        # DRIVER = overlay, SCOPE = swarm
   ```
+
+  이 시점엔 overlay 위에 아직 서비스가 없어 **이름 해석은 검증할 대상이 없습니다** — 서비스 이름 해석은 이후 절에서 server·backing service 가 overlay 에 뜬 뒤 healthcheck·테스트 run 으로 확인합니다.
 
   이후 절의 모든 compose 는 이 `mlops` 를 external network 로 참조하고, 주소는 LAN IP 가 아니라 **서비스 이름** (`prefect_server`·`minio`·`postgres`·`mlflow`) 으로 통일합니다.
 
@@ -296,7 +298,7 @@ Prefect stack 의 컨테이너들은 **docker network** 로 서로 통신합니�
       command: prefect server start --host 0.0.0.0
       env_file:
         # PREFECT_SERVER_DATABASE_CONNECTION_URL + PREFECT_API_URL (host LAN IP); the UI inherits PREFECT_API_URL, so no PREFECT_UI_API_URL is needed.
-        - ../docker-compose.env       # shared, kept at Docker/Prefect root
+        - ../docker-compose.env_example       # shared, kept at Docker/Prefect root
       ports:
         - "4200:4200"                 # dashboard/API. Clients connect on this port.
       volumes:
@@ -478,7 +480,7 @@ dispatcher 는 **`docker` work pool** 을 polling 해 job 마다 `pipeline_flow`
     prefect_dispatcher:
       image: prefect-dispatcher:latest   # built once from Dockerfile.dispatcher (prefect + prefect-docker)
       env_file:
-        - ../docker-compose.env       # PREFECT_API_URL (shared, at Docker/Prefect root)
+        - ../docker-compose.env_example       # PREFECT_API_URL (shared, at Docker/Prefect root)
       command: prefect worker start --type docker --pool ${WORK_POOL:-high_performance} --limit ${WORKER_LIMIT:-8} --no-create-pool-if-not-found
       volumes:
         - /var/run/docker.sock:/var/run/docker.sock   # host docker socket, to spawn sibling containers
@@ -754,26 +756,33 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
 
 ## 7. Credentials
 
-설정 값은 **세 곳** 으로 나뉘고 서로 겹치지 않습니다 — ① server·dispatcher 인프라 값 (backend DB·Control Node 주소) 은 `docker-compose.env`, ② `pipeline_flow` 컨테이너의 **기동·연결 설정** (`PREFECT_API_URL`·`mem_limit` 등, 비밀 아님) 은 **base job template** (§4), ③ **run 코드용 자격증명** (MinIO·DB) 만 **Prefect Secret** 입니다. 따라서 base job template 에 적은 값 (`PREFECT_API_URL` 등) 은 **Secret 에 넣지 않습니다** (비밀이 아니고 `docker inspect` 로 보여도 무방). dispatcher 는 자격증명을 들지 않습니다.
+설정 값은 **세 곳** 으로 나뉘고 서로 겹치지 않습니다 — ① server·dispatcher 인프라 값 (backend DB·Control Node 주소) 은 `docker-compose.env_example`, ② `pipeline_flow` 컨테이너의 **기동·연결 설정** (`PREFECT_API_URL`·`mem_limit` 등, 비밀 아님) 은 **base job template** (§4), ③ **run 코드용 자격증명** (MinIO·DB) 만 **Prefect Secret** 입니다. 따라서 base job template 에 적은 값 (`PREFECT_API_URL` 등) 은 **Secret 에 넣지 않습니다** (비밀이 아니고 `docker inspect` 로 보여도 무방). dispatcher 는 자격증명을 들지 않습니다.
 
-### docker-compose.env
+### docker-compose.env_example
 
-  **server·dispatcher 용 값** (backend DB URL·Control Node 주소) 은 `docker-compose.env` 한 파일에 모읍니다.
+  **server·dispatcher 용 값** (backend DB URL·Control Node 주소) 은 `docker-compose.env_example` 한 파일에 모읍니다.
 
   ```dotenv
-  # docker-compose.env_example  (every value is a placeholder — never expose real values)
+  # docker-compose.env_example  (Prefect — server and dispatcher infrastructure)
+  # __version__ = "0.0.10"
+  # All secrets are CHANGE_ME placeholders — do not expose real values.
+  # The real docker-compose.env is excluded by .gitignore; only this _example is committed.
 
-  # -- prefect-server --
+  # -- prefect_server (Control Node) --------------------------------------
+  # PostgreSQL (prefect DB) URL where the server stores metadata; reached by service name 'postgres'.
+  # Match the account/password to POSTGRES_USER / POSTGRES_PASSWORD on the PostgreSQL stack.
   PREFECT_SERVER_DATABASE_CONNECTION_URL=postgresql+asyncpg://CHANGE_ME:CHANGE_ME@postgres:5432/prefect
 
-  # -- prefect-dispatcher --
-  # The Prefect server API the dispatcher connects to. Use service name prefect_server on the same host,
-  # or the host IP/hostname on another machine (then remove the networks block in the dispatcher compose).
-  PREFECT_API_URL=http://prefect_server:4200/api
+  # -- prefect_dispatcher -------------------------------------------------
+  # The Prefect server API the dispatcher connects to (:4200).
+  #   - in docker network: http://prefect_server:4200/api
+  #   - out of docker network: http://<server LAN IP>:4200/api
+  PREFECT_API_URL=http://192.168.0.13:4200/api
   ```
 
   - server 는 `postgres` 서비스명으로 backend 에 접속하므로 URL 호스트가 `postgres` 입니다.
   - dispatcher 는 코드를 실행하지 않아 MinIO·카탈로그 자격증명이 필요 없습니다 — 그 값들은 아래 Credential Blocks 에서 다룹니다.
+  - `PREFECT_API_URL` — prefect web dashboard 를 web browser 로 열 때 browser 는 docker network 밖이라 `prefect_server` 대신 LAN IP 를 사용해야 합니다.
 
 ### Credential Blocks
 

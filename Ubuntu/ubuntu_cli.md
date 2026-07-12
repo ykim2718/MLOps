@@ -1,6 +1,6 @@
 # Ubuntu CLI
 
-<sub>rev. 10</sub>
+<sub>rev. 11</sub>
 
 > Commands in this document are written for **Ubuntu**.
 
@@ -115,3 +115,50 @@ ss -tlnp | grep 8001           # Check whether a specific port is listening
 ```
 
 - `ss -tlnp` shows `0.0.0.0:PORT` (all interfaces, reachable externally) vs `127.0.0.1:PORT` (local only).
+
+## 4. Sudo
+
+Ways to avoid typing `sudo` in front of every command.
+
+### 4.1 Open a root shell
+
+```bash
+sudo -i    # Root login shell (root's environment)
+sudo -s    # Root shell (keep current environment)
+```
+
+- The prompt changes to `#`; commands then run without a `sudo` prefix.
+- Authenticate once with your own password.
+- Always `exit` when done — do not linger in a root shell.
+
+### 4.2 Extend the sudo password timeout
+
+By default sudo caches authentication for 5 minutes. To change it, edit the sudoers file safely:
+
+```bash
+sudo visudo
+```
+
+Add or edit this line:
+
+```
+Defaults        timestamp_timeout=30
+```
+
+- The value is in minutes (`30` = no re-prompt for 30 minutes).
+- `-1` means never expire until logout — not recommended for security.
+- Always edit via `visudo`; it validates syntax and prevents breaking sudoers.
+
+### 4.3 Group several commands under one sudo
+
+```bash
+sudo bash -c 'apt update && apt install -y curl && systemctl restart docker'
+```
+
+- Chaining with `&&` inside a single `sudo` prompts for the password only once.
+
+### 4.4 Re-run the previous command with sudo
+
+```bash
+sudo !!    # Repeat the last command with sudo prepended
+```
