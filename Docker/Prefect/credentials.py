@@ -1,7 +1,8 @@
 # credentials.py — shared Prefect credential block (Credentials) + JSON register CLI.
 #
-# Defines the one credential Block used across the stack and registers a team member's block from a
-# JSON file. Block name precedence: --block-name > JSON "name" field > file stem. Prefect requires the
+# Defines the one credential Block (per-member SECRETS only; service addresses live in prefect Variables)
+# and registers a team member's block from a JSON file. Block name precedence: --block-name > JSON "name"
+# field > file stem. Prefect requires the
 # block name to be lowercase letters, numbers, and dashes only — use a lowercase member name.
 #
 #     python credentials.py --json-path Jason.json --block-name jason    # save a block named "jason"
@@ -21,17 +22,16 @@ from typing import List, Optional, Union
 from prefect.blocks.core import Block
 from prefect.blocks.fields import SecretDict
 
-__version__ = "0.0.19"  # Semantic Versioning:  Version = Major.Minor.Patch
+__version__ = "0.0.20"  # Semantic Versioning:  Version = Major.Minor.Patch
 
 # Prefect block document names allow lowercase letters, numbers, and dashes only (no upper/underscore/space/dot).
 _BLOCK_NAME_RE = re.compile(r"^[a-z0-9-]+$")
 
 
-class Credentials(Block):              # must match pipeline.py exactly (class name + fields)
-    minio: SecretDict                  # endpoint, access_key, secret_key
-    postgresql_catalog: SecretDict     # endpoint, username, password, database
-    postgresql_optuna: SecretDict      # endpoint, username, password, database
-    mlflow: Optional[SecretDict] = None  # endpoint (MLflow tracking URI); optional so old blocks still load
+class Credentials(Block):              # must match pipeline.py exactly (class name + fields).
+    minio: SecretDict                  # access_key, secret_key        (endpoint is a prefect Variable)
+    postgresql_catalog: SecretDict     # username, password, database  (host/port are prefect Variables)
+    postgresql_optuna: SecretDict      # username, password, database  (host/port are prefect Variables)
 
 
 def register(spec_path: Union[str, Path], name: Optional[str] = None) -> None:

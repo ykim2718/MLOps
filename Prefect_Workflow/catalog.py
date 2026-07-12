@@ -47,7 +47,7 @@ CLI help (`python catalog.py`):
 
 usage: catalog.py [-h] [-V] <command> ...
 
-catalog.py v0.0.42 - Data catalog (PostgreSQL ledger) + MinIO object operations.
+catalog.py v0.0.43 - Data catalog (PostgreSQL ledger) + MinIO object operations.
 
 positional arguments:
   <command>
@@ -86,14 +86,15 @@ targets (each command prints where it connects + creds source at start):
   list/find = PostgreSQL             objects = MinIO
   upload/download/remove = both
 
-credentials - from a Prefect block (via the profile's PREFECT_API_URL), else default
-(localhost). no env vars, no docker-compose.env.
-  block sections (nested dict, hidden via SecretDict):
-    minio = {endpoint, access_key, secret_key}
-    postgresql_catalog/postgresql_optuna = {endpoint, username, password, database}
-  -b <block> picks the block (DB + MinIO). catalog/optuna are the shared DB.
-  --pg-host/--minio-host override only the endpoint host (creds unchanged) - reuse a
-                  container block from the host: --pg-host localhost --minio-host localhost.
+credentials - SECRETS from a Prefect block (via the profile's PREFECT_API_URL); addresses from prefect
+Variables; else localhost defaults. no env vars, no docker-compose.env.
+  block sections (secrets only, hidden via SecretDict):
+    minio = {access_key, secret_key}
+    postgresql_catalog/postgresql_optuna = {username, password, database}
+  addresses (prefect Variables): minio_endpoint, postgres_host, postgres_port
+  -b <block> picks the block (DB + MinIO creds). catalog/optuna are the shared DB.
+  --pg-host/--minio-host override only the address host (creds unchanged) - reuse from the host:
+                  --pg-host localhost --minio-host localhost.
 """
 import argparse
 import glob
@@ -107,7 +108,7 @@ from typing import Any, List, Optional, Tuple
 import psycopg2
 from psycopg2.extras import Json, RealDictCursor
 
-__version__ = "0.0.42"  # Semantic Versioning:  Version = Major.Minor.Patch
+__version__ = "0.0.43"  # Semantic Versioning:  Version = Major.Minor.Patch
 
 _BLOCK = None       # credential block name (-b); set by CLI or set_block(), used to read creds
 _PG_HOST = None      # CLI --pg-host: override the postgresql endpoint host only (creds unchanged)
@@ -123,14 +124,10 @@ except Exception as _cred_err:             # keep the reason; surfaced only when
     Credentials = None
     _CRED_IMPORT_ERR = _cred_err
 
-_DEFAULTS = {
-    "minio": {"endpoint": "http://localhost:9000", "access_key": "minioadmin", "secret_key": "minioadmin"},
-    "postgresql_catalog": {
-        "endpoint": "localhost:5432", "username": "postgres", "password": "postgres", "database": "catalog",
-    },
-    "postgresql_optuna": {
-        "endpoint": "localhost:5432", "username": "postgres", "password": "postgres", "database": "optuna",
-    },
+_DEFAULTS = {   # SECRETS only; addresses come from prefect Variables (with -b), else the localhost defaults in _addr
+    "minio": {"access_key": "minioadmin", "secret_key": "minioadmin"},
+    "postgresql_catalog": {"username": "postgres", "password": "postgres", "database": "catalog"},
+    "postgresql_optuna": {"username": "postgres", "password": "postgres", "database": "optuna"},
 }
 
 
@@ -155,6 +152,18 @@ def _override_url_host(url: str, host: Optional[str]) -> str:
     u = urlparse(url)
     netloc = f"{host}:{u.port}" if u.port else host
     return urlunparse(u._replace(netloc=netloc))
+
+
+def _addr(name: str, default: str) -> str:
+    """Backing-service address (non-secret): a prefect Variable from the server when a block (-b) is in
+    play, else a localhost default. Variables are the single address source (register_variables)."""
+    if not _BLOCK:
+        return default                                     # no -b -> local dev defaults (localhost)
+    from prefect.variables import Variable
+    v = Variable.get(name)
+    if not v:
+        raise RuntimeError(f"-b {_BLOCK}: prefect Variable '{name}' is unset - run register_variables.")
+    return v
 
 
 def _section(section: str, block: Optional[str] = None) -> Tuple[dict, str]:
@@ -184,12 +193,11 @@ def _section(section: str, block: Optional[str] = None) -> Tuple[dict, str]:
 
 
 def _dsn() -> str:
-    """블록의 'postgresql_catalog' 섹션 필드로 DSN 을 조립한다 (DSN 문자열을 통째로 저장하지 않음)."""
-    cfg, _ = _section("postgresql_catalog")
-    host, _, port = cfg["endpoint"].partition(":")           # "postgres:5432"
-    if _PG_HOST:                                             # CLI --pg-host overrides host only
-        host = _PG_HOST
-    return f"postgresql://{cfg['username']}:{cfg['password']}@{host}:{port or '5432'}/{cfg['database']}"
+    """블록의 'postgresql_catalog' 섹션(비밀)과 prefect Variable(host/port)로 DSN 을 조립한다."""
+    cfg, _ = _section("postgresql_catalog")                  # username, password, database
+    host = _PG_HOST or _addr("postgres_host", "localhost")   # CLI --pg-host overrides, else Variable/default
+    port = _addr("postgres_port", "5432")
+    return f"postgresql://{cfg['username']}:{cfg['password']}@{host}:{port}/{cfg['database']}"
 
 DDL = """
 CREATE TABLE IF NOT EXISTS datasets (
@@ -540,14 +548,15 @@ def list_datasets() -> List[dict]:
 # file-type (extension) tally - count MinIO objects for the tree (boto3 imported only when needed)
 # --------------------------------------------------------------------------- #
 def _s3(block: Optional[str] = None) -> Any:
-    """MinIO(S3 호환) 클라이언트. 블록의 'minio' 섹션(endpoint·access·secret)을 그대로 쓴다.
+    """MinIO(S3 호환) 클라이언트. 비밀(access/secret)은 블록의 'minio' 섹션, endpoint 는 prefect Variable.
 
     block(없으면 전역 _BLOCK)의 minio 키로 접속해 버킷 권한이 블록별로 적용된다. block 가
-    없으면 _DEFAULTS 로 떨어진다.
+    없으면 _DEFAULTS(비밀) + localhost(주소) 로 떨어진다.
     """
     import boto3
-    m, _ = _section("minio", block)                  # endpoint/access_key/secret_key (per-block, fallback shared)
-    return boto3.client("s3", endpoint_url=_override_url_host(m["endpoint"], _MINIO_HOST),
+    m, _ = _section("minio", block)                  # access_key, secret_key (per-block, fallback shared)
+    endpoint = _override_url_host(_addr("minio_endpoint", "http://localhost:9000"), _MINIO_HOST)
+    return boto3.client("s3", endpoint_url=endpoint,
                         aws_access_key_id=m["access_key"], aws_secret_access_key=m["secret_key"])
 
 
@@ -648,14 +657,15 @@ def _build_parser() -> argparse.ArgumentParser:
           list/find = PostgreSQL             objects = MinIO
           upload/download/remove = both
 
-        credentials - from a Prefect block (via the profile's PREFECT_API_URL), else default
-        (localhost). no env vars, no docker-compose.env.
-          block sections (nested dict, hidden via SecretDict):
-            minio = {endpoint, access_key, secret_key}
-            postgresql_catalog/postgresql_optuna = {endpoint, username, password, database}
-          -b <block> picks the block (DB + MinIO). catalog/optuna are the shared DB.
-          --pg-host/--minio-host override only the endpoint host (creds unchanged) - reuse a
-                          container block from the host: --pg-host localhost --minio-host localhost.
+        credentials - SECRETS from a Prefect block (via the profile's PREFECT_API_URL); addresses from
+        prefect Variables; else localhost defaults. no env vars, no docker-compose.env.
+          block sections (secrets only, hidden via SecretDict):
+            minio = {access_key, secret_key}
+            postgresql_catalog/postgresql_optuna = {username, password, database}
+          addresses (prefect Variables): minio_endpoint, postgres_host, postgres_port
+          -b <block> picks the block (DB + MinIO creds). catalog/optuna are the shared DB.
+          --pg-host/--minio-host override only the address host (creds unchanged) - reuse from the host:
+                          --pg-host localhost --minio-host localhost.
         """)
     p = argparse.ArgumentParser(
         prog="catalog.py",
@@ -728,8 +738,8 @@ def _print_targets(args: argparse.Namespace) -> None:
         _, src = _section("postgresql_catalog")
         print(f"  PostgreSQL (catalog DB): {_mask_dsn(_dsn())}  [creds: {src}]", file=sys.stderr)
     if args.uses_minio:
-        m, src = _section("minio", getattr(args, "block", None))
-        ep = _override_url_host(m["endpoint"], _MINIO_HOST)
+        _, src = _section("minio", getattr(args, "block", None))
+        ep = _override_url_host(_addr("minio_endpoint", "http://localhost:9000"), _MINIO_HOST)
         print(f"  MinIO (object storage):  {ep}  [creds: {src}]", file=sys.stderr)
 
 

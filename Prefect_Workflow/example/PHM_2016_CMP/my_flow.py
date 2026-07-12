@@ -33,22 +33,10 @@ from prefect.artifacts import create_markdown_artifact, create_table_artifact
 from prefect.runtime import flow_run
 from prefect.task_runners import ThreadPoolTaskRunner
 
-# Credentials block class (defined in Prefect/credentials.py). Optional import so the flow
-# still parses without it; in production pipeline.py provides it on the path, same as catalog.py.
-try:
-    from credentials import Credentials
-except Exception:
-    Credentials = None
-
-
-__version__ = "0.0.24"
+__version__ = "0.0.25"
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OPTUNA_CFG = os.path.join(HERE, "optuna.json")
-
-# Dev-only fallback; the real DSN comes from the member's postgresql_optuna block.
-_OPTUNA_DEFAULT = {"endpoint": "localhost:5432", "username": "postgres",
-                   "password": "postgres", "database": "optuna"}
 
 # 25 positional columns (CSVs are header-less) - PHM 2016 CFP, Table 1.
 COLS = [
@@ -80,28 +68,19 @@ def _mask(dsn: str) -> str:
     return re.sub(r"(://[^:/@]+:)[^@]*(@)", r"\1***\2", dsn)
 
 
-def _optuna_storage(cfg: dict, member: str) -> tuple:
-    """Optuna storage URL = the member's postgresql_optuna Credentials block (the team DB).
+def _optuna_storage(cfg: dict) -> tuple:
+    """Optuna study storage. Priority: cfg['storage'] > POSTGRESQL_OPTUNA_DSN env > local sqlite.
 
-    `cfg['storage']` overrides (e.g. a test DSN); otherwise the DSN is built from the
-    `postgresql_optuna` section of `Credentials.load(member)`, exactly like catalog.py.
-    Falls back to a localhost optuna DB if the block / prefect is unavailable. The block
-    holds host `postgres` (the compose-network name), so a live connect needs the flow to
-    run inside that network - which is how pipeline.py runs this payload in production.
+    pipeline.py bridges the shared postgres study DSN (Variable host/port + block creds) as
+    POSTGRESQL_OPTUNA_DSN; a standalone run without that env falls back to a local sqlite file.
     """
     override = cfg.get("storage")
     if override:
         return override, "config"
-    sect, src = _OPTUNA_DEFAULT, "default (localhost optuna)"
-    if Credentials is not None and member:
-        try:
-            sect = Credentials.load(member).postgresql_optuna.get_secret_value()
-            src = f"prefect-block (member={member})"
-        except Exception:                                        # block missing / server down
-            pass
-    host, _, port = sect["endpoint"].partition(":")
-    dsn = f"postgresql://{sect['username']}:{sect['password']}@{host}:{port or '5432'}/{sect['database']}"
-    return dsn, src
+    dsn = os.environ.get("POSTGRESQL_OPTUNA_DSN")
+    if dsn:
+        return dsn, "env (POSTGRESQL_OPTUNA_DSN)"
+    return "sqlite:///optuna.db", "local sqlite (fallback)"
 
 
 def _mlflow_start(uri: str, experiment: str, run_name: str):
@@ -503,10 +482,10 @@ def my_flow(data_dir: str, member: str = "local"):
     cfg = load_config(OPTUNA_CFG)                            # read fresh each run
     log.info(f"tuning {cfg['n_trials']} trials, metric={cfg['metric']}")
 
-    storage, src = _optuna_storage(cfg, member)             # postgresql_optuna block (by member)
+    storage, src = _optuna_storage(cfg)                     # cfg['storage'] > POSTGRESQL_OPTUNA_DSN env > sqlite
     log.info(f"optuna storage [{src}]: {_mask(storage)}")
 
-    mlflow_uri = cfg.get("mlflow_uri") or "http://mlflow:5000"   # compose service; localhost:5000 on host
+    mlflow_uri = os.environ.get("MLFLOW_TRACKING_URI") or cfg.get("mlflow_uri") or "http://mlflow:5000"
     run_name = f"{member}"
     log.info(f"mlflow uri: {mlflow_uri}")
 

@@ -1,6 +1,6 @@
 # Prefect Pipeline Orchestration on Docker
 
-<sub>rev. 552</sub>
+<sub>rev. 558</sub>
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
@@ -55,7 +55,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
 - **pool = 라우팅 라벨** — server 가 run 을 `work_pool_name` 으로 해당 등급 pool 에 보냅니다 (pool 은 큐일 뿐 컨테이너가 아닙니다).
 - **dispatcher = 머신마다 1개** — 각 컴퓨터가 자기 등급 pool 의 dispatcher 를 띄웁니다. 한 등급에 머신이 여럿이면 그 pool 에 dispatcher 가 여럿 붙어 큐를 나눕니다 (위 그림: high 는 2대 → dispatcher 2개).
 - **dispatcher 마다 flow 여럿** — 각 dispatcher 가 `--limit` 까지 pipeline_flow 컨테이너를 동시에 띄웁니다 (그림은 2개씩).
-- **deployment = 등급별 등록** — **deployment** (flow 를 어떤 pool·파라미터로 실행할지 server 에 등록한 실행 정의) 은 pool 하나에 바인딩되므로, 같은 flow 를 등급마다 등록해 (`pipeline/pipelineflow-high`·`pipeline/pipelineflow-low`) job 을 보낼 등급을 고릅니다 (등록 방법은 [§6.2](#62-deployment)).
+- **deployment = 등급별 등록** — **deployment** (flow 를 어떤 pool·파라미터로 실행할지 server 에 등록한 실행 정의) 은 pool 하나에 바인딩되므로, 같은 flow 를 등급마다 등록해 (`pipeline/high_deployment`·`pipeline/low_deployment`) job 을 보낼 등급을 고릅니다 (등록 방법은 [§6.2](#62-deployment)).
 
 각 서비스의 역할입니다.
 
@@ -110,10 +110,10 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
   ══ DOCKER 3 ── PIPELINE FLOW ═════════════════════════════════════════════
      dir    : PipelineFlow/
      files  : Dockerfile.pipeline_flow · requirements.txt · pipeline.py
-              pipelineflow-high.yml · pipelineflow-low.yml
+              high_deployment.yml · low_deployment.yml
      run    : docker build -f Dockerfile.pipeline_flow -t pipeline-flow:latest .   # in PipelineFlow/
-              prefect deploy --prefect-file pipelineflow-<tier>.yml --name pipelineflow-<tier> --no-prompt
-     config → deployment parameters (pipelineflow-{high,low}.yml)
+              prefect deploy --prefect-file <tier>_deployment.yml --name <tier>_deployment --no-prompt
+     config → deployment parameters ({high,low}-deployment.yml)
               git_repo · git_commit_hash · minio_key · minio_bucket · member · payload
        │
        └─ Credential blocks (admin, once)         # one block per team member on server; needed before first run
@@ -137,6 +137,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
      PrefectServer/
      ├─ docker-compose.server.yml      server container definition (port 4200 · mounts the base job templates)
      ├─ run_server.ps1                 start: create network + compose up
+     ├─ register_variables.ps1         register backing-address variables (once, after the server is up)
      ├─ register_pool.ps1              register work pools (once, after the server is up)
      ├─ prune_loop.sh                  worker_pruner sidecar loop (prunes OFFLINE worker records)
      ├─ docker-pool-template-high.json   high-tier base job template (mem_limit 16g · = flow container settings)
@@ -147,6 +148,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
 
      ```powershell
      .\run_server.ps1 -Yaml docker-compose.server.yml -Network mlops
+     .\register_variables.ps1 -Minio http://192.168.0.8:9000 -PostgresHost 192.168.0.8 -PostgresPort 5432 -Mlflow http://192.168.0.8:5000
      .\register_pool.ps1 -PoolName high_performance  -TemplateFile docker-pool-template-high.json -ConcurrencyLimit 16 -Compose docker-compose.server.yml
      .\register_pool.ps1 -PoolName low_performance -TemplateFile docker-pool-template-low.json  -ConcurrencyLimit 8  -Compose docker-compose.server.yml
      ```
@@ -175,14 +177,14 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
      ├─ Dockerfile.pipeline_flow       flow image recipe (FROM python:3.11.15)
      ├─ requirements.txt               team libraries (torch · mlflow · optuna …)
      ├─ pipeline.py                    orchestrator (copied into the image)
-     └─ pipelineflow-{high,low}.yml    deployment definitions (admin registers once)
+     └─ {high,low}-deployment.yml    deployment definitions (admin registers once)
      ```
 
      Run (from `PipelineFlow/`):
 
      ```powershell
      docker build -f Dockerfile.pipeline_flow -t pipeline-flow:latest .   # build the image once
-     prefect deploy --prefect-file pipelineflow-high.yml --name pipelineflow-high --no-prompt   # register a deployment (host shell, once; repeat for -low)
+     prefect deploy --prefect-file high_deployment.yml --name high_deployment --no-prompt   # register a deployment (host shell, once; repeat for low_deployment)
      ```
 
   4) **[Credentials](#7-credentials)** — 팀원별 자격증명 블록 (admin · 팀원마다 1회) · `Docker/Prefect/` 루트
@@ -528,9 +530,9 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
   #### Yaml
 
   ```yaml
-  # pipelineflow-high.yml - high-tier deployment definition
+  # high_deployment.yml - high-tier deployment definition
   deployments:
-    - name: pipelineflow-high
+    - name: high_deployment
       entrypoint: pipeline.py:pipeline       # <file>:<@flow function>
       work_pool:
         name: high_performance
@@ -540,7 +542,7 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
         payload: my_flow.py
   ```
 
-  - `name: pipelineflow-high` — deployment 이름입니다 (등급별로 `pipelineflow-high`·`pipelineflow-low`).
+  - `name: high_deployment` — deployment 이름입니다 (등급별로 `high_deployment`·`low_deployment`).
   - `entrypoint: pipeline.py:pipeline` — 실행할 flow 를 `<파일>:<@flow 함수>` 로 가리킵니다 (어떻게 `pipeline.py` 가 되는지는 [§6.3](#63-pipelinepy)).
   - `work_pool.name: high_performance` — 이 deployment 가 제출될 work pool 입니다.
   - `job_variables.image: pipeline-flow:latest` — flow 를 띄울 이미지입니다 ([§6.1](#61-image)). 이 `job_variables` 블록은 `work_pool.name` 으로 등록된 work pool 의 **base job template 을 override** 합니다. `job_variables.image` 는 `job_configuration.image` 를 override 합니다 ([§4](#work-pool-registration)).
@@ -550,19 +552,19 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
 
   #### Execution Command
 
-  `prefect deploy` 는 yaml 정의를 server 에 등록합니다. 실행 폴더에는 `pipeline.py` 와 `pipelineflow-high.yml` 가 있어야 합니다.
+  `prefect deploy` 는 yaml 정의를 server 에 등록합니다. 실행 폴더에는 `pipeline.py` 와 `high_deployment.yml` 가 있어야 합니다.
 
   ```powershell
-  cd PipelineFlow                                      # the folder with pipeline.py and pipelineflow-high.yml
+  cd PipelineFlow                                      # the folder with pipeline.py and high_deployment.yml
   $env:PREFECT_API_URL = "http://localhost:4200/api"   # on another machine, http://<server IP>:4200/api
-  prefect deploy --prefect-file pipelineflow-high.yml --name pipelineflow-high --no-prompt
+  prefect deploy --prefect-file high_deployment.yml --name high_deployment --no-prompt
   ```
 
   - `prefect CLI --prefect-file` — 정의 파일.
   - `prefect CLI --name` — 등록할 deployment.
   - `prefect CLI --no-prompt` — 대화형 질문을 끄고 yaml 정의대로 등록합니다 (이미지 빌드·스케줄 프롬프트 안 뜸).
 
-  `prefect deploy` 는 DB 에 직접 쓰지 않고 server API 로 등록을 보냅니다 (server 가 Postgres `prefect` DB 에 저장). 등급마다 `pipelineflow-high`·`pipelineflow-low` yaml 로 두 벌 등록합니다.
+  `prefect deploy` 는 DB 에 직접 쓰지 않고 server API 로 등록을 보냅니다 (server 가 Postgres `prefect` DB 에 저장). 등급마다 `high`·`low` yaml 로 두 벌 등록합니다.
 
   > **중요** — `prefect deploy` 는 entrypoint 인 `pipeline.py` 의 `pipeline` 함수 **시그니처를 introspect** 해 파라미터 스키마를 server DB (`prefect`) 에 저장합니다. 따라서 `prefect deploy` 는 `pipeline.py` 가 있는 폴더에서 실행하여야 하며, `pipeline` 함수가 바뀌면 이미지 `docker build` 와 함께 **`prefect deploy` 도 반드시** 다시 해야 합니다 (그래야 server 의 파라미터 스키마·UI Run 폼·trigger 검증이 새 시그니처와 맞습니다).
 
@@ -572,17 +574,17 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
 
   ```powershell
   prefect deployment ls
-  prefect deployment inspect "pipeline/pipelineflow-low"
+  prefect deployment inspect "pipeline/low_deployment"
   ```
 
-  `deployment ls` 결과물 예시 — `pipeline/pipelineflow-low` 가 `low_performance` pool 로 등록된 모습:
+  `deployment ls` 결과물 예시 — `pipeline/low_deployment` 가 `low_performance` pool 로 등록된 모습:
 
   ```text
                                        Deployments
   ┌───────────────────────────┬──────────────────────────────────────┬─────────────────┐
   │ Name                      │ ID                                   │ Work Pool       │
   ├───────────────────────────┼──────────────────────────────────────┼─────────────────┤
-  │ pipeline/pipelineflow-low │ a1b2c3d4-5e6f-7081-92a3-b4c5d6e7f809 │ low_performance │
+  │ pipeline/low_deployment │ a1b2c3d4-5e6f-7081-92a3-b4c5d6e7f809 │ low_performance │
   └───────────────────────────┴──────────────────────────────────────┴─────────────────┘
   ```
 
@@ -607,11 +609,10 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
   __version__ = "0.0.26"  # Semantic Versioning:  Version = Major.Minor.Patch
 
 
-  class Credentials(Block):              # ONE block holds everything as nested dicts; values hidden
-      minio: SecretDict                  # endpoint, access_key, secret_key
-      postgresql_catalog: SecretDict     # endpoint, username, password, database
-      postgresql_optuna: SecretDict      # endpoint, username, password, database
-      mlflow: Optional[SecretDict] = None  # endpoint (MLflow tracking URI); optional so old blocks still load
+  class Credentials(Block):              # ONE block holds per-member SECRETS as nested dicts (values hidden);
+      minio: SecretDict                  # access_key, secret_key        (endpoint is a prefect Variable)
+      postgresql_catalog: SecretDict     # username, password, database  (host/port are prefect Variables)
+      postgresql_optuna: SecretDict      # username, password, database  (host/port are prefect Variables)
 
 
   # flow_run_name shows who submitted the run (e.g. alice@a1b2c3d).
@@ -683,7 +684,7 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
 
   [§6.2](#62-deployment) 의 deployment 가 entrypoint 를 **`pipeline.py:pipeline`** 로 가리킵니다. 이 문자열은 server 의 deployment 레코드 (`prefect` DB) 에 저장되고, dispatcher 가 띄운 컨테이너 안에서 Prefect 런타임이 이미지 작업 디렉터리 (`/work`, `Dockerfile.pipeline_flow` 가 `pipeline.py` 를 COPY 한 곳) 기준으로 `pipeline.py` 를 import 해 콜론 뒤 **`@flow` 함수 `pipeline`** 을 run 파라미터 (`git_repo`·`git_commit_hash`·`minio_key`·`minio_bucket`·`submitter`·`prefect_block`·`payload`) 와 함께 호출합니다. 그래서 deployment entrypoint 가 곧 이 `pipeline.py` 입니다.
 
-  `pipeline` 함수에 전달한 run 파라미터 **값** 은 **trigger 할 때** 지정합니다 — trigger 주체는 보통 **팀원** (또는 스케줄·automation) 입니다. 팀원이 자기 머신·CI 에서 CLI `prefect deployment run "pipeline/pipelineflow-high" -p git_repo=… -p git_commit_hash=… -p minio_key=… -p submitter=… -p prefect_block=…` 을 실행하거나 (CLI 는 [Appendix B](#appendix-b-prefect-cli)), server UI 의 Run 폼, 스케줄·automation, 또는 `run_deployment(name, parameters={…})` 로 ([§8.2](#82-python-sdk)) trigger 합니다.
+  `pipeline` 함수에 전달한 run 파라미터 **값** 은 **trigger 할 때** 지정합니다 — trigger 주체는 보통 **팀원** (또는 스케줄·automation) 입니다. 팀원이 자기 머신·CI 에서 CLI `prefect deployment run "pipeline/high_deployment" -p git_repo=… -p git_commit_hash=… -p minio_key=… -p submitter=… -p prefect_block=…` 을 실행하거나 (CLI 는 [Appendix B](#appendix-b-prefect-cli)), server UI 의 Run 폼, 스케줄·automation, 또는 `run_deployment(name, parameters={…})` 로 ([§8.2](#82-python-sdk)) trigger 합니다.
 
   `pipeline.py` 가 **`pipeline_flow` 컨테이너 안에서** run 마다 만드는 폴더 구조입니다 (끝나면 통째로 삭제 — 컨테이너 자체가 일시적이라 함께 사라집니다).
 
@@ -702,46 +703,65 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
 
 ## 7. Credentials
 
-설정 값은 **세 곳** 으로 나뉘고 서로 겹치지 않습니다 — ① server·dispatcher 인프라 값 (backend DB·Control Node 주소) 은 `docker-compose.env_example`, ② `pipeline_flow` 컨테이너의 **기동·연결 설정** (`PREFECT_API_URL`·`mem_limit` 등, 비밀 아님) 은 **base job template** (§4), ③ **run 코드용 자격증명** (MinIO·DB) 만 **Prefect Secret** 입니다. 따라서 base job template 에 적은 값 (`PREFECT_API_URL` 등) 은 **Secret 에 넣지 않습니다** (비밀이 아니고 `docker inspect` 로 보여도 무방). dispatcher 는 자격증명을 들지 않습니다.
+설정 값은 **네 곳** 으로 나뉘고 서로 겹치지 않습니다 — ① server·dispatcher **부트스트랩** (backend DB URL·server 주소) 은 `docker-compose.env_example`, ② `pipeline_flow` 컨테이너의 **기동 설정** (`PREFECT_API_URL`·`mem_limit` 등, 비밀 아님) 은 **base job template** (§4), ③ **backing service 주소** (MinIO·PostgreSQL·MLflow endpoint, 비밀 아님) 은 서버의 **Prefect Variable** (`register_variables`), ④ **run 코드용 비밀** (MinIO 키·DB 비번) 만 **Credential 블록** (Prefect Secret) 입니다. **주소(③)와 비밀(④)을 분리** — 주소는 한 곳(Variable)에서 관리하고 비밀만 블록에 둡니다. dispatcher 는 자격증명을 들지 않습니다.
 
 ### docker-compose.env_example
 
-  **server·dispatcher 용 값** (backend DB URL·Control Node 주소) 은 `docker-compose.env_example` 한 파일에 모읍니다.
+  **server·dispatcher 부트스트랩 값** (server 주소·backend DB URL) 만 `docker-compose.env_example` 에 모읍니다 (컨테이너가 `env_file` 로 읽음). backing 주소는 여기 없고 서버 Variable 에 있습니다 (아래 Service Address Variables).
 
   ```dotenv
-  # docker-compose.env_example  (Prefect — server and dispatcher infrastructure)
-  # __version__ = "0.0.10"
-  # All secrets are CHANGE_ME placeholders — do not expose real values.
-  # The real docker-compose.env is excluded by .gitignore; only this _example is committed.
+  # docker-compose.env_example  (Prefect stack — server/dispatcher bootstrap config)
+  # __version__ = "0.0.13"
+  # Container-only config: read via env_file by prefect_server and prefect_dispatcher. NOT used by host
+  # tools. Backing-service addresses (MinIO / PostgreSQL / MLflow) live on the server as prefect Variables
+  # (register_variables.sh) — a single, non-secret source read by the flow and by host tools alike.
+  # The real docker-compose.env is git-ignored; only this _example is committed. Secrets stay CHANGE_ME.
 
-  # -- prefect_server (Control Node) --------------------------------------
-  # PostgreSQL (prefect DB) URL where the server stores metadata; reached by service name 'postgres'.
-  # Match the account/password to POSTGRES_USER / POSTGRES_PASSWORD on the PostgreSQL stack.
-  PREFECT_SERVER_DATABASE_CONNECTION_URL=postgresql+asyncpg://CHANGE_ME:CHANGE_ME@postgres:5432/prefect
-
-  # -- prefect_dispatcher -------------------------------------------------
-  # The Prefect server API the dispatcher connects to (:4200).
-  #   - in docker network: http://prefect_server:4200/api
-  #   - out of docker network: http://<server LAN IP>:4200/api
+  # -- Prefect server address (bootstrap) -------------------------------------
+  # Server API address — used by the dispatcher, by flow containers (via the base job template), and by
+  # in-container CLI (register_pool). Set to the prefect_server host LAN IP.
   PREFECT_API_URL=http://192.168.0.13:4200/api
+  # API address the server hands to browsers for the dashboard (browsers live outside docker).
+  PREFECT_UI_API_URL=http://192.168.0.13:4200/api
+
+  # -- Prefect metadata DB (bootstrap) ----------------------------------------
+  # Where the server stores flow runs / deployments / logs. Host = the PostgreSQL host LAN IP.
+  PREFECT_SERVER_DATABASE_CONNECTION_URL=postgresql+asyncpg://CHANGE_ME:CHANGE_ME@192.168.0.8:5432/prefect
   ```
 
-  - server 는 `postgres` 서비스명으로 backend 에 접속하므로 URL 호스트가 `postgres` 입니다.
-  - dispatcher 는 코드를 실행하지 않아 MinIO·카탈로그 자격증명이 필요 없습니다 — 그 값들은 아래 Credential Blocks 에서 다룹니다.
-  - `PREFECT_API_URL` — prefect web dashboard 를 web browser 로 열 때 browser 는 docker network 밖이라 `prefect_server` 대신 LAN IP 를 사용해야 합니다.
+  - **메타 DB 호스트** 는 PostgreSQL 이 있는 머신의 **LAN IP** (여기선 `192.168.0.8`) — server 와 다른 머신이면 서비스 이름 `postgres` 대신 IP 를 씁니다.
+  - `PREFECT_UI_API_URL` — 브라우저는 docker network 밖이라 `prefect_server` 대신 **LAN IP**.
+  - **backing 주소 (MinIO·PostgreSQL·MLflow) 는 여기 없습니다** — 서버 Variable 로 관리합니다 (아래). dispatcher 는 자격증명·주소를 들지 않습니다.
+
+### Service Address Variables
+
+  backing service 주소 (MinIO·PostgreSQL·MLflow endpoint, 비밀 아님) 는 서버의 **Prefect Variable** 한 곳에 둡니다. flow 코드와 host 툴 (`catalog.py`) 이 모두 **서버에서** 읽으므로 (`Variable.get(...)`), docker-compose.env 를 컨테이너 밖에서 볼 필요가 없습니다. server 기동 후 `register_variables.sh` 로 한 번 등록합니다.
+
+  ```bash
+  ./register_variables.sh --minio http://192.168.0.8:9000 --postgres-host 192.168.0.8 \
+                          --postgres-port 5432 --mlflow http://192.168.0.8:5000
+  ```
+
+  | Variable | 값 (LAN IP) | 쓰는 곳 |
+  |----------|-------------|---------|
+  | `minio_endpoint` | `http://<MinIO IP>:9000` | pipeline.py·catalog.py (S3) |
+  | `postgres_host` · `postgres_port` | `<PostgreSQL IP>` · `5432` | catalog·optuna DSN |
+  | `mlflow_tracking_uri` | `http://<MLflow IP>:5000` | payload MLflow 로깅 |
+
+  - 주소가 바뀌면 `register_variables.sh` 를 **다시 한 번** 돌리면 server·flow·host 툴 전부 반영됩니다.
+  - `Variable.get` 은 서버가 있어야 하므로, flow 는 base job template 의 `PREFECT_API_URL` 로, host 툴은 프로필로 서버에 붙습니다 (한 곳으로 몰린 주소를 모두가 서버에서 가져감).
 
 ### Credential Blocks
 
-  코드가 **MinIO** · **MLflow** · PostgreSQL 의 `catalog`·`optuna` DB 에 접속할 자격증명·엔드포인트를 **한 블록** 에 모읍니다 — `minio`·`postgresql_catalog`·`postgresql_optuna`·`mlflow` 네 묶음을 쪼개지 않고 한 블록의 **nested dict** 로 담고, 비밀 값은 `SecretDict` 로 가립니다 (`mlflow` 는 optional — endpoint 하나). server 에 한 번 저장하면 컨테이너·머신마다 따로 넣지 않아도 됩니다.
+  코드가 **MinIO** 와 PostgreSQL 의 `catalog`·`optuna` DB 에 접속할 **비밀** 을 **한 블록** 에 모읍니다 — `minio`·`postgresql_catalog`·`postgresql_optuna` 세 묶음의 **비밀만** (주소·endpoint 는 위 Variable). 비밀 값은 `SecretDict` 로 가립니다. server 에 한 번 저장하면 컨테이너·머신마다 따로 넣지 않아도 됩니다.
 
-  블록 클래스는 `Credentials` **하나** (`minio`·`postgresql_catalog`·`postgresql_optuna` + optional `mlflow`, `SecretDict` 필드) 이고, **블록 이름은 팀원 이름** 입니다 — 팀원마다 자기 이름의 블록을 하나 갖습니다 (예시 `Jason` 은 팀원 이름). **`pipeline.py`** 와 **`catalog.py`** (모든 팀원이 쓰는 공통 라이브러리) 가 같은 클래스를 정의해 쓰므로 한쪽 `save`, 다른 쪽 `load` 가 맞물립니다. 코드는 run 의 팀원 이름으로 `Credentials.load(<member>)` 해 그 팀원의 자격증명을 받습니다.
+  블록 클래스는 `Credentials` **하나** (`minio`·`postgresql_catalog`·`postgresql_optuna` 세 `SecretDict` 필드) 이고, **블록 이름은 팀원 이름** 입니다 — 팀원마다 자기 이름의 블록을 하나 갖습니다 (예시 `Jason` 은 팀원 이름). **`pipeline.py`** 와 **`catalog.py`** (모든 팀원이 쓰는 공통 라이브러리) 가 같은 클래스를 정의해 쓰므로 한쪽 `save`, 다른 쪽 `load` 가 맞물립니다. 코드는 run 의 팀원 이름으로 `Credentials.load(<member>)` 해 그 팀원의 **비밀** 을 받습니다 (주소는 Variable).
 
   ```text
-  Jason                       # block name = a team member's name (e.g. Jason); load it -> everything
-  ├─ minio              : endpoint, access_key, secret_key
-  ├─ postgresql_catalog : endpoint, username, password, database
-  ├─ postgresql_optuna  : endpoint, username, password, database
-  └─ mlflow             : endpoint            # MLflow tracking URI (optional)
+  Jason                       # block name = a team member's name (e.g. Jason); load it -> SECRETS only
+  ├─ minio              : access_key, secret_key
+  ├─ postgresql_catalog : username, password, database
+  └─ postgresql_optuna  : username, password, database
   ```
 
   팀원별 자격증명을 **JSON 파일** 로 적고 `credentials.py` 로 등록합니다 — 블록 이름은 Prefect 규칙상 **소문자·숫자·하이픈만** 가능하므로 `--block-name` 으로 소문자 이름을 지정합니다 (파일명은 `Jason.json` 그대로 두고 블록 이름만 `jason`). `credentials.py` 코드는 [Appendix G](#appendix-g-credentialspy).
@@ -751,24 +771,18 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
   ```json
   {
     "minio": {
-      "endpoint": "http://minio:9000",
       "access_key": "<MINIO_ACCESS_KEY>",
       "secret_key": "<MINIO_SECRET_KEY>"
     },
     "postgresql_catalog": {
-      "endpoint": "postgres:5432",
       "username": "catalog_user",
       "password": "<CATALOG_DB_PASSWORD>",
       "database": "catalog"
     },
     "postgresql_optuna": {
-      "endpoint": "postgres:5432",
       "username": "optuna_user",
       "password": "<OPTUNA_DB_PASSWORD>",
       "database": "optuna"
-    },
-    "mlflow": {
-      "endpoint": "http://mlflow:5000"
     }
   }
   ```
@@ -785,13 +799,13 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
   ```powershell
   prefect config view                       # PREFECT_API_URL 이 server 를 가리키는지 확인
   prefect block ls                          # Name=jason, Type=Credentials (Slug 열에 credentials/jason)
-  prefect block inspect credentials/jason   # 네 섹션 확인 (SecretDict 라 비밀 값은 *** 로 가려짐)
+  prefect block inspect credentials/jason   # 세 섹션 확인 (SecretDict 라 비밀 값은 *** 로 가려짐)
   python -c "from credentials import Credentials as cr; print(cr.load('jason').minio.get_secret_value())"
   ```
 
   UI 로는 `http://<Host IP>:4200` → **Blocks** 에서도 같은 블록이 보입니다.
 
-  `pipeline.py` 는 그 run 의 팀원 블록에서 `minio` (+ optional `mlflow`) 를, `catalog.py` 는 `minio`·`postgresql_catalog`·`postgresql_optuna` 세 섹션을 씁니다 (실제 load 예시는 [§6.3](#63-pipelinepy) 의 `pipeline.py`).
+  `pipeline.py` 는 블록의 `minio` **비밀** + Variable **주소** 로 다운로드하고, `catalog.py` 는 `minio`·`postgresql_catalog`·`postgresql_optuna` **비밀** + Variable **주소** 를 씁니다 (실제 load 예시는 [§6.3](#63-pipelinepy) 의 `pipeline.py`).
 
   > flow 컨테이너는 base job template 의 `PREFECT_API_URL` 로 server 에 연결돼야 블록을 받습니다 ([§4 Work Pool Registration](#work-pool-registration)). `mlflow`·`prefect` DB 는 사용자 코드가 직접 접속하지 않으므로, 사용자 role 에는 `catalog`·`optuna` 권한만 있으면 됩니다.
 
@@ -833,7 +847,7 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
   사람이 셸에서, 또는 CI 의 한 스텝으로 직접 trigger 합니다. 필요한 것은 그 셸의 `prefect` CLI 와 `PREFECT_API_URL` 설정뿐입니다.
 
   ```powershell
-  prefect deployment run "pipeline/pipelineflow-high" `
+  prefect deployment run "pipeline/high_deployment" `
     -p git_repo=https://github.com/team/repo.git -p git_commit_hash=a1b2c3d `
     -p minio_key="SYDNEY/Bennelong Point" -p submitter=alice -p prefect_block=yrocket
   ```
@@ -850,7 +864,7 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
   from prefect.deployments import run_deployment
 
   flow_run = run_deployment(                                                   # ask the server to create a flow run
-      name="pipeline/pipelineflow-high",                                      # deployment name
+      name="pipeline/high_deployment",                                      # deployment name
       parameters={"git_repo": "https://github.com/team/repo.git",
                   "git_commit_hash": "a1b2c3d", "minio_key": "SYDNEY/Bennelong Point", "member": "alice"},
   )
@@ -868,18 +882,18 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
   ```python
   # serve mode — one process registers the deployment AND runs it (no work pool / dispatcher).
   from my_flow import pipeline                 # the @flow object
-  pipeline.serve(name="pipelineflow-serve")    # long-lived; Ctrl-C to stop
+  pipeline.serve(name="serve")    # long-lived; Ctrl-C to stop
   ```
 
   - **등록+실행** — `pipeline.serve(...)` 한 줄이 deployment 등록과 실행 프로세스를 겸합니다 (`prefect deploy`·dispatcher·이미지 빌드 불필요).
-  - **trigger** — serve 프로세스는 상시 떠 있으므로 **별도 터미널에서** trigger 하며, 방법은 **§8.1·§8.2 와 똑같습니다** (`prefect deployment run "pipeline/pipelineflow-serve"` · `run_deployment(...)`). served 프로세스가 그 run 을 자기 안에서 실행합니다.
+  - **trigger** — serve 프로세스는 상시 떠 있으므로 **별도 터미널에서** trigger 하며, 방법은 **§8.1·§8.2 와 똑같습니다** (`prefect deployment run "pipeline/serve"` · `run_deployment(...)`). served 프로세스가 그 run 을 자기 안에서 실행합니다.
   - **차이·적합** — run 마다 컨테이너 격리가 없고, 그 프로세스가 떠 있어야 run 이 돕니다. 다수 팀원·동시 실행·격리가 필요하면 work pool (이 스택) 입니다 ([Appendix C](#appendix-c-execution-architecture)).
 
 ## 9. Prefect UI
 
 server 대시보드 (`http://<Host IP>:4200`) 에서 deployment·run·task 가 어떻게 보이는지입니다.
 
-- **Deployments** — `<flow_name>/<deployment_name>` 로 나열됩니다 (예: `pipeline/pipelineflow-high`·`pipeline/pipelineflow-low`). flow 이름은 `@flow(name="pipeline")`, deployment 이름은 yaml 의 `name` 입니다.
+- **Deployments** — `<flow_name>/<deployment_name>` 로 나열됩니다 (예: `pipeline/high_deployment`·`pipeline/low_deployment`). flow 이름은 `@flow(name="pipeline")`, deployment 이름은 yaml 의 `name` 입니다.
 - **Flow Runs** — trigger 된 run 이 `flow_run_name` 으로 나열됩니다. `member` 가 들어가 같은 deployment 아래에서 `alice@a1b2c3d` 처럼 **누구의 run 인지** 구분됩니다 ([§6.3](#63-pipelinepy) 의 `flow_run_name`). `pipeline.py` 는 payload 에 실행자 이름 (`submitter`) 만 넘기고 git 정보는 넘기지 않으므로, 팀 payload 의 flow run 은 실행자 이름 (예: `alice`) 으로 나열됩니다 (orchestrator run 은 `alice@a1b2c3d`).
 - **Tasks** — 팀 payload 가 단계 (dp·fe·train·test) 를 **`@task`** 로 감싸고 `@flow` 로 묶으면, 컨테이너 env 의 `PREFECT_API_URL` 덕분에 그 subprocess 가 **자기 flow run 과 task** 를 보고해 단계가 보입니다 (orchestrator run 과 **별개 flow run**, subprocess 라 격리 유지 — [Appendix K](#appendix-k-prefect-task)).
 - **Parameters · State · Logs** — run 마다 입력 파라미터 (`git_repo`·`git_commit_hash`·`minio_key`·`member`)·상태·로그가 자동 기록되어 (UI 의 Flow Run → Parameters), 같은 파라미터로 재실행 (재현) 할 수 있습니다.
@@ -888,8 +902,8 @@ job 하나가 trigger 되면 대시보드에 다음처럼 보입니다.
 
 ```text
 Deployments
-  pipeline/pipelineflow-high     high_performance     # per-tier registration (§6.2)
-  pipeline/pipelineflow-low      low_performance
+  pipeline/high_deployment     high_performance     # per-tier registration (§6.2)
+  pipeline/low_deployment      low_performance
 
 Flow Runs
   pipeline   alice@a1b2c3d   Completed   high_performance     # orchestrator (pipeline.py)
@@ -915,11 +929,11 @@ Flow Runs
 - **deployment** — flow 를 어떻게 실행할지 묶어 **server DB (`prefect`) 에 저장한 레코드** 입니다. 파일·dict 가 아니라 server 안의 영구 레코드이고, API·UI·`prefect deployment inspect` 에서 **JSON 으로** 보입니다.
   - **누가** — 플랫폼·관리자가 등급마다 1회 (팀원 아님).
   - **어떻게** — `prefect deploy --prefect-file <yaml> --name <name> --no-prompt` (CLI) 가 yaml 정의를 server API 로 보내 DB 에 등록합니다 ([§6.2](#62-deployment)).
-  - **사용** — 코드를 다시 안 봐도 이름 `<flow>/<deployment>` 로 run 을 trigger 합니다 (`prefect deployment run "pipeline/pipelineflow-high" -p payload=my_flow.py` · UI · 스케줄). 그러면 dispatcher 가 그 정의대로 `pipeline_flow` 컨테이너를 띄웁니다.
-  - 저장된 모습 (`prefect deployment inspect "pipeline/pipelineflow-high"`):
+  - **사용** — 코드를 다시 안 봐도 이름 `<flow>/<deployment>` 로 run 을 trigger 합니다 (`prefect deployment run "pipeline/high_deployment" -p payload=my_flow.py` · UI · 스케줄). 그러면 dispatcher 가 그 정의대로 `pipeline_flow` 컨테이너를 띄웁니다.
+  - 저장된 모습 (`prefect deployment inspect "pipeline/high_deployment"`):
 
     ```json
-    { "name": "pipelineflow-high", "flow_name": "pipeline", "entrypoint": "pipeline.py:pipeline",
+    { "name": "high_deployment", "flow_name": "pipeline", "entrypoint": "pipeline.py:pipeline",
       "work_pool_name": "high_performance", "job_variables": { "image": "pipeline-flow:latest" },
       "parameters": { "payload": "my_flow.py" } }
     ```
@@ -1161,11 +1175,10 @@ __version__ = "0.0.19"  # Semantic Versioning:  Version = Major.Minor.Patch
 _BLOCK_NAME_RE = re.compile(r"^[a-z0-9-]+$")
 
 
-class Credentials(Block):              # must match pipeline.py exactly (class name + fields)
-    minio: SecretDict                  # endpoint, access_key, secret_key
-    postgresql_catalog: SecretDict     # endpoint, username, password, database
-    postgresql_optuna: SecretDict      # endpoint, username, password, database
-    mlflow: Optional[SecretDict] = None  # endpoint (MLflow tracking URI); optional so old blocks still load
+class Credentials(Block):              # must match pipeline.py exactly (class name + fields).
+    minio: SecretDict                  # access_key, secret_key        (endpoint is a prefect Variable)
+    postgresql_catalog: SecretDict     # username, password, database  (host/port are prefect Variables)
+    postgresql_optuna: SecretDict      # username, password, database  (host/port are prefect Variables)
 
 
 def register(spec_path: Union[str, Path], name: Optional[str] = None) -> None:

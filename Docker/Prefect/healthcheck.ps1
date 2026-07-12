@@ -1,5 +1,5 @@
 # healthcheck.ps1 - health & wiring check for the Prefect MLOps stack (per prefect.md "1. Architecture").
-# __version__ = "0.0.26"  # Semantic Versioning:  Version = Major.Minor.Patch
+# __version__ = "0.0.28"  # Semantic Versioning:  Version = Major.Minor.Patch
 #
 # Read-only. It inspects, it never changes anything. It verifies the always-on pieces are up and
 # correctly wired, then prints an ASCII diagram of the architecture with live [ OK ] / [WARN] / [FAIL]:
@@ -252,7 +252,7 @@ if (-not $serverOk) {
         Info ("             auto_remove={0}  env.PREFECT_API_URL={1}" -f $auto, $api)
 
         $tier = ($name -split '_')[0]
-        $dep  = "pipeline/pipelineflow-$tier"
+        $dep  = "pipeline/${tier}_deployment"
         if (Test-PrefectObject @('deployment','inspect',$dep)) { Node "OK" ("    deployment $dep") }
         else { Node "FAIL" ("    deployment $dep  (not registered - prefect deploy)") }
     }

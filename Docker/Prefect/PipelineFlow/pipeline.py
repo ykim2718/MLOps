@@ -4,21 +4,20 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Optional
 
 import boto3
 from prefect import flow, get_run_logger
 from prefect.blocks.core import Block
 from prefect.blocks.fields import SecretDict
+from prefect.variables import Variable
 
-__version__ = "0.0.26"  # Semantic Versioning:  Version = Major.Minor.Patch
+__version__ = "0.0.27"  # Semantic Versioning:  Version = Major.Minor.Patch
 
 
-class Credentials(Block):              # ONE block holds everything as nested dicts; values hidden
-    minio: SecretDict                  # endpoint, access_key, secret_key
-    postgresql_catalog: SecretDict     # endpoint, username, password, database
-    postgresql_optuna: SecretDict      # endpoint, username, password, database
-    mlflow: Optional[SecretDict] = None  # endpoint (MLflow tracking URI); optional so old blocks still load
+class Credentials(Block):              # ONE block holds per-member SECRETS as nested dicts (values hidden);
+    minio: SecretDict                  # access_key, secret_key        (endpoint is a prefect Variable)
+    postgresql_catalog: SecretDict     # username, password, database  (host/port are prefect Variables)
+    postgresql_optuna: SecretDict      # username, password, database  (host/port are prefect Variables)
 
 
 # flow_run_name shows who submitted the run (e.g. alice@a1b2c3d).
@@ -41,10 +40,10 @@ def pipeline(*, submitter: str = "", payload: str = "my_flow.py", prefect_block:
 
         # data/: MinIO download target (git didn't create it)
         data.mkdir(parents=True, exist_ok=True)
-        # this run's prefect_block -> its credentials (§6): minio for data, mlflow URI for the payload.
+        # this run's prefect_block -> its SECRETS (§7); service addresses are prefect Variables (§3).
         creds = Credentials.load(prefect_block)
         minio = creds.minio.get_secret_value()
-        s3 = boto3.client("s3", endpoint_url=minio["endpoint"],
+        s3 = boto3.client("s3", endpoint_url=Variable.get("minio_endpoint"),
                           aws_access_key_id=minio["access_key"],
                           aws_secret_access_key=minio["secret_key"])
         # minio_key -> data/: download every object under the key (works for a single file or a whole prefix).
@@ -62,18 +61,18 @@ def pipeline(*, submitter: str = "", payload: str = "my_flow.py", prefect_block:
             raise FileNotFoundError(f"no objects under s3://{minio_bucket}/{minio_key}")
         log.info(f"downloaded {n} object(s) from s3://{minio_bucket}/{minio_key} to {data}")
 
-        # bridge the block's MLflow tracking URI to the payload via env, so my_flow.py logs to the
-        # MLflow server instead of a local ./mlruns. set only when the block carries an mlflow endpoint.
+        # bridge addresses (prefect Variables) to the payload via env: the MLflow tracking URI so
+        # my_flow.py logs to the MLflow server (not a local ./mlruns), and the optuna study DSN
+        # (Variable host/port + block creds) so a payload using Optuna hits the shared study DB.
         env = os.environ.copy()
-        if creds.mlflow is not None:
-            mlflow_endpoint = creds.mlflow.get_secret_value().get("endpoint")
-            if mlflow_endpoint:
-                env["MLFLOW_TRACKING_URI"] = mlflow_endpoint
-        # bridge the postgresql_optuna DSN too, so a payload using Optuna hits the shared study DB.
+        mlflow_uri = Variable.get("mlflow_tracking_uri")
+        if mlflow_uri:
+            env["MLFLOW_TRACKING_URI"] = mlflow_uri
         opt = creds.postgresql_optuna.get_secret_value()
-        opt_host, _, opt_port = opt["endpoint"].partition(":")
+        opt_host = Variable.get("postgres_host")
+        opt_port = Variable.get("postgres_port") or "5432"
         env["POSTGRESQL_OPTUNA_DSN"] = (f"postgresql://{opt['username']}:{opt['password']}"
-                                        f"@{opt_host}:{opt_port or '5432'}/{opt['database']}")
+                                        f"@{opt_host}:{opt_port}/{opt['database']}")
         # run the team's payload in script/; run identity passed as CLI args; output streams to this run's logs.
         subprocess.run(["python", payload, "--submitter", submitter,
                         "--data_folder", data], cwd=script, env=env, check=True)
