@@ -4,7 +4,7 @@ REM Launch the pool-mode dry-run trigger. cmd.exe can't run a .ps1 directly,
 REM so invoke PowerShell explicitly. %~dp0 = this .bat's folder (so the .ps1
 REM is found regardless of the current directory).
 REM STAMP = locale-safe timestamp (e.g. 20260709-19:11); appended to the submitter label so each run is unique.
-for /f %%i in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd-HH:mm"') do set "STAMP=%%i"
+for /f %%i in ('powershell -NoProfile -Command "[TimeZoneInfo]::ConvertTimeBySystemTimeZoneId((Get-Date), 'Korea Standard Time').ToString('yyyyMMdd-HHmm') + '_Seoul'"') do set "STAMP=%%i"
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0my_flow_trigger.ps1" ^
   -Mode pool -PrefectBlock yrocket -Submitter "yRocket-%STAMP%" ^
   -PrefectApiUrl "http://localhost:4200/api" ^

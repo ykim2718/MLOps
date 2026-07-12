@@ -1,6 +1,6 @@
-# Linux CLI
+# Ubuntu CLI
 
-<sub>rev. 9</sub>
+<sub>rev. 10</sub>
 
 > Commands in this document are written for **Ubuntu**.
 
@@ -80,3 +80,38 @@ sudo chown -R :groupname .      # Change group only
 - Target `.` (not `./*`) to include the current directory itself and hidden dotfiles; `./*` skips names starting with `.`.
 - By default only the symlink itself is changed, not its target.
 - Check before and after with `ls -la`.
+
+## 3. Network
+
+### 3.1 Show IP addresses
+
+```bash
+hostname -I                    # All IP addresses of this host, space-separated
+ip addr                        # Full interface details (addresses, state, MAC)
+ip -4 addr show scope global   # IPv4 addresses on external interfaces only
+```
+
+- `hostname -I` — Quickest way to get the machine's IP(s); excludes loopback (`127.0.0.1`).
+- Use the LAN address (e.g. `192.168.x.x`) when connecting from another host on the same network.
+
+### 3.2 Show MAC address
+
+```bash
+ip link                                    # MAC address (link/ether) of every interface
+cat /sys/class/net/eth0/address            # MAC of a specific interface (replace eth0)
+ip link show eth0                          # MAC of one interface with its state
+```
+
+- In `ip link` output, the MAC follows the `link/ether` label.
+- List interface names first with `ls /sys/class/net` (e.g. `eth0`, `ens33`, `wlan0`, `lo`).
+- `lo` (loopback) has a fixed all-zero MAC (`00:00:00:00:00:00`); ignore it.
+
+### 3.3 Check connectivity and open ports
+
+```bash
+ping <host>                    # Test reachability to a host or IP
+ss -tlnp                       # List listening TCP ports and owning processes
+ss -tlnp | grep 8001           # Check whether a specific port is listening
+```
+
+- `ss -tlnp` shows `0.0.0.0:PORT` (all interfaces, reachable externally) vs `127.0.0.1:PORT` (local only).
