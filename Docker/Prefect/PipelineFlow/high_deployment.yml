@@ -1,10 +1,10 @@
-# pipelineflow-low.yml - low-tier deployment definition
-# __version__ = "0.0.2"    # Semantic Versioning : Major.Minor.Patch
+# high_deployment.yml - high-tier deployment definition
+# __version__ = "0.0.6"    # Semantic Versioning : Major.Minor.Patch
 deployments:
-  - name: pipelineflow-low
+  - name: high_deployment
     entrypoint: pipeline.py:pipeline       # <file>:<@flow function>
     work_pool:
-      name: low_performance
+      name: high_performance
       job_variables:
         image: pipeline-flow:latest
     parameters:
