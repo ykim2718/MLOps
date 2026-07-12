@@ -1,6 +1,6 @@
 # Prefect Pipeline Orchestration on Docker
 
-<sub>rev. 566</sub>
+<sub>rev. 569</sub>
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
@@ -214,19 +214,29 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
 
   **LAN IP 모델** 에서는 원격 backing service (PostgreSQL·MinIO·MLflow) 를 호스트의 LAN IP와 port로 부릅니다. 이때 **호스트 방화벽**을 점검해야 합니다. 특히 Docker 가 `0.0.0.0:<port>` 로 게시해도 backing 호스트 (특히 **Windows + Docker Desktop**) 는 LAN 인바운드를 기본 차단하는 경우가 많습니다. 막혀 있으면 예컨대 prefect_server 는 DB 에 못 붙어 migration `TimeoutError` 로 crash-loop 합니다.
 
-  그래서 stack 을 올리기 **전에**, backing service 를 **serving 하는 호스트**에서 `open_backing_ports` 를 돌립니다. 각 서비스 `host:port` 를 받아 도달 가능한지 확인하고, `BLOCKED` 면 메시지와 함께 그 포트의 인바운드를 (주소에서 뽑은 LAN subnet 으로 제한하여) 엽니다. 코드는 [Appendix D](#appendix-d-open_backing_portsps1).
+  방화벽 열기와 도달성 검증은 **서로 다른 호스트**의 일입니다 — 여는 것은 그 backing 호스트의 로컬 방화벽이라 거기서, 검증은 자기 자신이 아닌 **소비 호스트**에서 해야 실제 네트워크 도달성을 봅니다 (backing 호스트에서 자기 LAN IP 로의 접속은 loopback 이라 방화벽과 무관하게 늘 열린 것처럼 보입니다). 순서대로:
+
+  `backing_ports` 스크립트에 action (`open` · `check`) 과 `-host`·`-port` 를 줘서 포트 하나씩 처리합니다 (Windows 는 `.ps1`, Linux 는 `./backing_ports.sh` 로 grammar 동일). 코드는 [Appendix D](#appendix-d-backing_portsps1).
+
+  **① backing 호스트에서 인바운드 열기** (`open`, 멱등) — 주소에서 뽑은 LAN subnet 으로 제한합니다.
 
   ```powershell
-  # Windows backing host (admin PowerShell)
-  .\open_backing_ports.ps1 -PostgreSQL 192.168.0.8:5432 -MinIO 192.168.0.8:9000 -MLflow 192.168.0.8:5000
+  # on the backing host (Windows: admin PowerShell) — Linux: sudo ./backing_ports.sh open -host ... -port ...
+  .\backing_ports.ps1 open -host 192.168.0.8 -port 5432  # PostgreSQL
+  .\backing_ports.ps1 open -host 192.168.0.8 -port 9000  # MinIO
+  .\backing_ports.ps1 open -host 192.168.0.8 -port 5000  # MLflow
   ```
 
-  ```bash
-  # Linux backing host
-  sudo ./open_backing_ports.sh --postgresql 192.168.0.8:5432 --minio 192.168.0.8:9000 --mlflow 192.168.0.8:5000
+  **② 소비 호스트 (server·dispatcher) 에서 도달성 검증** (`check`) — backing 호스트가 **아닌** 다른 호스트에서 실행해야 loopback 이 아닌 실제 도달성을 봅니다.
+
+  ```powershell
+  # on a consuming host (NOT the backing host) — Linux: ./backing_ports.sh check -host ... -port ...
+  .\backing_ports.ps1 check -host 192.168.0.8 -port 5432  # PostgreSQL
+  .\backing_ports.ps1 check -host 192.168.0.8 -port 9000  # MinIO
+  .\backing_ports.ps1 check -host 192.168.0.8 -port 5000  # MLflow
   ```
 
-  모든 서비스가 `OPEN` 으로 나오면 다음으로 넘어갑니다 (backing service 자체의 설치·포트 게시는 각 서비스 문서를 따릅니다).
+  모든 포트가 `OPEN` 이면 다음으로 넘어갑니다 (backing service 자체의 설치·포트 게시는 각 서비스 문서를 따릅니다).
 
 ### Docker Network
 
@@ -1010,47 +1020,41 @@ Prefect 실행 모드는 **serve mode** 와 **work pool mode** 이고, 차이는
 - **핵심 차이 — 실행 주체** — work pool type 이 실행 주체를 정합니다. `process` 는 worker 가 자기 컨테이너 안 subprocess 로, `docker` 는 job 마다 뜨는 flow 컨테이너가, `kubernetes` 는 job 마다 뜨는 pod 가 실행합니다. 그 실행 주체의 이미지에 라이브러리가 있어야 합니다.
 - **serve mode** — 단일 머신·소규모 구성에는 work pool 없이 `flow.serve()` 만 띄우는 serve mode 가 더 단순합니다.
 
-## Appendix D. open_backing_ports.ps1
+## Appendix D. backing_ports.ps1
 
-backing service 를 serving 하는 호스트에서 각 서비스 `host:port` 의 도달성을 확인하고, `BLOCKED` 면 그 포트의 인바운드를 (주소에서 뽑은 LAN /24 로 제한하여) 여는 사전 검증 스크립트입니다 ([§3 Reachability to backing service](#reachability-to-backing-service)). Linux 는 sibling `open_backing_ports.sh` (ufw) 를 씁니다. 관리자 PowerShell 로 실행합니다.
+backing service 포트 하나를 대상으로, action 에 따라 **도달성 확인 (`check`)** 또는 **인바운드 방화벽 개방 (`open`)** 을 하는 스크립트입니다 ([§3 Reachability to backing service](#reachability-to-backing-service)). `open` 은 그 포트를 **serving 하는 호스트**에서 (관리자 PowerShell), `check` 는 backing 호스트가 **아닌 소비 호스트**에서 실행합니다 — serving 호스트에서 자기 IP 로의 접속은 loopback 이라 방화벽과 무관하게 늘 열린 것처럼 보이기 때문입니다. `open` 은 멱등입니다. Linux 는 sibling `backing_ports.sh` (ufw) 로 grammar 동일합니다.
 
 ```powershell
-# open_backing_ports.ps1 — check backing service reachability and open inbound firewall (Windows Defender) if blocked.
-# __version__ = "0.0.2"  # Semantic Versioning:  Version = Major.Minor.Patch
-# Run as Administrator on the host that SERVES the ports (opening inbound edits the local firewall).
-#   .\open_backing_ports.ps1 -PostgreSQL 192.168.0.8:5432 -MinIO 192.168.0.8:9000 -MLflow 192.168.0.8:5000
+# backing_ports.ps1 — check reachability of, or open the inbound firewall for, one backing service port.
+# __version__ = "0.0.1"  # Semantic Versioning:  Version = Major.Minor.Patch
+#   check : TCP-test the port. Run from a CONSUMING host (server / dispatcher) to see real reachability;
+#           from the serving host it is a meaningless loopback (always OPEN).
+#   open  : open the inbound firewall (Windows Defender) for the port. Run as Administrator on the host
+#           that SERVES the port. Idempotent (skips an existing rule).
+#
+#   .\backing_ports.ps1 check -host 192.168.0.8 -port 5432
+#   .\backing_ports.ps1 open  -host 192.168.0.8 -port 5432
 param(
-    [string]$PostgreSQL,                # host:port, e.g. 192.168.0.8:5432
-    [string]$MinIO,                     # host:port, e.g. 192.168.0.8:9000
-    [string]$MLflow                     # host:port, e.g. 192.168.0.8:5000
+    [Parameter(Mandatory = $true, Position = 0)]
+    [ValidateSet("check", "open")]
+    [string]$Action,
+    [Parameter(Mandatory = $true)] [Alias("host")] [string]$HostName,   # backing service host (LAN IP)
+    [Parameter(Mandatory = $true)] [int]$Port                           # service port, e.g. 5432 / 9000 / 5000
 )
 $ErrorActionPreference = "Stop"
 
-$svc = [ordered]@{}                     # display name -> host:port
-if ($PostgreSQL) { $svc["PostgreSQL"] = $PostgreSQL }
-if ($MinIO)      { $svc["MinIO"]      = $MinIO }
-if ($MLflow)     { $svc["MLflow"]     = $MLflow }
-
-if ($svc.Count -eq 0) {
-    Write-Error "Usage: .\open_backing_ports.ps1 [-PostgreSQL host:port] [-MinIO host:port] [-MLflow host:port]"
-    exit 1
+if ($Action -eq "check") {
+    $ok = (Test-NetConnection -ComputerName $HostName -Port $Port -WarningAction SilentlyContinue).TcpTestSucceeded
+    if ($ok) { Write-Host "${HostName}:${Port} OPEN" }
+    else     { Write-Host "${HostName}:${Port} BLOCKED" }
 }
-
-foreach ($name in $svc.Keys) {
-    $hp = $svc[$name]
-    $addr, $portStr = $hp.Split(":")
-    $port = [int]$portStr
-    $ok = (Test-NetConnection -ComputerName $addr -Port $port -WarningAction SilentlyContinue).TcpTestSucceeded
-    if ($ok) {
-        Write-Host "$name $hp OPEN - reachable, no rule added"
-    } else {
-        $subnet = ($addr -replace '\.\d+$', '.0') + "/24"   # derive the LAN /24 from the address
-        $rule   = "mlops $name $port inbound"
-        Write-Host "$name $hp BLOCKED - opening inbound $port/tcp from $subnet"
-        if (-not (Get-NetFirewallRule -DisplayName $rule -ErrorAction SilentlyContinue)) {
-            New-NetFirewallRule -DisplayName $rule -Direction Inbound `
-                -Protocol TCP -LocalPort $port -Action Allow -RemoteAddress $subnet | Out-Null
-        }
+else {   # open
+    $subnet = ($HostName -replace '\.\d+$', '.0') + "/24"   # derive the LAN /24 from the address
+    $rule   = "mlops backing $Port inbound"
+    Write-Host "ensuring inbound $Port/tcp from $subnet"
+    if (-not (Get-NetFirewallRule -DisplayName $rule -ErrorAction SilentlyContinue)) {   # idempotent
+        New-NetFirewallRule -DisplayName $rule -Direction Inbound `
+            -Protocol TCP -LocalPort $Port -Action Allow -RemoteAddress $subnet | Out-Null
     }
 }
 ```
