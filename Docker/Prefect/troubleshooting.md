@@ -1,6 +1,6 @@
 # Troubleshooting
 
-<sub>rev. 15</sub>
+<sub>rev. 16</sub>
 
 운영 중 마주친 문제를 증상·원인·진단·해결 순으로 모읍니다. 새 이슈는 H2 항목으로 덧붙입니다.
 
@@ -102,3 +102,48 @@
   ```
 
   이후 `./healthcheck.sh` 의 `offline(stale)` 수가 0 으로 줄어듭니다. 지금 쌓인 것을 기다리지 않고 비우려면 한 사이클을 손으로 돌립니다 (pool 별 worker filter → OFFLINE 이름 → `curl -X DELETE`).
+
+## prefect_server crash-loop (`Up N seconds`) — alembic `TimeoutError`, 원격 Postgres 도달 불가
+
+- **증상** — prefect_server 가 계속 재시작합니다. `docker compose ps` 의 STATUS 가 `Up 11 seconds` 처럼 짧게 리셋되고 (같은 stack 의 `worker_pruner` 는 `Up N minutes`), `register_pool.sh` 의 pool 생성이 성공 메시지 없이 조용히 재시도만 반복합니다.
+- **원인** — server 는 기동 시 Postgres 에 붙어 alembic DB migration 을 돌립니다. DB 에 도달하지 못하면 로그가 **인증 에러가 아니라** `TimeoutError` → `Application startup failed. Exiting.` 로 끝나고, `restart: unless-stopped` 때문에 무한 재시작합니다. 자격증명 (`PREFECT_SERVER_DATABASE_CONNECTION_URL`) 문제가 아니라 **네트워크 도달 문제**입니다 — 대개 DB 호스트 (특히 Windows + Docker Desktop) 의 방화벽이 LAN 인바운드 5432 를 막고 있습니다. Docker 가 `0.0.0.0:5432` 로 게시해도 Windows Defender 방화벽이 외부 유입을 차단합니다.
+- **진단** — 로그에서 `TimeoutError` 를 확인한 뒤, 도달 가능성을 컨테이너 → 호스트 → DB 머신 순으로 좁힙니다.
+
+  ```bash
+  # (1) 죽는 이유 — alembic TimeoutError 인지 (인증 에러면 원인이 다름)
+  sudo docker logs --tail 60 prefect-server-prefect_server-1
+
+  # (2) 컨테이너 안에서 Postgres 5432 도달? (3s 뒤 timeout 이면 도달 불가)
+  sudo docker compose -f docker-compose.server.yml exec -T prefect_server \
+    python -c 'import socket; socket.create_connection(("192.168.0.8",5432),3); print("reachable")'
+
+  # (3) 호스트에서도 안 되나 — 컨테이너 network 문제 vs DB 문제 가르기
+  timeout 3 bash -c '</dev/tcp/192.168.0.8/5432' && echo OPEN || echo "BLOCKED/CLOSED"
+
+  # (4) 호스트도 BLOCKED 면 머신 자체는 사나 (응답의 ttl=128 이면 Windows host)
+  ping -c 2 192.168.0.8
+  ```
+
+  (2)(3) 모두 실패 + ping 성공 → 머신은 살아있고 **5432 포트만 막힘** → DB 호스트 방화벽·게시 확인. (3)만 `OPEN` 이고 (2) 실패 → 컨테이너 network 라우팅 문제 (LAN 으로 못 나감).
+- **해결** — DB 호스트에서 컨테이너·포트 게시·방화벽을 확인하고 인바운드 5432 를 엽니다.
+
+  ```powershell
+  # on the Postgres host (Windows) — container up & publishing 0.0.0.0:5432 ?
+  docker ps --filter "name=postgres"
+  Test-NetConnection 127.0.0.1 -Port 5432        # local True but remote blocked => firewall
+
+  # admin PowerShell — allow LAN inbound 5432 (scope to the subnet)
+  New-NetFirewallRule -DisplayName "PostgreSQL 5432" -Direction Inbound `
+      -Protocol TCP -LocalPort 5432 -Action Allow -RemoteAddress 192.168.0.0/24
+  ```
+
+  Linux DB 호스트라면 `sudo ufw allow from 192.168.0.0/24 to any port 5432 proto tcp`.
+- **확인** — 방화벽 허용 후 server 머신에서 `timeout 3 bash -c '</dev/tcp/192.168.0.8/5432' && echo OPEN` 가 `OPEN` 이면 도달됩니다. server 를 다시 세워 migration 을 통과시킵니다.
+
+  ```bash
+  sudo docker compose -f docker-compose.server.yml up -d --force-recreate prefect_server
+  sudo docker compose -f docker-compose.server.yml ps            # STATUS 가 Up N minutes 로 유지
+  sudo docker logs --tail 15 prefect-server-prefect_server-1     # 정상 기동, TimeoutError 없음
+  ```
+
+  STATUS 가 유지되고 `TimeoutError` 가 사라지면 `register_pool.sh` 도 바로 `Created work pool ...` 를 냅니다. 같은 원리로 다른 backing service (MinIO 9000 · MLflow 5000 · MongoDB 27017) 도 원격 호스트의 인바운드 방화벽이 열려야 LAN 에서 붙습니다 — 설치 시 [prefect.md §3](prefect.md) 의 포트 도달성 선검증으로 미리 걸러야 합니다.

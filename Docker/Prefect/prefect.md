@@ -1,6 +1,6 @@
 # Prefect Pipeline Orchestration on Docker
 
-<sub>rev. 558</sub>
+<sub>rev. 566</sub>
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
@@ -190,7 +190,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
   4) **[Credentials](#7-credentials)** — 팀원별 자격증명 블록 (admin · 팀원마다 1회) · `Docker/Prefect/` 루트
 
      ```
-     credentials.py                    Credentials block class + JSON register CLI ([Appendix G](#appendix-g-credentialspy))
+     credentials.py                    Credentials block class + JSON register CLI ([Appendix H](#appendix-h-credentialspy))
      <member>.json                     per-member credential JSON (e.g. Jason.json)
      ```
 
@@ -206,18 +206,40 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
      docker-compose.env             credentials · PREFECT_API_URL   (Docker/Prefect/ root)
      ```
 
-## 3. Docker Network
+## 3. Network
 
-Prefect stack 의 컨테이너들은 docker network `mlops` 로 통신합니다. 접근 방식은 컨테이너가 **같은 머신**인지 **다른 머신**인지에 따라 갈립니다 (**LAN IP 모델**):
+이 스택은 여러 머신에 걸쳐 있어, 통신이 되려면 두 가지가 갖춰져야 합니다 — ① 원격 backing service 포트가 방화벽 너머로 **도달 가능**해야 하고, ② 컨테이너를 띄우는 **각 호스트**에 로컬 docker network `mlops` 가 있어야 합니다. stack 을 올리기 전에 이 순서로 확인합니다.
 
-- **같은 머신** → docker **서비스 이름** (`prefect_server`·`minio`·`postgres`·`mlflow`). 같은 호스트의 `mlops` 에 붙은 컨테이너끼리 이름으로 바로 찾습니다.
-- **다른 머신** → 그 서비스가 있는 **호스트의 LAN IP + 게시 포트** (예: `http://192.168.0.13:4200/api`, `<MinIO 호스트 IP>:9000`).
+### Reachability to backing service
 
-왜 다른 머신은 이름이 안 되나 — 기본 `bridge` network 는 **호스트 로컬**이라, 각 머신에 같은 이름 `mlops` 를 만들어도 **이름만 같을 뿐 별개의 network** 입니다. docker 서비스 이름은 그 호스트의 network 안에서만 해석되므로 **머신을 넘지 못합니다.** 그래서 크로스머신 접근은 LAN IP 로 합니다.
+  **LAN IP 모델** 에서는 원격 backing service (PostgreSQL·MinIO·MLflow) 를 호스트의 LAN IP와 port로 부릅니다. 이때 **호스트 방화벽**을 점검해야 합니다. 특히 Docker 가 `0.0.0.0:<port>` 로 게시해도 backing 호스트 (특히 **Windows + Docker Desktop**) 는 LAN 인바운드를 기본 차단하는 경우가 많습니다. 막혀 있으면 예컨대 prefect_server 는 DB 에 못 붙어 migration `TimeoutError` 로 crash-loop 합니다.
 
-> docker 이름을 **머신을 넘어** 쓰려면 Docker Swarm 의 **overlay network** 가 필요하지만, 전 노드가 **LAN-native Linux** 여야 동작합니다 (Windows/macOS 의 Docker Desktop 노드는 불가 — [Appendix L](#appendix-l-swarm-overlay-network)). 이 스택은 OS 혼합·단순성을 위해 기본적으로 **LAN IP 모델** 을 씁니다.
+  그래서 stack 을 올리기 **전에**, backing service 를 **serving 하는 호스트**에서 `open_backing_ports` 를 돌립니다. 각 서비스 `host:port` 를 받아 도달 가능한지 확인하고, `BLOCKED` 면 메시지와 함께 그 포트의 인바운드를 (주소에서 뽑은 LAN subnet 으로 제한하여) 엽니다. 코드는 [Appendix D](#appendix-d-open_backing_portsps1).
 
-### Create the Network
+  ```powershell
+  # Windows backing host (admin PowerShell)
+  .\open_backing_ports.ps1 -PostgreSQL 192.168.0.8:5432 -MinIO 192.168.0.8:9000 -MLflow 192.168.0.8:5000
+  ```
+
+  ```bash
+  # Linux backing host
+  sudo ./open_backing_ports.sh --postgresql 192.168.0.8:5432 --minio 192.168.0.8:9000 --mlflow 192.168.0.8:5000
+  ```
+
+  모든 서비스가 `OPEN` 으로 나오면 다음으로 넘어갑니다 (backing service 자체의 설치·포트 게시는 각 서비스 문서를 따릅니다).
+
+### Docker Network
+
+  Prefect stack 의 컨테이너들은 docker network `mlops` 로 통신합니다. 접근 방식은 컨테이너가 **같은 머신**인지 **다른 머신**인지에 따라 갈립니다 (**LAN IP 모델**):
+
+  - **같은 머신** → docker **서비스 이름** (`prefect_server`·`minio`·`postgres`·`mlflow`). 같은 호스트의 `mlops` 에 붙은 컨테이너끼리 이름으로 바로 찾습니다.
+  - **다른 머신** → 그 서비스가 있는 **호스트의 LAN IP + 게시 포트** (예: `http://192.168.0.13:4200/api`, `<MinIO 호스트 IP>:9000`).
+
+  왜 다른 머신은 이름이 안 되나 — 기본 `bridge` network 는 **호스트 로컬**이라, 각 머신에 같은 이름 `mlops` 를 만들어도 **이름만 같을 뿐 별개의 network** 입니다. docker 서비스 이름은 그 호스트의 network 안에서만 해석되므로 **머신을 넘지 못합니다.** 그래서 크로스머신 접근은 LAN IP 로 합니다.
+
+  > docker 이름을 **머신을 넘어** 쓰려면 Docker Swarm 의 **overlay network** 가 필요하지만, 전 노드가 **LAN-native Linux** 여야 동작합니다 (Windows/macOS 의 Docker Desktop 노드는 불가 — [docker_network.md §2 Swarm Overlay Network](../docker_network.md#2-swarm-overlay-network)). 이 스택은 OS 혼합·단순성을 위해 기본적으로 **LAN IP 모델** 을 씁니다.
+
+#### Create the Network
 
   컨테이너를 띄울 **각 호스트**에서 로컬 bridge `mlops` 를 한 번 만듭니다 (이미 있으면 무해).
 
@@ -288,7 +310,7 @@ Prefect stack 의 컨테이너들은 docker network `mlops` 로 통신합니다.
   .\run_server.ps1 -Yaml docker-compose.server.yml -Network mlops
   ```
 
-  - `run_server.ps1` (코드는 [Appendix D](#appendix-d-run_serverps1)) — 네트워크 생성과 `docker compose up` 을 한 번에 처리합니다.
+  - `run_server.ps1` (코드는 [Appendix E](#appendix-e-run_serverps1)) — 네트워크 생성과 `docker compose up` 을 한 번에 처리합니다.
   - `-Yaml` — 띄울 compose 파일. 프로젝트명은 이 파일의 top-level `name:` (`prefect-server`) 이 정합니다.
   - `-Network` — 붙을 공유 네트워크.
 
@@ -347,7 +369,7 @@ Prefect stack 의 컨테이너들은 docker network `mlops` 로 통신합니다.
 
   #### Registration
 
-  server 안 prefect CLI 로 pool 마다 등록합니다 (`PrefectServer/` 에서 실행; `<Pool Name>`·`<Template File>` 변수화; 코드는 [Appendix E](#appendix-e-register_poolps1)).
+  server 안 prefect CLI 로 pool 마다 등록합니다 (`PrefectServer/` 에서 실행; `<Pool Name>`·`<Template File>` 변수화; 코드는 [Appendix F](#appendix-f-register_poolps1)).
 
   ```powershell
   # Register each tier (run once, after the server is up; from PrefectServer/).
@@ -453,7 +475,7 @@ dispatcher 는 **`docker` work pool** 을 polling 해 job 마다 `pipeline_flow`
   .\run_dispatcher.ps1 -WorkPool <tier>
   ```
 
-  - `run_dispatcher.ps1 -WorkPool <tier>` (코드는 [Appendix F](#appendix-f-run_dispatcherps1)) — yaml 을 띄웁니다 (머신마다 1회).
+  - `run_dispatcher.ps1 -WorkPool <tier>` (코드는 [Appendix G](#appendix-g-run_dispatcherps1)) — yaml 을 띄웁니다 (머신마다 1회).
   - `-WorkPool <tier>` — 이 dispatcher 가 붙을 work pool 등급입니다 (예: `high_performance`).
   - **pool 검증** — 기동 전에 server 에 등록된 **docker 타입** work pool 목록과 대조해, 없는 이름이면 목록을 번호로 보여주고 그중에서 고르게 합니다 (오타·미등록 pool, 그리고 자동 생성된 process pool 까지 걸러 헛도는 것을 막습니다). 조회는 host 의 `prefect` CLI (`work-pool ls --output json`) 로 합니다.
   - `docker compose up` (스크립트 내부) — 컨테이너가 뜨면 그 `command` 인 `prefect worker start` 가 컨테이너 안에서 실행됩니다.
@@ -462,7 +484,7 @@ dispatcher 는 **`docker` work pool** 을 polling 해 job 마다 `pipeline_flow`
 
   worker 가 뜨는 **그 순간** server 에 자기를 알리며 (heartbeat 시작) 해당 work pool 에 **자동 등록**됩니다 — **polling 시작 = 등록** 이라 별도 절차가 없습니다. heartbeat 가 끊기면 잠시 뒤 **OFFLINE** 으로 바뀝니다 (dispatcher 등록은 deployment 등록과 별개).
 
-  > **보안 주의** — 도커 소켓 마운트는 dispatcher 에 호스트 도커 전체 제어권 (사실상 root) 을 줍니다. 신뢰된 내부망·스터디 용도로 한정하고, 더 강한 격리는 Kubernetes work pool 을 고려합니다 ([Appendix J](#appendix-j-orchestrator-benchmarking)).
+  > **보안 주의** — 도커 소켓 마운트는 dispatcher 에 호스트 도커 전체 제어권 (사실상 root) 을 줍니다. 신뢰된 내부망·스터디 용도로 한정하고, 더 강한 격리는 Kubernetes work pool 을 고려합니다 ([Appendix K](#appendix-k-orchestrator-benchmarking)).
 
 ### 5.3 Scaling
 
@@ -680,7 +702,7 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
   - **자유로운 코드** — `payload` 로 팀원이 자기 스크립트를 지정하므로 코드를 정해진 틀에 맞출 필요가 없습니다. 입력은 CLI 인자 (`--submitter`·`--data_folder`) 로 받으므로, 팀원 스크립트는 `argparse` 로 그 값만 읽으면 됩니다. (payload 는 이미 체크아웃된 `script/` 안에서 돌므로 git 정보는 넘기지 않고, MLflow 서버 주소만 블록의 `mlflow` endpoint 를 `MLFLOW_TRACKING_URI` 환경변수로 넘깁니다.)
   - **데이터 이력** — `minio_bucket`·`minio_key` 가 **flow 파라미터** 라서 Prefect 가 run 마다 입력값을 `prefect` DB 에 자동 저장합니다 (어느 버킷·객체를 썼는지 lineage 로 남습니다).
   - **crash 확인** — payload 가 0 이 아닌 코드로 끝나면 `subprocess.run(check=True)` 가 `CalledProcessError` 를 던지고, `pipeline` 가 `submitter@commit` 을 단 에러를 run 로그에 남긴 뒤 다시 raise 해 run 이 **Failed** 로 표시됩니다. payload 의 stdout·stderr 는 실행 중 이 run 의 로그로 흘러 들어가므로, 팀원은 자기 이름이 붙은 run (`alice@a1b2c3d`) 의 **Logs** 에서 crash 원인을 봅니다. payload 가 `@task` 를 쓰면 자기 flow run ([§9](#9-prefect-ui)) 에서 **어느 단계** 가 깨졌는지까지 보입니다.
-  - **이력 자동 저장** — `@flow` 진입 시 Prefect 가 run 의 상태·로그·파라미터를 자동 기록합니다. 지표·모델은 팀원 코드가 MLflow 로 로깅하면 함께 남습니다 — pipeline.py 가 블록의 `mlflow` endpoint 를 `MLFLOW_TRACKING_URI` env 로 넘기므로 payload 는 그 tracking 서버로 로깅합니다 (없으면 로컬 `./mlruns` 로 빠지니 블록에 `mlflow` 를 채워야 대시보드에 뜹니다). 마찬가지로 블록의 `postgresql_optuna` 를 DSN 으로 조립해 `POSTGRESQL_OPTUNA_DSN` env 로 넘기므로, Optuna 를 쓰는 payload 는 공유 postgres study 에 연결합니다 ([Appendix K](#appendix-k-prefect-task)).
+  - **이력 자동 저장** — `@flow` 진입 시 Prefect 가 run 의 상태·로그·파라미터를 자동 기록합니다. 지표·모델은 팀원 코드가 MLflow 로 로깅하면 함께 남습니다 — pipeline.py 가 블록의 `mlflow` endpoint 를 `MLFLOW_TRACKING_URI` env 로 넘기므로 payload 는 그 tracking 서버로 로깅합니다 (없으면 로컬 `./mlruns` 로 빠지니 블록에 `mlflow` 를 채워야 대시보드에 뜹니다). 마찬가지로 블록의 `postgresql_optuna` 를 DSN 으로 조립해 `POSTGRESQL_OPTUNA_DSN` env 로 넘기므로, Optuna 를 쓰는 payload 는 공유 postgres study 에 연결합니다 ([Appendix L](#appendix-l-prefect-task)).
 
   [§6.2](#62-deployment) 의 deployment 가 entrypoint 를 **`pipeline.py:pipeline`** 로 가리킵니다. 이 문자열은 server 의 deployment 레코드 (`prefect` DB) 에 저장되고, dispatcher 가 띄운 컨테이너 안에서 Prefect 런타임이 이미지 작업 디렉터리 (`/work`, `Dockerfile.pipeline_flow` 가 `pipeline.py` 를 COPY 한 곳) 기준으로 `pipeline.py` 를 import 해 콜론 뒤 **`@flow` 함수 `pipeline`** 을 run 파라미터 (`git_repo`·`git_commit_hash`·`minio_key`·`minio_bucket`·`submitter`·`prefect_block`·`payload`) 와 함께 호출합니다. 그래서 deployment entrypoint 가 곧 이 `pipeline.py` 입니다.
 
@@ -764,7 +786,7 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
   └─ postgresql_optuna  : username, password, database
   ```
 
-  팀원별 자격증명을 **JSON 파일** 로 적고 `credentials.py` 로 등록합니다 — 블록 이름은 Prefect 규칙상 **소문자·숫자·하이픈만** 가능하므로 `--block-name` 으로 소문자 이름을 지정합니다 (파일명은 `Jason.json` 그대로 두고 블록 이름만 `jason`). `credentials.py` 코드는 [Appendix G](#appendix-g-credentialspy).
+  팀원별 자격증명을 **JSON 파일** 로 적고 `credentials.py` 로 등록합니다 — 블록 이름은 Prefect 규칙상 **소문자·숫자·하이픈만** 가능하므로 `--block-name` 으로 소문자 이름을 지정합니다 (파일명은 `Jason.json` 그대로 두고 블록 이름만 `jason`). `credentials.py` 코드는 [Appendix H](#appendix-h-credentialspy).
 
   `Jason.json`:
 
@@ -895,7 +917,7 @@ server 대시보드 (`http://<Host IP>:4200`) 에서 deployment·run·task 가 �
 
 - **Deployments** — `<flow_name>/<deployment_name>` 로 나열됩니다 (예: `pipeline/high_deployment`·`pipeline/low_deployment`). flow 이름은 `@flow(name="pipeline")`, deployment 이름은 yaml 의 `name` 입니다.
 - **Flow Runs** — trigger 된 run 이 `flow_run_name` 으로 나열됩니다. `member` 가 들어가 같은 deployment 아래에서 `alice@a1b2c3d` 처럼 **누구의 run 인지** 구분됩니다 ([§6.3](#63-pipelinepy) 의 `flow_run_name`). `pipeline.py` 는 payload 에 실행자 이름 (`submitter`) 만 넘기고 git 정보는 넘기지 않으므로, 팀 payload 의 flow run 은 실행자 이름 (예: `alice`) 으로 나열됩니다 (orchestrator run 은 `alice@a1b2c3d`).
-- **Tasks** — 팀 payload 가 단계 (dp·fe·train·test) 를 **`@task`** 로 감싸고 `@flow` 로 묶으면, 컨테이너 env 의 `PREFECT_API_URL` 덕분에 그 subprocess 가 **자기 flow run 과 task** 를 보고해 단계가 보입니다 (orchestrator run 과 **별개 flow run**, subprocess 라 격리 유지 — [Appendix K](#appendix-k-prefect-task)).
+- **Tasks** — 팀 payload 가 단계 (dp·fe·train·test) 를 **`@task`** 로 감싸고 `@flow` 로 묶으면, 컨테이너 env 의 `PREFECT_API_URL` 덕분에 그 subprocess 가 **자기 flow run 과 task** 를 보고해 단계가 보입니다 (orchestrator run 과 **별개 flow run**, subprocess 라 격리 유지 — [Appendix L](#appendix-l-prefect-task)).
 - **Parameters · State · Logs** — run 마다 입력 파라미터 (`git_repo`·`git_commit_hash`·`minio_key`·`member`)·상태·로그가 자동 기록되어 (UI 의 Flow Run → Parameters), 같은 파라미터로 재실행 (재현) 할 수 있습니다.
 
 job 하나가 trigger 되면 대시보드에 다음처럼 보입니다.
@@ -988,9 +1010,54 @@ Prefect 실행 모드는 **serve mode** 와 **work pool mode** 이고, 차이는
 - **핵심 차이 — 실행 주체** — work pool type 이 실행 주체를 정합니다. `process` 는 worker 가 자기 컨테이너 안 subprocess 로, `docker` 는 job 마다 뜨는 flow 컨테이너가, `kubernetes` 는 job 마다 뜨는 pod 가 실행합니다. 그 실행 주체의 이미지에 라이브러리가 있어야 합니다.
 - **serve mode** — 단일 머신·소규모 구성에는 work pool 없이 `flow.serve()` 만 띄우는 serve mode 가 더 단순합니다.
 
-## Appendix D. run_server.ps1
+## Appendix D. open_backing_ports.ps1
 
-제어 노드에서 Prefect server compose 스택을 띄우는 기동 스크립트입니다 ([§4 Server Setup](#server-setup)). 공유 `mlops` 네트워크가 없으면 만들고 `docker-compose.server.yml` 을 올립니다. work pool 등록은 별도입니다 (`register_pool.ps1` — [Appendix E](#appendix-e-register_poolps1)).
+backing service 를 serving 하는 호스트에서 각 서비스 `host:port` 의 도달성을 확인하고, `BLOCKED` 면 그 포트의 인바운드를 (주소에서 뽑은 LAN /24 로 제한하여) 여는 사전 검증 스크립트입니다 ([§3 Reachability to backing service](#reachability-to-backing-service)). Linux 는 sibling `open_backing_ports.sh` (ufw) 를 씁니다. 관리자 PowerShell 로 실행합니다.
+
+```powershell
+# open_backing_ports.ps1 — check backing service reachability and open inbound firewall (Windows Defender) if blocked.
+# __version__ = "0.0.2"  # Semantic Versioning:  Version = Major.Minor.Patch
+# Run as Administrator on the host that SERVES the ports (opening inbound edits the local firewall).
+#   .\open_backing_ports.ps1 -PostgreSQL 192.168.0.8:5432 -MinIO 192.168.0.8:9000 -MLflow 192.168.0.8:5000
+param(
+    [string]$PostgreSQL,                # host:port, e.g. 192.168.0.8:5432
+    [string]$MinIO,                     # host:port, e.g. 192.168.0.8:9000
+    [string]$MLflow                     # host:port, e.g. 192.168.0.8:5000
+)
+$ErrorActionPreference = "Stop"
+
+$svc = [ordered]@{}                     # display name -> host:port
+if ($PostgreSQL) { $svc["PostgreSQL"] = $PostgreSQL }
+if ($MinIO)      { $svc["MinIO"]      = $MinIO }
+if ($MLflow)     { $svc["MLflow"]     = $MLflow }
+
+if ($svc.Count -eq 0) {
+    Write-Error "Usage: .\open_backing_ports.ps1 [-PostgreSQL host:port] [-MinIO host:port] [-MLflow host:port]"
+    exit 1
+}
+
+foreach ($name in $svc.Keys) {
+    $hp = $svc[$name]
+    $addr, $portStr = $hp.Split(":")
+    $port = [int]$portStr
+    $ok = (Test-NetConnection -ComputerName $addr -Port $port -WarningAction SilentlyContinue).TcpTestSucceeded
+    if ($ok) {
+        Write-Host "$name $hp OPEN - reachable, no rule added"
+    } else {
+        $subnet = ($addr -replace '\.\d+$', '.0') + "/24"   # derive the LAN /24 from the address
+        $rule   = "mlops $name $port inbound"
+        Write-Host "$name $hp BLOCKED - opening inbound $port/tcp from $subnet"
+        if (-not (Get-NetFirewallRule -DisplayName $rule -ErrorAction SilentlyContinue)) {
+            New-NetFirewallRule -DisplayName $rule -Direction Inbound `
+                -Protocol TCP -LocalPort $port -Action Allow -RemoteAddress $subnet | Out-Null
+        }
+    }
+}
+```
+
+## Appendix E. run_server.ps1
+
+제어 노드에서 Prefect server compose 스택을 띄우는 기동 스크립트입니다 ([§4 Server Setup](#server-setup)). 공유 `mlops` 네트워크가 없으면 만들고 `docker-compose.server.yml` 을 올립니다. work pool 등록은 별도입니다 (`register_pool.ps1` — [Appendix F](#appendix-f-register_poolps1)).
 
 ```powershell
 # run_server.ps1 — bring up the Prefect server compose stack on the Control Node.
@@ -1009,7 +1076,7 @@ if ($LASTEXITCODE -ne 0) { docker network create $Network | Out-Null }
 docker compose -f $Yaml up -d   # project name comes from the compose file's top-level name: (prefect-server)
 ```
 
-## Appendix E. register_pool.ps1
+## Appendix F. register_pool.ps1
 
 server 에 work pool 을 등록 (또는 갱신) 하는 스크립트입니다 ([§4 Work Pool Registration](#work-pool-registration)).
 
@@ -1052,9 +1119,9 @@ if ($created -and $ConcurrencyLimit -gt 0) {
 }
 ```
 
-## Appendix F. run_dispatcher.ps1
+## Appendix G. run_dispatcher.ps1
 
-각 dispatcher 머신에서 dispatcher compose 스택을 띄우는 기동 스크립트입니다 ([§5.2](#52-container)). server 기동과 work pool 등록은 별도입니다 (server 는 [Appendix D](#appendix-d-run_serverps1), pool 은 `register_pool.ps1` — [Appendix E](#appendix-e-register_poolps1)).
+각 dispatcher 머신에서 dispatcher compose 스택을 띄우는 기동 스크립트입니다 ([§5.2](#52-container)). server 기동과 work pool 등록은 별도입니다 (server 는 [Appendix E](#appendix-e-run_serverps1), pool 은 `register_pool.ps1` — [Appendix F](#appendix-f-register_poolps1)).
 
 ```powershell
 # run_dispatcher.ps1 — start the Prefect dispatcher compose stack on a worker machine.
@@ -1141,7 +1208,7 @@ docker compose -f $compose down
 docker compose -f $compose up -d
 ```
 
-## Appendix G. credentials.py
+## Appendix H. credentials.py
 
 팀원별 자격증명 블록을 JSON 으로 등록하는 스크립트입니다 ([§7 Credential Blocks](#credential-blocks)). 블록 이름은 **CLI 인자 > JSON `name` 필드 > 파일명** 순으로 정해지며, Prefect 규칙상 **소문자·숫자·하이픈만** 허용됩니다 (대문자 불가 → 팀원 이름은 소문자로). `Credentials` 클래스도 여기서 정의하며 `catalog.py` 가 import 해 씁니다 (`pipeline.py` 는 이미지 자기완결이라 같은 클래스를 따로 inline 정의 — [§6.3](#63-pipelinepy)).
 
@@ -1239,7 +1306,7 @@ if __name__ == "__main__":
             sys.exit(1)
 ```
 
-## Appendix H. requirements.txt
+## Appendix I. requirements.txt
 
 Pipeline Flow 이미지에 설치하는 파이썬 의존성 목록입니다 ([§6.1](#61-image)). 팀 소스는 이미지에 굽지 않고 런타임에 git worktree 로 받으므로 여기에는 라이브러리만 고정합니다 (base: `python:3.11.15`). 카테고리로 나눠 두고 버전은 `numpy` 기준에 맞춥니다.
 
@@ -1327,7 +1394,7 @@ protobuf==4.25.9               # Serialization (TensorFlow dependency)
 pyarrow==15.0.2                # parquet I/O; mlflow 2.14.1 requires pyarrow<16
 ```
 
-## Appendix I. Mounting a remote data folder
+## Appendix J. Mounting a remote data folder
 
 같은 LAN 의 remote Ubuntu 머신에 있는 data 폴더를 dispatcher 호스트의 docker 에 **NFS 로 mount** 해, `pipeline_flow` 컨테이너가 MinIO 다운로드 없이 그 폴더를 직접 읽게 하는 방법입니다. payload 는 `--data_folder` 로 경로만 받으므로 (`pipeline.py` [§6.3](#63-pipelinepy)) 다운로드든 mount 든 **무변경** 입니다.
 
@@ -1376,7 +1443,7 @@ data = Path("/datasets") / minio_key
 - **lineage** — `minio_key` 를 경로 키로 재사용하면 "어느 데이터" 기록이 유지됩니다.
 - **Windows/Docker Desktop dispatcher** 라면 NFS 대신 **SMB/CIFS** 가 편합니다 (대안: SSHFS·CIFS). 권한은 컨테이너 안에서 읽기 가능한 UID/GID 인지 확인합니다.
 
-## Appendix J. Orchestrator Benchmarking
+## Appendix K. Orchestrator Benchmarking
 
 ### Prefect vs Dagster vs Airflow
 
@@ -1428,7 +1495,7 @@ data = Path("/datasets") / minio_key
 
   > granularity 는 **Workflow → Run/Job → Task → Step** 순으로 좁아지고, 실행을 감싸는 껍데기는 **컨테이너 (단일 호스트) / pod (클러스터)** 입니다. 세 단어를 하나로 통일하기보다 이 계층 안에서 구분해 쓰는 것이 업계 표준에 맞습니다.
 
-## Appendix K. Prefect @task
+## Appendix L. Prefect @task
 
 `@task` 를 쓰지 않아도 이력 관리와 재현 (reproducibility) 은 완전히 됩니다. Prefect 에서 실행 흐름을 묶는 핵심 단위는 `@task` 가 아니라 **`@flow`** 이기 때문입니다. `@flow` 데코레이터만 붙이면 그 안의 코드가 일반 함수든 클래스든 **실행 이력과 입력 파라미터가 Prefect Server 에 기록**됩니다.
 
@@ -1479,89 +1546,3 @@ data = Path("/datasets") / minio_key
 ### Summary
 
   이력 관리와 과거 재현은 **`@flow` 에 파라미터 (git 커밋·MinIO 버전) 를 넘기는 것만으로 작동**합니다. 학습 소스가 클래스 덩어리라 `@task` 를 일일이 붙이기 번거롭다면, `@task` 를 생략하고 `@flow` 만 씌워도 MLOps 재현 목적에는 지장이 없습니다.
-
-## Appendix L. Swarm Overlay Network
-
-여러 머신에서 LAN IP 대신 **docker 서비스 이름을 그대로** 쓰고 싶으면, **Docker Swarm 의 overlay network** 로 전 호스트를 하나의 가상 network 로 묶습니다. [§3](#3-docker-network) 의 LAN IP 모델 대신 쓰는 **멀티 머신·all-Linux 대안** 입니다.
-
-> ⚠️ **제약** — overlay 데이터플레인 (VXLAN) 은 각 노드가 **LAN 에 직접 붙은 native Linux Docker** 일 때만 흐릅니다. **Windows/macOS 의 Docker Desktop 노드는 VM (WSL2 등) NAT 뒤라 크로스호스트 overlay 가 동작하지 않습니다** — 그 경우 §3 의 LAN IP 모델을 씁니다. overlay 로 가려면 모든 노드가 LAN-native Linux (베어메탈 또는 bridged Linux VM) 여야 합니다.
-
-세 단계로 구성합니다 — **Firewall** (노드 간 포트) · **Swarm Configuration** (매니저·워커) · **Overlay Network** (attachable overlay 생성). 성공하면 이후 절의 compose 는 `mlops` 를 external network 로 참조하고, 주소를 LAN IP 대신 **서비스 이름** 으로 통일합니다.
-
-### Firewall
-
-  Swarm 노드끼리 아래 포트가 서로 열려 있어야 합니다.
-
-  | Port | Protocol | Purpose |
-  |------|----------|---------|
-  | 2377 | tcp | cluster management (manager only) |
-  | 7946 | tcp + udp | node-to-node communication (gossip / discovery) |
-  | 4789 | udp | overlay data plane (VXLAN) |
-
-  보통 Swarm join 뒤 `docker node ls` (Swarm Configuration) 에 노드가 모두 보이면 방화벽은 문제없는 것입니다. 워커가 안 보이거나 join 이 막히면, 각 노드의 **ufw** 로 위 포트를 엽니다.
-
-  ```bash
-  # check whether ufw is active (inactive -> not blocking, no action needed)
-  sudo ufw status verbose
-
-  # if active, open the swarm ports
-  #   manager (prefect_server machine): 2377 + 7946 + 4789
-  sudo ufw allow 2377/tcp        # cluster management (manager only)
-  sudo ufw allow 7946            # node-to-node gossip (tcp + udp)
-  sudo ufw allow 4789/udp        # overlay data plane (VXLAN)
-  #   worker machines: 7946 + 4789 only (2377 not needed inbound)
-
-  # confirm the rules landed
-  sudo ufw status numbered       # 2377/tcp, 7946, 4789/udp should show ALLOW
-  ```
-
-  > ufw 를 새로 켤 때는 잠금 방지를 위해 SSH 부터 허용합니다 — `sudo ufw allow OpenSSH` 후 `sudo ufw enable`.
-
-### Swarm Configuration
-
-  한 머신 (예: prefect_server machine) 을 **매니저**로 초기화하고, 나머지 머신 (prefect_dispatcher machine · backing service machine 들) 을 **워커**로 조인합니다.
-
-  ```bash
-  # on the manager (e.g. the prefect_server machine)
-  docker swarm init --advertise-addr <manager LAN IP>
-  #   -> prints a "docker swarm join --token <TOKEN> <manager IP>:2377" command
-
-  # on each worker machine — run that printed join command
-  docker swarm join --token <TOKEN> <manager IP>:2377
-  ```
-
-  검증 — 매니저에서 모든 노드가 `Ready` 로 보이는지 확인합니다.
-
-  ```bash
-  docker node ls          # manager (Leader) + every joined worker, STATUS = Ready
-  ```
-
-  > ⚠️ 워커가 **Docker Desktop (Windows/macOS)** 이면 `Ready` 로 보여도 overlay 데이터플레인이 안 흘러, 아래 Overlay Network 의 관통 테스트에서 실패합니다 (`context deadline exceeded`). all-Linux 노드여야 합니다.
-
-### Overlay Network
-
-  전 노드가 공유할 **attachable overlay** network 를 매니저에서 한 번 만듭니다. `--attachable` 이라야 compose / `docker run` 으로 뜨는 **일반 컨테이너** (이 스택은 swarm service 가 아님) 와 dispatcher 가 소켓으로 띄우는 `pipeline_flow` 컨테이너도 붙을 수 있습니다.
-
-  ```bash
-  # on the manager
-  docker network create --driver overlay --attachable mlops
-  ```
-
-  overlay network 는 매니저에서 생성되고, 워커에는 **컨테이너가 처음 attach 될 때** 나타납니다 (그 전에는 워커의 `docker network ls` 에 안 보여도 정상). 생성 직후 확인은 매니저에서 driver·scope 만 봅니다.
-
-  ```bash
-  # on the manager: confirm it is an overlay on the swarm scope
-  docker network ls | grep mlops        # DRIVER = overlay, SCOPE = swarm
-  ```
-
-  **관통 테스트** — 워커에 테스트 컨테이너를 붙여 매니저에서 이름으로 ping 되면 크로스호스트 데이터플레인이 정상입니다 (이게 통과해야 overlay 를 실제로 쓸 수 있습니다).
-
-  ```bash
-  # on a worker: attach a test container to the overlay
-  docker run -d --name t1 --network mlops nginx
-  # on the manager: resolve + reach it by name across hosts
-  docker run --rm --network mlops busybox ping -c2 t1
-  #   -> replies => overlay OK.  timeout/'context deadline exceeded' => a node is not LAN-native (e.g. Docker Desktop)
-  ```
-
-  성공하면 이후 절의 compose 는 `mlops` 를 external network 로 참조하고, 주소를 LAN IP 대신 **서비스 이름** (`prefect_server`·`minio`·`postgres`·`mlflow`) 으로 통일합니다.
