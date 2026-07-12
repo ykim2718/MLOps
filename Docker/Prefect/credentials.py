@@ -5,8 +5,8 @@
 # field > file stem. Prefect requires the
 # block name to be lowercase letters, numbers, and dashes only — use a lowercase member name.
 #
+#     prefect block delete credentials/jason
 #     python credentials.py --json-path Jason.json --block-name jason    # save a block named "jason"
-#     python credentials.py --json-path Jason.json --block-name alice    # any lowercase block name
 #
 # Separation of concerns: the Prefect folder owns the credential block (this file); PrefectWorkflow's
 # catalog.py imports it (`from credentials import Credentials`); pipeline.py keeps its own inline copy
@@ -22,7 +22,7 @@ from typing import List, Optional, Union
 from prefect.blocks.core import Block
 from prefect.blocks.fields import SecretDict
 
-__version__ = "0.0.20"  # Semantic Versioning:  Version = Major.Minor.Patch
+__version__ = "0.0.21"  # Semantic Versioning:  Version = Major.Minor.Patch
 
 # Prefect block document names allow lowercase letters, numbers, and dashes only (no upper/underscore/space/dot).
 _BLOCK_NAME_RE = re.compile(r"^[a-z0-9-]+$")
@@ -30,8 +30,8 @@ _BLOCK_NAME_RE = re.compile(r"^[a-z0-9-]+$")
 
 class Credentials(Block):              # must match pipeline.py exactly (class name + fields).
     minio: SecretDict                  # access_key, secret_key        (endpoint is a prefect Variable)
-    postgresql_catalog: SecretDict     # username, password, database  (host/port are prefect Variables)
-    postgresql_optuna: SecretDict      # username, password, database  (host/port are prefect Variables)
+    postgresql_catalog: SecretDict     # username, password, database  (host:port is the prefect Variable 'postgresql')
+    postgresql_optuna: SecretDict      # username, password, database  (host:port is the prefect Variable 'postgresql')
 
 
 def register(spec_path: Union[str, Path], name: Optional[str] = None) -> None:

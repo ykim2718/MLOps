@@ -11,13 +11,13 @@ from prefect.blocks.core import Block
 from prefect.blocks.fields import SecretDict
 from prefect.variables import Variable
 
-__version__ = "0.0.27"  # Semantic Versioning:  Version = Major.Minor.Patch
+__version__ = "0.0.28"  # Semantic Versioning:  Version = Major.Minor.Patch
 
 
 class Credentials(Block):              # ONE block holds per-member SECRETS as nested dicts (values hidden);
     minio: SecretDict                  # access_key, secret_key        (endpoint is a prefect Variable)
-    postgresql_catalog: SecretDict     # username, password, database  (host/port are prefect Variables)
-    postgresql_optuna: SecretDict      # username, password, database  (host/port are prefect Variables)
+    postgresql_catalog: SecretDict     # username, password, database  (host:port is the prefect Variable 'postgresql')
+    postgresql_optuna: SecretDict      # username, password, database  (host:port is the prefect Variable 'postgresql')
 
 
 # flow_run_name shows who submitted the run (e.g. alice@a1b2c3d).
@@ -69,8 +69,8 @@ def pipeline(*, submitter: str = "", payload: str = "my_flow.py", prefect_block:
         if mlflow_uri:
             env["MLFLOW_TRACKING_URI"] = mlflow_uri
         opt = creds.postgresql_optuna.get_secret_value()
-        opt_host = Variable.get("postgres_host")
-        opt_port = Variable.get("postgres_port") or "5432"
+        opt_host, _, opt_port = (Variable.get("postgresql") or "").partition(":")   # single Variable -> host, port
+        opt_port = opt_port or "5432"                                               # tolerate a bare host with no ':port'
         env["POSTGRESQL_OPTUNA_DSN"] = (f"postgresql://{opt['username']}:{opt['password']}"
                                         f"@{opt_host}:{opt_port}/{opt['database']}")
         # run the team's payload in script/; run identity passed as CLI args; output streams to this run's logs.
