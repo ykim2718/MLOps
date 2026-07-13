@@ -11,7 +11,7 @@ from prefect.blocks.core import Block
 from prefect.blocks.fields import SecretDict
 from prefect.variables import Variable
 
-__version__ = "0.0.30"  # Semantic Versioning:  Version = Major.Minor.Patch
+__version__ = "0.0.31"  # Semantic Versioning:  Version = Major.Minor.Patch
 
 
 class Credentials(Block):              # ONE block holds a credential set as nested dicts (values hidden);
@@ -21,10 +21,11 @@ class Credentials(Block):              # ONE block holds a credential set as nes
 
 
 # flow_run_name shows who submitted the run (e.g. alice@a1b2c3d).
-@flow(name=f"pipeline_{__version__}", flow_run_name="{submitter}#{git_commit_hash}")
+@flow(name="pipeline", flow_run_name="{submitter}#{git_commit_hash}")
 def pipeline(*, submitter: str = "", payload: str = "my_flow.py", prefect_block: str = "",
              git_repo: str, git_commit_hash: str, minio_key: str, minio_bucket: str = "datasets") -> None:
     log = get_run_logger()                         # writes to this run's UI logs
+    log.info(f"pipeline v{__version__}")
     base = Path(tempfile.mkdtemp(prefix="run-"))   # per-run temp dir (removed in finally)
     repo = base / "repo"                           # git database (.git + the fetched commit)
     script = base / "script"                       # worktree: team repo snapshot at the commit
