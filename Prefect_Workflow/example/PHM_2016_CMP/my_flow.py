@@ -4,7 +4,7 @@ Predicts wafer AVG_REMOVAL_RATE (a scalar / regression target) from CMP tool
 sensor trajectories with LightGBM - the same Virtual Metrology shape as film
 thickness / etch-rate prediction. Run as the team payload that pipeline.py drives:
 
-    python my_flow.py --member <m> --data_folder ./data
+    python my_flow.py --submitter <m> --data_folder ./data   (pipeline.py passes --submitter/--data_folder)
 
 Pipeline (a small DAG): load_config -> train_prepare -> train_featurize -> train ->
 (validate || test); parity_plot AND publish_artifacts both fire right after each of
@@ -33,7 +33,7 @@ from prefect.artifacts import create_markdown_artifact, create_table_artifact
 from prefect.runtime import flow_run
 from prefect.task_runners import ThreadPoolTaskRunner
 
-__version__ = "0.0.25"
+__version__ = "0.0.26"
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OPTUNA_CFG = os.path.join(HERE, "optuna.json")
@@ -469,15 +469,15 @@ def parity_plot(y_true: list, y_pred: list, stage: str, work: str) -> dict:
     return {"stage": stage, "path": out, "r2": r2}
 
 
-@flow(name="cmp_vm", flow_run_name="{member}", log_prints=True,
+@flow(name="cmp_vm", flow_run_name="{submitter}", log_prints=True,
       task_runner=ThreadPoolTaskRunner(max_workers=4))
-def my_flow(data_dir: str, member: str = "local"):
+def my_flow(data_dir: str, submitter: str = "local"):
     """PHM 2016 CMP virtual metrology: train_prepare -> train_featurize -> train ->
     (validate || test), parity after each."""
     log = get_run_logger()
     work = os.path.join(HERE, "work")
     os.makedirs(work, exist_ok=True)
-    log.info(f"start: member={member} data={data_dir}")
+    log.info(f"start: submitter={submitter} data={data_dir}")
 
     cfg = load_config(OPTUNA_CFG)                            # read fresh each run
     log.info(f"tuning {cfg['n_trials']} trials, metric={cfg['metric']}")
@@ -486,7 +486,7 @@ def my_flow(data_dir: str, member: str = "local"):
     log.info(f"optuna storage [{src}]: {_mask(storage)}")
 
     mlflow_uri = os.environ.get("MLFLOW_TRACKING_URI") or cfg.get("mlflow_uri") or "http://mlflow:5000"
-    run_name = f"{member}"
+    run_name = f"{submitter}"
     log.info(f"mlflow uri: {mlflow_uri}")
 
     prep = train_prepare.submit(data_dir, work, cfg)
@@ -526,7 +526,7 @@ def my_flow(data_dir: str, member: str = "local"):
     for f in (p_train, p_val, p_test, a_train, a_val, a_test):
         f.result()
 
-    summary = {"member": member,
+    summary = {"submitter": submitter,
                "n_train": prep_meta["n_train"], "n_val": prep_meta["n_val"],
                "n_features": prep_meta["n_features"],
                "best_cv_rmse": train_meta["best_cv_rmse"],
@@ -566,6 +566,6 @@ def publish_artifacts(stage: str, metrics: dict, run_label: str, top_features: l
 if __name__ == "__main__":
     p = argparse.ArgumentParser()                           # pipeline.py passes these as CLI args
     p.add_argument("--data_folder", default=os.path.join(HERE, "data"))
-    p.add_argument("--member", default="local")
+    p.add_argument("--submitter", default="local")
     a = p.parse_args()
-    my_flow(a.data_folder, member=a.member)
+    my_flow(a.data_folder, submitter=a.submitter)

@@ -91,7 +91,7 @@ Variables; else localhost defaults. no env vars, no docker-compose.env.
   block sections (secrets only, hidden via SecretDict):
     minio = {access_key, secret_key}
     postgresql_catalog/postgresql_optuna = {username, password, database}
-  addresses (prefect Variables): minio_endpoint, postgresql (host:port)
+  addresses (prefect Variables): minio_endpoint, postgresql_host_port (host:port)
   -b <block> picks the block (DB + MinIO creds). catalog/optuna are the shared DB.
   --pg-host/--minio-host override only the address host (creds unchanged) - reuse from the host:
                   --pg-host localhost --minio-host localhost.
@@ -108,7 +108,7 @@ from typing import Any, List, Optional, Tuple
 import psycopg2
 from psycopg2.extras import Json, RealDictCursor
 
-__version__ = "0.0.44"  # Semantic Versioning:  Version = Major.Minor.Patch
+__version__ = "0.0.45"  # Semantic Versioning:  Version = Major.Minor.Patch
 
 _BLOCK = None       # credential block name (-b); set by CLI or set_block(), used to read creds
 _PG_HOST = None      # CLI --pg-host: override the postgresql endpoint host only (creds unchanged)
@@ -193,9 +193,9 @@ def _section(section: str, block: Optional[str] = None) -> Tuple[dict, str]:
 
 
 def _dsn() -> str:
-    """블록의 'postgresql_catalog' 섹션(비밀)과 prefect Variable('postgresql' = host:port)로 DSN 을 조립한다."""
+    """블록의 'postgresql_catalog' 섹션(비밀)과 prefect Variable('postgresql_host_port' = host:port)로 DSN 을 조립한다."""
     cfg, _ = _section("postgresql_catalog")                  # username, password, database
-    host, _, port = _addr("postgresql", "localhost:5432").partition(":")   # single Variable -> host, port
+    host, _, port = _addr("postgresql_host_port", "localhost:5432").partition(":")   # single Variable -> host, port
     host = _PG_HOST or host                                   # CLI --pg-host overrides the host only
     port = port or "5432"                                     # tolerate a bare host with no ':port'
     return f"postgresql://{cfg['username']}:{cfg['password']}@{host}:{port}/{cfg['database']}"
@@ -663,7 +663,7 @@ def _build_parser() -> argparse.ArgumentParser:
           block sections (secrets only, hidden via SecretDict):
             minio = {access_key, secret_key}
             postgresql_catalog/postgresql_optuna = {username, password, database}
-          addresses (prefect Variables): minio_endpoint, postgresql (host:port)
+          addresses (prefect Variables): minio_endpoint, postgresql_host_port (host:port)
           -b <block> picks the block (DB + MinIO creds). catalog/optuna are the shared DB.
           --pg-host/--minio-host override only the address host (creds unchanged) - reuse from the host:
                           --pg-host localhost --minio-host localhost.

@@ -1,6 +1,6 @@
 # MinIO — Object Storage
 
-<sub>rev. 107</sub>
+<sub>rev. 108</sub>
 
 **MinIO**는 **AWS S3 (Amazon Simple Storage Service) 와 100% 호환되는 오픈소스 오브젝트 스토리지**입니다. 클라우드 (AWS) 없이 사내 server 나 로컬 도커에 띄워 "내 S3"처럼 쓸 수 있어, 데이터셋·모델·MLflow artifact 등 **실제 대용량 데이터의 보관 위치**로 사용합니다.
 
@@ -147,7 +147,7 @@ MinIO는 S3 호환이라 두 가지 클라이언트로 접근합니다 — **파
 
   로컬 파일 → MinIO 객체 (put).
 
-  > **권장 키 경로** — 데이터는 `s3://<bucket>/<member>/<experiment>/<version>/<filename>` 형태로 키를 둡니다. 버전이 경로에 들어가 버전마다 다른 키가 되므로 서로 덮어쓰지 않고, 경로만 봐도 누구의·어느 실험의·어느 버전인지 드러납니다. `<experiment>` 는 예컨대 medallion architecture 의 단계 (`bronze`·`silver`·`gold`) 가 될 수 있습니다.
+  > **권장 키 경로** — 데이터는 `s3://<bucket>/<owner>/<experiment>/<version>/<filename>` 형태로 키를 둡니다. 버전이 경로에 들어가 버전마다 다른 키가 되므로 서로 덮어쓰지 않고, 경로만 봐도 누구의·어느 실험의·어느 버전인지 드러납니다. `<experiment>` 는 예컨대 medallion architecture 의 단계 (`bronze`·`silver`·`gold`) 가 될 수 있습니다.
 
   예시 — `s3://datasets/sydney/silver/v3/001.parquet`
 

@@ -1,6 +1,6 @@
 # Prefect AI/ML Workflow Automation
 
-<sub>rev. 92</sub>
+<sub>rev. 96</sub>
 
 Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환경입니다. 이 문서는 **전체 워크플로우의 인덱스 (개요)** 이고, 도구별 상세는 컴포넌트 문서로 잇습니다.
 
@@ -111,7 +111,7 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
       raise FileExistsError("minio_key already exists")
   for fp, rel in files:                        # upload each file -> s3://<bucket>/<minio_key>/<rel>
       s3.upload_file(str(fp), bucket, prefix + rel)
-  doc = {k: v for k, v in spec.items() if k != "member"}   # store the spec verbatim -> doc JSONB
+  doc = {k: v for k, v in spec.items() if k != "block"}    # store the spec verbatim -> doc JSONB
   register(minio_key, minio_path, doc,         # register the catalog row (path + counts + doc)
            n_files=n_files, size_bytes=size_bytes)
   ```
@@ -210,8 +210,8 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
 
   ```powershell
   # Trigger — pick the tier by deployment; heavy -> high, light -> low (params otherwise identical).
-  prefect deployment run "pipeline/pipelineflow-high" -p submitter=alice -p prefect_block=yrocket -p git_repo=https://github.com/<member>/<repo>.git -p git_commit_hash=a1b2c3d -p minio_key=SYDNEY/001.parquet
-  prefect deployment run "pipeline/pipelineflow-low"  -p submitter=alice -p prefect_block=yrocket -p git_repo=https://github.com/<member>/<repo>.git -p git_commit_hash=a1b2c3d -p minio_key=SYDNEY/001.parquet
+  prefect deployment run "pipeline/pipelineflow-high" -p submitter=alice -p prefect_block=yrocket -p git_repo=https://github.com/<user>/<repo>.git -p git_commit_hash=a1b2c3d -p minio_key=SYDNEY/001.parquet
+  prefect deployment run "pipeline/pipelineflow-low"  -p submitter=alice -p prefect_block=yrocket -p git_repo=https://github.com/<user>/<repo>.git -p git_commit_hash=a1b2c3d -p minio_key=SYDNEY/001.parquet
   ```
   ```python
   from prefect.deployments import run_deployment
@@ -219,7 +219,7 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
   params = {
       "submitter": "alice",
       "prefect_block": "yrocket",
-      "git_repo": "https://github.com/<member>/<repo>.git",
+      "git_repo": "https://github.com/<user>/<repo>.git",
       "git_commit_hash": "a1b2c3d",
       "minio_key": "SYDNEY/001.parquet",
   }
@@ -586,7 +586,7 @@ python catalog.py remove <minio_key> -b <block> --pg-host localhost --minio-host
 
 ### Credentials (Prefect block)
 
-  catalog.py 가 읽는 자격증명은 **팀원마다 하나인 `Credentials` 블록** (블록 이름 = 팀원 이름, 소문자·숫자·대시) 에 담겨 있고, 관리자가 `credentials.py` 로 1회 등록합니다 (`python credentials.py --json-path <member>.json --block-name <member>` — [prefect.md](../Docker/Prefect/prefect.md) §5 Credentials). 한 블록 안에 네 섹션 (nested dict, `SecretDict` 로 가림; `mlflow` 는 optional) 이 들어 있습니다.
+  catalog.py 가 읽는 자격증명은 **`Credentials` 블록** (블록 이름 = 임의의 소문자 식별자, 소문자·숫자·대시; 팀원 이름과 무관) 에 담겨 있고, 관리자가 `credentials.py` 로 1회 등록합니다 (`python credentials.py --json-path <name>.json --block-name <name>` — [prefect.md](../Docker/Prefect/prefect.md) §7 Credentials). 한 블록 안에 세 섹션 (`minio`·`postgresql_catalog`·`postgresql_optuna`; nested dict, `SecretDict` 로 가림) 이 들어 있고, 서비스 주소(endpoint)는 블록이 아니라 prefect Variable 입니다.
 
   | Section | Fields | Target |
   |---|---|---|
@@ -595,11 +595,11 @@ python catalog.py remove <minio_key> -b <block> --pg-host localhost --minio-host
   | `postgresql_optuna` | `endpoint` · `username` · `password` · `database` | PostgreSQL (`optuna` DB, flow·Optuna 용) |
   | `mlflow` (optional) | `endpoint` | MLflow (tracking URI; flow 로깅용) |
 
-  - **`-b <block>`** 가 어느 팀원 블록을 읽을지 정합니다. catalog.py 는 그중 `minio` + `postgresql_catalog` 두 섹션만 씁니다 (`postgresql_optuna`·`mlflow` 는 flow 용 — pipeline.py 가 `mlflow` endpoint 를 payload 에 `MLFLOW_TRACKING_URI` 로 넘김). `-b` 를 **안 주면** default (localhost) 로 돌고 배너에 `[creds: default (localhost)]`, 주면 `[creds: prefect-block (block=…)]` 로 출처가 표시됩니다. `-b` 를 **줬는데** credentials.py import 실패나 블록 로드 실패(서버 미연결·블록 없음)면 조용히 default 로 안 떨어지고 오류로 즉시 중단합니다 (silent-default 방지 — `credentials.py` 는 catalog.py 옆이나 `PYTHONPATH` 에 있어야 함).
+  - **`-b <block>`** 가 어느 블록을 읽을지 정합니다. catalog.py 는 그중 `minio` + `postgresql_catalog` 두 섹션만 씁니다 (`postgresql_optuna` 는 flow 용). MLflow 주소는 블록이 아니라 Variable `mlflow_tracking_uri` 로, pipeline.py 가 payload 에 `MLFLOW_TRACKING_URI` 로 넘깁니다. `-b` 를 **안 주면** default (localhost) 로 돌고 배너에 `[creds: default (localhost)]`, 주면 `[creds: prefect-block (block=…)]` 로 출처가 표시됩니다. `-b` 를 **줬는데** credentials.py import 실패나 블록 로드 실패(서버 미연결·블록 없음)면 조용히 default 로 안 떨어지고 오류로 즉시 중단합니다 (silent-default 방지 — `credentials.py` 는 catalog.py 옆이나 `PYTHONPATH` 에 있어야 함).
   - **`--pg-host` / `--minio-host`** 는 블록 endpoint 의 host 만 덮어씁니다 (creds·port 불변). 컨테이너용 블록 (endpoint 가 `postgres`·`minio` 서비스명) 을 host 에서 쓸 때 `--pg-host localhost --minio-host localhost` 로 붙입니다.
   - `PREFECT_API_URL` (Prefect 프로필) 은 이 블록을 받기 위한 **접속점** 일 뿐 catalog 데이터가 아닙니다. 프로세스 환경변수·`docker-compose.env` 는 쓰지 않습니다.
 
-  > **권한 차단은 MinIO policy 로** — 팀원 블록의 `minio` 키가 곧 그 팀원의 MinIO 신원입니다. 진짜 사용자별 차단은 **그 키가 MinIO 에서 버킷 policy 로 제한** 되어 있어야 실제로 막히고, 그렇지 않으면 격리는 경로에 `{member}` 등 고유 키를 넣어 나누는 규칙 (`s3://.../{member}/...`) 에 의존합니다. Prefect 블록 자체엔 사용자별 접근제어가 없습니다.
+  > **권한 차단은 MinIO policy 로** — 블록의 `minio` 키가 곧 그 블록의 MinIO 신원입니다. 진짜 사용자별 차단은 **그 키가 MinIO 에서 버킷 policy 로 제한** 되어 있어야 실제로 막히고, 그렇지 않으면 격리는 경로에 `{owner}` 등 고유 키를 넣어 나누는 규칙 (`s3://.../{owner}/...`) 에 의존합니다. Prefect 블록 자체엔 사용자별 접근제어가 없습니다.
 
 ---
 

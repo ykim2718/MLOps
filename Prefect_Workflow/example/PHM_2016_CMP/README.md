@@ -1,6 +1,6 @@
 # PHM 2016 CMP - Virtual Metrology (LightGBM)
 
-<sub>rev. 31</sub>
+<sub>rev. 32</sub>
 
 Predicts wafer **AVG_REMOVAL_RATE** (a continuous target - the same Virtual Metrology
 shape as film-thickness / etch-rate prediction) from CMP tool sensor trajectories,
@@ -201,8 +201,8 @@ AVG_REMOVAL_RATE - training distribution (1,981 samples; each █ ~ 25 wafers)
 
 ```bash
 python my_flow.py --data_folder ./data
-# full pipeline.py-style invocation:
-python my_flow.py --git_repo <r> --git_commit_hash <c> --member <m> --data_folder ./data
+# pipeline.py-style invocation:
+python my_flow.py --submitter <m> --data_folder ./data
 ```
 
 `optuna.json` -> `sample_wafers` keeps the dry run fast (default 300 wafers); set it
@@ -398,11 +398,12 @@ One run, with the defaults in `optuna.json`:
 ## 8. Optuna dashboard
 
 `train` logs every trial to the **team PostgreSQL Optuna DB**. The storage DSN is not
-hardcoded - it is built from the `postgresql_optuna` section of the member's
-`Credentials` block (`Credentials.load(<member>)`), exactly like `catalog.py`. So the
-DB target follows whoever runs the flow (`--member`), and no secret lives in the repo.
+hardcoded - it comes from the `POSTGRESQL_OPTUNA_DSN` env var, which `pipeline.py` builds
+from the run's `Credentials` block (`postgresql_optuna` secrets) plus the
+`postgresql_host_port` prefect Variable and passes to this payload. So no secret lives in
+the repo, and a standalone run without that env falls back to a local `sqlite:///optuna.db`.
 
-That block holds host `postgres` (the compose-network service name), so the study is
+That DSN's host is `postgres` (the compose-network service name), so the study is
 written when the flow runs **inside the compose network** (how `pipeline.py` runs this
 payload). The same DB is published on the host at `localhost:5432`, so to view it:
 
@@ -416,7 +417,7 @@ hyperparameter-importance plots, and every trial's params and CV-RMSE. Re-runs a
 to the same `study_name` (`cmp_vm`).
 
 `optuna.json -> storage` is an **override**: leave it `null` to use the
-`postgresql_optuna` block (default), or set a full DSN (e.g. a local
+`POSTGRESQL_OPTUNA_DSN` env (default, set by `pipeline.py`), or set a full DSN (e.g. a local
 `sqlite:///optuna.db` or a test Postgres) to point elsewhere.
 
 ## 9. MLflow metrics
@@ -426,7 +427,7 @@ MLflow UI draws a per-trial curve. This is the place for metric curves; the optu
 above is for the tuning plots. Logging is **best-effort** - if MLflow is unreachable the run
 prints `MLflow disabled ...` and continues, so a local dry run never fails on it.
 
-Logged in one run named `<member>@<commit>` under experiment `cmp_vm`:
+Logged in one run named `<submitter>` under experiment `cmp_vm`:
 
 | Metric / field | Meaning |
 |---|---|
@@ -439,14 +440,14 @@ View it on the stack's MLflow server:
 
 ```bash
 # host: http://localhost:5000   (inside the compose network: http://mlflow:5000)
-# Experiments -> cmp_vm -> run <member>@<commit> -> Metrics -> cv_rmse  (x = trial, y = RMSE)
+# Experiments -> cmp_vm -> run <submitter> -> Metrics -> cv_rmse  (x = trial, y = RMSE)
 ```
 
 `optuna.json -> mlflow_uri` is an **override**: leave it `null` to use `http://mlflow:5000`
 (the compose service, how `pipeline.py` runs this payload), or set `http://localhost:5000`
 when you run `my_flow.py` directly on the host. The tracking URI is a plain service address,
 not a secret, so it stays in config - unlike the DB / MinIO creds, which come from the
-member's `Credentials` block.
+run's `Credentials` block.
 
 ## 10. Appendix - Prefect syntax
 
@@ -461,15 +462,15 @@ A quick reference for every Prefect construct used in `my_flow.py`.
       retries=1, retry_delay_seconds=2, log_prints=True)
 def train(prep, cfg, storage, mlflow_uri="", run_name=""): ...
 
-@flow(name="cmp_vm", flow_run_name="{member}@{git_commit_hash}", log_prints=True,
+@flow(name="cmp_vm", flow_run_name="{submitter}", log_prints=True,
       task_runner=ThreadPoolTaskRunner(max_workers=4))
-def my_flow(data_dir, member="local", git_commit_hash="dryrun", git_repo=""): ...
+def my_flow(data_dir, submitter="local"): ...
 ```
 
 | Argument | Meaning |
 |---|---|
 | `name` | task / flow name shown in the UI |
-| `task_run_name` / `flow_run_name` | per-run label; `"{member}@{git_commit_hash}"` is filled from the call arguments |
+| `task_run_name` / `flow_run_name` | per-run label; `"{submitter}"` is filled from the call arguments |
 | `tags` | labels for UI filtering and concurrency limits |
 | `retries`, `retry_delay_seconds` | on failure, re-run the task N times, waiting M seconds between tries |
 | `log_prints=True` | capture the function's `print()` into the Prefect run logs |

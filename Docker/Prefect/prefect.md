@@ -1,6 +1,6 @@
 # Prefect Pipeline Orchestration on Docker
 
-<sub>rev. 580</sub>
+<sub>rev. 584</sub>
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
@@ -116,11 +116,11 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
      config → deployment parameters ({high,low}-deployment.yml)
               git_repo · git_commit_hash · minio_key · minio_bucket · submitter · payload
        │
-       └─ Credential blocks (admin, once)         # one block per team member on server; needed before first run
-          files  : credentials.py · <member>.json (e.g. Jason.json)
-          run    : python credentials.py --json-path Jason.json --block-name jason   # one block (lowercase name)
-          config → run-code credentials (one block per member, nested)
-                   <member> { minio · postgresql_catalog · postgresql_optuna · mlflow }   # block name = member (lowercase)
+       └─ Credential blocks (admin, once)         # Credentials blocks on server; needed before first run
+          files  : credentials.py · <name>.json (e.g. yrocket.json)
+          run    : python credentials.py --json-path yrocket.json --block-name yrocket   # block name = any lowercase id
+          config → run-code credentials (one or more blocks, nested)
+                   <name> { minio · postgresql_catalog · postgresql_optuna }   # block name = any lowercase id (not tied to a person)
 
   shared : docker-compose.env                      # at Docker/Prefect/ root; server & dispatcher read ../docker-compose.env
   ```
@@ -187,17 +187,17 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
      prefect deploy --prefect-file high_deployment.yml --name high_deployment --no-prompt   # register a deployment (host shell, once; repeat for low_deployment)
      ```
 
-  4) **[Credentials](#7-credentials)** — 팀원별 자격증명 블록 (admin · 팀원마다 1회) · `Docker/Prefect/` 루트
+  4) **[Credentials](#7-credentials)** — 자격증명 블록 (admin · 블록마다 1회) · `Docker/Prefect/` 루트
 
      ```
      credentials.py                    Credentials block class + JSON register CLI ([Appendix I](#appendix-i-credentialspy))
-     <member>.json                     per-member credential JSON (e.g. Jason.json)
+     <name>.json                       credential JSON (e.g. yrocket.json)
      ```
 
      Run (from `Docker/Prefect/`, `PREFECT_API_URL` → server):
 
      ```powershell
-     python credentials.py --json-path Jason.json --block-name jason     # save a block named "jason" (lowercase)
+     python credentials.py --json-path yrocket.json --block-name yrocket     # save a block named "yrocket" (lowercase)
      ```
 
   - **공유** — `Docker/Prefect/` 루트에 두고 server·dispatcher compose 가 `../docker-compose.env` 로 읽음
@@ -439,15 +439,15 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
 
   ```text
   Set variable 'minio_endpoint' to "http://192.168.0.8:9000"
-  Set variable 'postgresql' to "192.168.0.8:5432"
+  Set variable 'postgresql_host_port' to "192.168.0.8:5432"
   Set variable 'mlflow_tracking_uri' to "http://192.168.0.8:5000"
-  [register_variables] set: minio_endpoint, postgresql, mlflow_tracking_uri
+  [register_variables] set: minio_endpoint, postgresql_host_port, mlflow_tracking_uri
   ```
 
   | Variable | Value (LAN IP) | Used by |
   |----------|----------------|---------|
   | `minio_endpoint` | `http://<MinIO IP>:9000` | pipeline.py·catalog.py (S3) |
-  | `postgresql` | `<PostgreSQL IP>:5432` | catalog·optuna DSN (host:port, 소비 코드가 분리) |
+  | `postgresql_host_port` | `<PostgreSQL IP>:5432` | catalog·optuna DSN (host:port, 소비 코드가 분리) |
   | `mlflow_tracking_uri` | `http://<MLflow IP>:5000` | payload MLflow 로깅 |
 
   - 주소가 바뀌면 `register_variables.sh` 를 **다시 한 번** 돌리면 server·flow·host 툴 전부 반영됩니다.
@@ -676,20 +676,20 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
   import subprocess
   import tempfile
   from pathlib import Path
-  from typing import Optional
 
   import boto3
   from prefect import flow, get_run_logger
   from prefect.blocks.core import Block
   from prefect.blocks.fields import SecretDict
+  from prefect.variables import Variable
 
-  __version__ = "0.0.26"  # Semantic Versioning:  Version = Major.Minor.Patch
+  __version__ = "0.0.29"  # Semantic Versioning:  Version = Major.Minor.Patch
 
 
-  class Credentials(Block):              # ONE block holds per-member SECRETS as nested dicts (values hidden);
+  class Credentials(Block):              # ONE block holds a credential set as nested dicts (values hidden);
       minio: SecretDict                  # access_key, secret_key        (endpoint is a prefect Variable)
-      postgresql_catalog: SecretDict     # username, password, database  (host:port is the prefect Variable 'postgresql')
-      postgresql_optuna: SecretDict      # username, password, database  (host:port is the prefect Variable 'postgresql')
+      postgresql_catalog: SecretDict     # username, password, database  (host:port is the prefect Variable 'postgresql_host_port')
+      postgresql_optuna: SecretDict      # username, password, database  (host:port is the prefect Variable 'postgresql_host_port')
 
 
   # flow_run_name shows who submitted the run (e.g. alice@a1b2c3d).
@@ -710,10 +710,10 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
           subprocess.run(["git", "-C", repo, "worktree", "add", "--detach", script, git_commit_hash], check=True)
 
           data.mkdir(parents=True, exist_ok=True)  # data/: MinIO download target (git didn't create it)
-          # this run's prefect_block -> its credentials (§7): minio for data, mlflow URI for the payload.
+          # this run's prefect_block -> its SECRETS (§7); service addresses are prefect Variables (§4).
           creds = Credentials.load(prefect_block)
           minio = creds.minio.get_secret_value()
-          s3 = boto3.client("s3", endpoint_url=minio["endpoint"],
+          s3 = boto3.client("s3", endpoint_url=Variable.get("minio_endpoint"),
                             aws_access_key_id=minio["access_key"],
                             aws_secret_access_key=minio["secret_key"])
           # minio_key -> data/: download every object under the key (works for a single file or a whole prefix).
@@ -731,18 +731,18 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
               raise FileNotFoundError(f"no objects under s3://{minio_bucket}/{minio_key}")
           log.info(f"downloaded {n} object(s) from s3://{minio_bucket}/{minio_key} to {data}")
 
-          # bridge the block's MLflow tracking URI to the payload via env, so my_flow.py logs to the
-          # MLflow server instead of a local ./mlruns. set only when the block carries an mlflow endpoint.
+          # bridge addresses (prefect Variables) to the payload via env: the MLflow tracking URI so
+          # my_flow.py logs to the MLflow server (not a local ./mlruns), and the optuna study DSN
+          # (Variable host/port + block creds) so a payload using Optuna hits the shared study DB.
           env = os.environ.copy()
-          if creds.mlflow is not None:
-              mlflow_endpoint = creds.mlflow.get_secret_value().get("endpoint")
-              if mlflow_endpoint:
-                  env["MLFLOW_TRACKING_URI"] = mlflow_endpoint
-          # bridge the postgresql_optuna DSN too, so a payload using Optuna hits the shared study DB.
+          mlflow_uri = Variable.get("mlflow_tracking_uri")
+          if mlflow_uri:
+              env["MLFLOW_TRACKING_URI"] = mlflow_uri
           opt = creds.postgresql_optuna.get_secret_value()
-          opt_host, _, opt_port = opt["endpoint"].partition(":")
+          opt_host, _, opt_port = (Variable.get("postgresql_host_port") or "").partition(":")
+          opt_port = opt_port or "5432"                                # tolerate a bare host with no ':port'
           env["POSTGRESQL_OPTUNA_DSN"] = (f"postgresql://{opt['username']}:{opt['password']}"
-                                          f"@{opt_host}:{opt_port or '5432'}/{opt['database']}")
+                                          f"@{opt_host}:{opt_port}/{opt['database']}")
           # run the team's payload in script/; run identity passed as CLI args; output streams to this run's logs.
           subprocess.run(["python", payload, "--submitter", submitter,
                           "--data_folder", data], cwd=script, env=env, check=True)
@@ -754,10 +754,10 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
           shutil.rmtree(base, ignore_errors=True)    # one cleanup removes repo/ + script/ + data/
   ```
 
-  - **자유로운 코드** — `payload` 로 팀원이 자기 스크립트를 지정하므로 코드를 정해진 틀에 맞출 필요가 없습니다. 입력은 CLI 인자 (`--submitter`·`--data_folder`) 로 받으므로, 팀원 스크립트는 `argparse` 로 그 값만 읽으면 됩니다. (payload 는 이미 체크아웃된 `script/` 안에서 돌므로 git 정보는 넘기지 않고, MLflow 서버 주소만 블록의 `mlflow` endpoint 를 `MLFLOW_TRACKING_URI` 환경변수로 넘깁니다.)
+  - **자유로운 코드** — `payload` 로 팀원이 자기 스크립트를 지정하므로 코드를 정해진 틀에 맞출 필요가 없습니다. 입력은 CLI 인자 (`--submitter`·`--data_folder`) 로 받으므로, 팀원 스크립트는 `argparse` 로 그 값만 읽으면 됩니다. (payload 는 이미 체크아웃된 `script/` 안에서 돌므로 git 정보는 넘기지 않고, MLflow 서버 주소만 Variable `mlflow_tracking_uri` 를 `MLFLOW_TRACKING_URI` 환경변수로 넘깁니다.)
   - **데이터 이력** — `minio_bucket`·`minio_key` 가 **flow 파라미터** 라서 Prefect 가 run 마다 입력값을 `prefect` DB 에 자동 저장합니다 (어느 버킷·객체를 썼는지 lineage 로 남습니다).
   - **crash 확인** — payload 가 0 이 아닌 코드로 끝나면 `subprocess.run(check=True)` 가 `CalledProcessError` 를 던지고, `pipeline` 가 `submitter@commit` 을 단 에러를 run 로그에 남긴 뒤 다시 raise 해 run 이 **Failed** 로 표시됩니다. payload 의 stdout·stderr 는 실행 중 이 run 의 로그로 흘러 들어가므로, 팀원은 자기 이름이 붙은 run (`alice@a1b2c3d`) 의 **Logs** 에서 crash 원인을 봅니다. payload 가 `@task` 를 쓰면 자기 flow run ([§9](#9-prefect-ui)) 에서 **어느 단계** 가 깨졌는지까지 보입니다.
-  - **이력 자동 저장** — `@flow` 진입 시 Prefect 가 run 의 상태·로그·파라미터를 자동 기록합니다. 지표·모델은 팀원 코드가 MLflow 로 로깅하면 함께 남습니다 — pipeline.py 가 블록의 `mlflow` endpoint 를 `MLFLOW_TRACKING_URI` env 로 넘기므로 payload 는 그 tracking 서버로 로깅합니다 (없으면 로컬 `./mlruns` 로 빠지니 블록에 `mlflow` 를 채워야 대시보드에 뜹니다). 마찬가지로 블록의 `postgresql_optuna` 를 DSN 으로 조립해 `POSTGRESQL_OPTUNA_DSN` env 로 넘기므로, Optuna 를 쓰는 payload 는 공유 postgres study 에 연결합니다 ([Appendix M](#appendix-m-prefect-task)).
+  - **이력 자동 저장** — `@flow` 진입 시 Prefect 가 run 의 상태·로그·파라미터를 자동 기록합니다. 지표·모델은 팀원 코드가 MLflow 로 로깅하면 함께 남습니다 — pipeline.py 가 Variable `mlflow_tracking_uri` 를 `MLFLOW_TRACKING_URI` env 로 넘기므로 payload 는 그 tracking 서버로 로깅합니다 (없으면 로컬 `./mlruns` 로 빠지니 `mlflow_tracking_uri` Variable 을 등록해야 대시보드에 뜹니다). 마찬가지로 블록의 `postgresql_optuna` 비밀 + Variable `postgresql_host_port` 로 DSN 을 조립해 `POSTGRESQL_OPTUNA_DSN` env 로 넘기므로, Optuna 를 쓰는 payload 는 공유 postgres study 에 연결합니다 ([Appendix M](#appendix-m-prefect-task)).
 
   [§6.2](#62-deployment) 의 deployment 가 entrypoint 를 **`pipeline.py:pipeline`** 로 가리킵니다. 이 문자열은 server 의 deployment 레코드 (`prefect` DB) 에 저장되고, dispatcher 가 띄운 컨테이너 안에서 Prefect 런타임이 이미지 작업 디렉터리 (`/work`, `Dockerfile.pipeline_flow` 가 `pipeline.py` 를 COPY 한 곳) 기준으로 `pipeline.py` 를 import 해 콜론 뒤 **`@flow` 함수 `pipeline`** 을 run 파라미터 (`git_repo`·`git_commit_hash`·`minio_key`·`minio_bucket`·`submitter`·`prefect_block`·`payload`) 와 함께 호출합니다. 그래서 deployment entrypoint 가 곧 이 `pipeline.py` 입니다.
 
@@ -776,7 +776,7 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
   ```
 
   - **팀원별 repo** — `git_repo` 가 **flow 파라미터** 라 deployment 마다 다른 repo 를 기본값으로 등록할 수 있습니다. 팀원은 각자 repo·커밋을 쓰고, run 마다 사설 `script/` 에 펼쳐져 서로 간섭하지 않습니다. Prefect 가 `git_repo`·`git_commit_hash` 을 run 파라미터로 자동 기록해 재현·lineage 가 남습니다.
-  - **데이터 준비** — `pipeline.py` 가 MinIO 에서 `minio_bucket`/`minio_key` 객체를 `data/` 로 미리 내려받고 `--data_folder` 로 경로를 넘깁니다. 접속 자격증명 (그 팀원 블록의 `minio` 섹션) 은 [§7](#7-credentials) 의 Credential Blocks 로 받습니다. 팀원 코드는 자격증명·다운로드를 각자 짤 필요 없이 `--data_folder` 폴더의 파일을 읽기만 하면 됩니다 (`pipeline.py` 가 `boto3` 로 받으므로 flow 이미지에 `boto3` 가 있어야 합니다 — [§6.1](#61-image)).
+  - **데이터 준비** — `pipeline.py` 가 MinIO 에서 `minio_bucket`/`minio_key` 객체를 `data/` 로 미리 내려받고 `--data_folder` 로 경로를 넘깁니다. 접속 자격증명 (그 블록의 `minio` 섹션) 은 [§7](#7-credentials) 의 Credential Blocks 로 받습니다. 팀원 코드는 자격증명·다운로드를 각자 짤 필요 없이 `--data_folder` 폴더의 파일을 읽기만 하면 됩니다 (`pipeline.py` 가 `boto3` 로 받으므로 flow 이미지에 `boto3` 가 있어야 합니다 — [§6.1](#61-image)).
 
 ## 7. Credentials
 
@@ -814,18 +814,18 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
 
   코드가 **MinIO** 와 PostgreSQL 의 `catalog`·`optuna` DB 에 접속할 **비밀** 을 **한 블록** 에 모읍니다 — `minio`·`postgresql_catalog`·`postgresql_optuna` 세 묶음의 **비밀만** (주소·endpoint 는 위 Variable). 비밀 값은 `SecretDict` 로 가립니다. server 에 한 번 저장하면 컨테이너·머신마다 따로 넣지 않아도 됩니다.
 
-  블록 클래스는 `Credentials` **하나** (`minio`·`postgresql_catalog`·`postgresql_optuna` 세 `SecretDict` 필드) 이고, **블록 이름은 팀원 이름** 입니다 — 팀원마다 자기 이름의 블록을 하나 갖습니다 (예시 `Jason` 은 팀원 이름). **`pipeline.py`** 와 **`catalog.py`** (모든 팀원이 쓰는 공통 라이브러리) 가 같은 클래스를 정의해 쓰므로 한쪽 `save`, 다른 쪽 `load` 가 맞물립니다. 코드는 run 의 팀원 이름으로 `Credentials.load(<member>)` 해 그 팀원의 **비밀** 을 받습니다 (주소는 Variable).
+  블록 클래스는 `Credentials` **하나** (`minio`·`postgresql_catalog`·`postgresql_optuna` 세 `SecretDict` 필드) 이고, **블록 이름은 임의의 소문자 식별자** 입니다 — 자격증명 세트마다 블록을 하나 만듭니다 (예시 `yrocket`; 팀원 이름과 무관, 이름은 자유). **`pipeline.py`** 와 **`catalog.py`** (공통 라이브러리) 가 같은 클래스를 정의해 쓰므로 한쪽 `save`, 다른 쪽 `load` 가 맞물립니다. 코드는 run 이 지정한 블록 이름으로 `Credentials.load(<name>)` 해 그 **비밀** 을 받습니다 (주소는 Variable).
 
   ```text
-  Jason                       # block name = a team member's name (e.g. Jason); load it -> SECRETS only
+  yrocket                     # block name = any lowercase id (e.g. yrocket); load it -> SECRETS only
   ├─ minio              : access_key, secret_key
   ├─ postgresql_catalog : username, password, database
   └─ postgresql_optuna  : username, password, database
   ```
 
-  팀원별 자격증명을 **JSON 파일** 로 적고 `credentials.py` 로 등록합니다 — 블록 이름은 Prefect 규칙상 **소문자·숫자·하이픈만** 가능하므로 `--block-name` 으로 소문자 이름을 지정합니다 (파일명은 `Jason.json` 그대로 두고 블록 이름만 `jason`). `credentials.py` 코드는 [Appendix I](#appendix-i-credentialspy).
+  자격증명을 **JSON 파일** 로 적고 `credentials.py` 로 등록합니다 — 블록 이름은 Prefect 규칙상 **소문자·숫자·하이픈만** 가능하므로 `--block-name` 으로 소문자 이름을 지정합니다 (예: 파일 `yrocket.json` → 블록 이름 `yrocket`). `credentials.py` 코드는 [Appendix I](#appendix-i-credentialspy).
 
-  `Jason.json`:
+  `yrocket.json`:
 
   ```json
   {
@@ -847,19 +847,19 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
   ```
 
   ```powershell
-  # Register (admin, per member) — PREFECT_API_URL must point at the server.
-  # Block name must be lowercase (Prefect rule), so pass --block-name even though the file is Jason.json.
-  prefect block delete credentials/jason                              # drop the old block first (clears stale fields)
-  python credentials.py --json-path Jason.json --block-name jason     # save a block named "jason"
+  # Register a Credentials block (admin) — PREFECT_API_URL must point at the server.
+  # Block name must be lowercase (Prefect rule); pass --block-name (any lowercase id).
+  prefect block delete credentials/yrocket                              # drop the old block first (clears stale fields)
+  python credentials.py --json-path yrocket.json --block-name yrocket   # save a block named "yrocket"
   ```
 
-  등록이 성공하면 `[credentials] saved block 'jason'` 이 찍힙니다. 블록은 server DB 에 저장되므로, 등록에 쓴 **같은 프로필** (`PREFECT_API_URL` → server) 로 확인합니다. slug 는 `<block-type-slug>/<block-document-name>` 이라 클래스 `Credentials` → `credentials/jason` 입니다.
+  등록이 성공하면 `[credentials] saved block 'yrocket'` 이 찍힙니다. 블록은 server DB 에 저장되므로, 등록에 쓴 **같은 프로필** (`PREFECT_API_URL` → server) 로 확인합니다. slug 는 `<block-type-slug>/<block-document-name>` 이라 클래스 `Credentials` → `credentials/yrocket` 입니다.
 
   ```powershell
   prefect config view                       # PREFECT_API_URL 이 server 를 가리키는지 확인
-  prefect block ls                          # Name=jason, Type=Credentials (Slug 열에 credentials/jason)
-  prefect block inspect credentials/jason   # 세 섹션 확인 (SecretDict 라 비밀 값은 *** 로 가려짐)
-  python -c "from credentials import Credentials as cr; print(cr.load('jason').minio.get_secret_value())"
+  prefect block ls                            # Name=yrocket, Type=Credentials (Slug 열에 credentials/yrocket)
+  prefect block inspect credentials/yrocket   # 세 섹션 확인 (SecretDict 라 비밀 값은 *** 로 가려짐)
+  python -c "from credentials import Credentials as cr; print(cr.load('yrocket').minio.get_secret_value())"
   ```
 
   UI 로는 `http://<Host IP>:4200` → **Blocks** 에서도 같은 블록이 보입니다.
@@ -989,7 +989,7 @@ Flow Runs
 - **API** = Application Programming Interface
 - **UI** = User Interface (여기서는 Prefect 웹 대시보드)
 - **DB** = Database
-- **DSN** = Data Source Name — DB 접속에 필요한 정보 (드라이버·계정·호스트·포트·DB 이름) 를 한 줄로 엮은 접속 문자열입니다 (예: `postgresql://user:pass@host:5432/catalog`). 이 스택은 DSN 을 통째로 저장하지 않고 팀원 블록 (이름이 팀원 이름; 예 `Jason`) 의 `postgresql_catalog`·`postgresql_optuna` 섹션 필드 (`endpoint`·`username`·`password`·`database`) 로 `catalog.py` 가 이 문자열을 조립합니다.
+- **DSN** = Data Source Name — DB 접속에 필요한 정보 (드라이버·계정·호스트·포트·DB 이름) 를 한 줄로 엮은 접속 문자열입니다 (예: `postgresql://user:pass@host:5432/catalog`). 이 스택은 DSN 을 통째로 저장하지 않고 Credentials 블록 (이름은 임의의 소문자 id; 예 `yrocket`) 의 `postgresql_catalog`·`postgresql_optuna` 섹션 비밀 (`username`·`password`·`database`) 에 Variable `postgresql_host_port` (host:port) 를 더해 `catalog.py`·`pipeline.py` 가 이 문자열을 조립합니다.
 - **CPU / GPU** = Central / Graphics Processing Unit
 
 ## Appendix B. Prefect CLI
@@ -1011,7 +1011,7 @@ Flow Runs
   - `prefect deploy` (또는 `flow.deploy(...)`) — deployment 를 등록합니다 (§6.2).
   - `prefect deployment run "<flow>/<deployment>" -p <key>=<value>` — 등록된 deployment 를 파라미터와 함께 trigger 합니다 (§6.3).
 - **§7 Credentials**
-  - `prefect block ls` — server 에 등록된 블록 (`Credentials` 등) 을 표 (ID·Type·Name·Slug) 로 출력합니다. run-code 자격증명 (팀원 블록, 예 `Jason`) 이 등록됐는지 확인합니다 (§7). 블록은 **그 server 의 DB 에 저장** 되므로 server 마다 따로 등록해야 하며, 등록 시점의 `PREFECT_API_URL` 이 가리킨 server 에 들어갑니다.
+  - `prefect block ls` — server 에 등록된 블록 (`Credentials` 등) 을 표 (ID·Type·Name·Slug) 로 출력합니다. run-code 자격증명 (Credentials 블록, 예 `yrocket`) 이 등록됐는지 확인합니다 (§7). 블록은 **그 server 의 DB 에 저장** 되므로 server 마다 따로 등록해야 하며, 등록 시점의 `PREFECT_API_URL` 이 가리킨 server 에 들어갑니다.
   - `prefect variable ls` — server 에 등록된 Variable 을 출력합니다. 자격증명을 Secret 블록 대신 Variable 로 넣었는지 확인합니다 (§7).
 
 ## Appendix C. Execution Architecture
@@ -1136,7 +1136,7 @@ if ($created -and $ConcurrencyLimit -gt 0) {
 
 server 에 backing service **주소 Variable** (MinIO·PostgreSQL·MLflow endpoint, 비밀 아님) 을 등록하는 스크립트입니다 ([§4 Service Address Variables](#service-address-variables)).
 
-`--overwrite` 라 재실행하면 값이 동기화됩니다 (idempotent). 등록한 각 값을 stdout 에 그대로 찍습니다. `--postgresql` 은 `host:port` 한 덩어리로 받아 **단일 Variable `postgresql`** 로 저장하고, 소비 코드 (`catalog.py`·`pipeline.py`) 가 host·port 로 분리합니다.
+`--overwrite` 라 재실행하면 값이 동기화됩니다 (idempotent). 등록한 각 값을 stdout 에 그대로 찍습니다. `--postgresql` 은 `host:port` 한 덩어리로 받아 **단일 Variable `postgresql_host_port`** 로 저장하고, 소비 코드 (`catalog.py`·`pipeline.py`) 가 host·port 로 분리합니다.
 
 ```powershell
 # register_variables.ps1 — register the shared backing-service ADDRESS variables on the Prefect server.
@@ -1164,9 +1164,9 @@ function Set-Var($name, $value) {
 }
 
 Set-Var 'minio_endpoint'      $Minio
-Set-Var 'postgresql'          $Postgresql   # host:port; consumers (catalog.py / pipeline.py) split it
+Set-Var 'postgresql_host_port' $Postgresql   # host:port; consumers (catalog.py / pipeline.py) split it
 Set-Var 'mlflow_tracking_uri' $Mlflow
-Write-Host "[register_variables] set: minio_endpoint, postgresql, mlflow_tracking_uri"
+Write-Host "[register_variables] set: minio_endpoint, postgresql_host_port, mlflow_tracking_uri"
 ```
 
 ## Appendix H. run_dispatcher.ps1
@@ -1260,17 +1260,17 @@ docker compose -f $compose up -d
 
 ## Appendix I. credentials.py
 
-팀원별 자격증명 블록을 JSON 으로 등록하는 스크립트입니다 ([§7 Credential Blocks](#credential-blocks)). 블록 이름은 **CLI 인자 > JSON `name` 필드 > 파일명** 순으로 정해지며, Prefect 규칙상 **소문자·숫자·하이픈만** 허용됩니다 (대문자 불가 → 팀원 이름은 소문자로). `Credentials` 클래스도 여기서 정의하며 `catalog.py` 가 import 해 씁니다 (`pipeline.py` 는 이미지 자기완결이라 같은 클래스를 따로 inline 정의 — [§6.3](#63-pipelinepy)).
+자격증명 블록을 JSON 으로 등록하는 스크립트입니다 ([§7 Credential Blocks](#credential-blocks)). 블록 이름은 **CLI 인자 > JSON `name` 필드 > 파일명** 순으로 정해지며, Prefect 규칙상 **소문자·숫자·하이픈만** 허용됩니다 (임의의 소문자 식별자, 팀원 이름과 무관). `Credentials` 클래스도 여기서 정의하며 `catalog.py` 가 import 해 씁니다 (`pipeline.py` 는 이미지 자기완결이라 같은 클래스를 따로 inline 정의 — [§6.3](#63-pipelinepy)).
 
 ```python
 # credentials.py — shared Prefect credential block (Credentials) + JSON register CLI.
 #
-# Defines the one credential Block used across the stack and registers a team member's block from a
+# Defines the one credential Block used across the stack and registers a Credentials block from a
 # JSON file. Block name precedence: --block-name > JSON "name" field > file stem. Prefect requires the
-# block name to be lowercase letters, numbers, and dashes only — use a lowercase member name.
+# block name to be lowercase letters, numbers, and dashes only — any lowercase id (not tied to a person).
 #
-#     prefect block delete credentials/jason
-#     python credentials.py --json-path Jason.json --block-name jason    # save a block named "jason"
+#     prefect block delete credentials/yrocket
+#     python credentials.py --json-path yrocket.json --block-name yrocket    # save a block named "yrocket"
 #
 # Separation of concerns: the Prefect folder owns the credential block (this file); PrefectWorkflow's
 # catalog.py imports it (`from credentials import Credentials`); pipeline.py keeps its own inline copy
@@ -1294,12 +1294,12 @@ _BLOCK_NAME_RE = re.compile(r"^[a-z0-9-]+$")
 
 class Credentials(Block):              # must match pipeline.py exactly (class name + fields).
     minio: SecretDict                  # access_key, secret_key        (endpoint is a prefect Variable)
-    postgresql_catalog: SecretDict     # username, password, database  (host:port is the prefect Variable 'postgresql')
-    postgresql_optuna: SecretDict      # username, password, database  (host:port is the prefect Variable 'postgresql')
+    postgresql_catalog: SecretDict     # username, password, database  (host:port is the prefect Variable 'postgresql_host_port')
+    postgresql_optuna: SecretDict      # username, password, database  (host:port is the prefect Variable 'postgresql_host_port')
 
 
 def register(spec_path: Union[str, Path], name: Optional[str] = None) -> None:
-    """JSON spec 으로 그 팀원의 Credentials 블록을 server 에 save 한다 (이름 우선순위: 인자 > spec['name'] > 파일명)."""
+    """JSON spec 으로 Credentials 블록을 server 에 save 한다 (이름 우선순위: 인자 > spec['name'] > 파일명)."""
     spec_path = Path(spec_path)
     spec = json.loads(spec_path.read_text(encoding="utf-8"))
     name = name or spec.pop("name", None) or spec_path.stem
@@ -1331,10 +1331,10 @@ def _block_name(value: str) -> str:
 
 def parse_args(argv: Optional[List[str]] = None) -> Optional[argparse.Namespace]:
     """argparse 로 CLI 인자를 파싱한다. 옵션이 없으면 전체 도움말을 출력하고 None 을 돌려준다."""
-    parser = argparse.ArgumentParser(description="Register a team member's Credentials block from a JSON spec.")
+    parser = argparse.ArgumentParser(description="Register a Credentials block from a JSON spec.")
     parser.add_argument(
         "--json-path", required=True, type=_json_path,
-        help="path to an existing <member>.json credential spec",
+        help="path to an existing <name>.json credential spec",
     )
     parser.add_argument(
         "--block-name", default=None, type=_block_name,

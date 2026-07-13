@@ -1,5 +1,5 @@
 # healthcheck.ps1 - health & wiring check for the Prefect MLOps stack (per prefect.md "1. Architecture").
-# __version__ = "0.0.28"  # Semantic Versioning:  Version = Major.Minor.Patch
+# __version__ = "0.0.29"  # Semantic Versioning:  Version = Major.Minor.Patch
 #
 # Read-only. It inspects, it never changes anything. It verifies the always-on pieces are up and
 # correctly wired, then prints an ASCII diagram of the architecture with live [ OK ] / [WARN] / [FAIL]:
@@ -30,8 +30,7 @@ param(
     [int]     $PostgresPort = 5432,  # PostgreSQL (metadata DB) port on the host
     [string]  $Network      = "",  # docker network: auto-derived from a pool's base job template; fallback mlops
     [string]  $DispImage    = "prefect-dispatcher:latest",  # dispatcher image (to find local containers + their IP)
-    [string[]]$Pools        = @(),  # expected docker pools to assert (empty = auto-discover whatever is registered)
-    [string[]]$Members      = @()  # optional: assert these member credential blocks exist (credentials/<member>)
+    [string[]]$Pools        = @()  # expected docker pools to assert (empty = auto-discover whatever is registered)
 )
 
 $ErrorActionPreference = "Stop"
@@ -263,23 +262,22 @@ if (-not $serverOk) {
         }
     }
 
-    # Run-code credentials: one Credentials-type block per team member (block name = lowercase member),
-    # server-wide and independent of any pool. Member names are dynamic, so discover them from block ls.
+    # Run-code credentials: Credentials-type blocks, server-wide and independent of any pool.
+    # Block names are dynamic, so discover them from block ls.
     Write-Host ""
-    Info "CREDENTIALS (run-code credentials; one Credentials block per member, server-wide):"
+    Info "CREDENTIALS (run-code credential blocks, server-wide):"
+    $prevCols = $env:COLUMNS
+    $env:COLUMNS = "200"                    # widen Rich's table so long slugs (credentials/<name>) don't wrap/truncate
     $blockLs = & prefect block ls 2>$null
+    if ($null -eq $prevCols) { Remove-Item Env:COLUMNS -ErrorAction SilentlyContinue } else { $env:COLUMNS = $prevCols }
     $found = @($blockLs | Select-String -Pattern 'credentials/([a-z0-9-]+)' -AllMatches |
               ForEach-Object { $_.Matches } | ForEach-Object { $_.Groups[1].Value }) | Sort-Object -Unique
     if ($found.Count -gt 0) {
-        Node "OK" ("  Credentials blocks present; members: " + ($found -join ", "))
+        Node "OK" ("  Credentials blocks present: " + ($found -join ", "))
     } elseif (Test-PrefectObject @('block','type','inspect','credentials')) {
-        Node "WARN" ("  Credentials type registered, but no member block yet (register with credentials.py)")
+        Node "WARN" ("  Credentials type registered, but no block yet (register with credentials.py)")
     } else {
-        Node "FAIL" ("  no Credentials block (register a member with credentials.py)")
-    }
-    foreach ($m in $Members) {
-        if ($found -contains $m) { Node "OK" ("  member block credentials/$m") }
-        else { Node "FAIL" ("  member block credentials/$m  MISSING - register with credentials.py") }
+        Node "FAIL" ("  no Credentials block (register with credentials.py)")
     }
 }
 

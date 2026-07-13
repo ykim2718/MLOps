@@ -1,12 +1,12 @@
 # credentials.py — shared Prefect credential block (Credentials) + JSON register CLI.
 #
-# Defines the one credential Block (per-member SECRETS only; service addresses live in prefect Variables)
-# and registers a team member's block from a JSON file. Block name precedence: --block-name > JSON "name"
+# Defines the one credential Block (SECRETS only; service addresses live in prefect Variables)
+# and registers a Credentials block from a JSON file. Block name precedence: --block-name > JSON "name"
 # field > file stem. Prefect requires the
-# block name to be lowercase letters, numbers, and dashes only — use a lowercase member name.
+# block name to be lowercase letters, numbers, and dashes only — any lowercase id (not tied to a person).
 #
-#     prefect block delete credentials/jason
-#     python credentials.py --json-path Jason.json --block-name jason    # save a block named "jason"
+#     prefect block delete credentials/yrocket
+#     python credentials.py --json-path yrocket.json --block-name yrocket    # save a block named "yrocket"
 #
 # Separation of concerns: the Prefect folder owns the credential block (this file); PrefectWorkflow's
 # catalog.py imports it (`from credentials import Credentials`); pipeline.py keeps its own inline copy
@@ -22,7 +22,7 @@ from typing import List, Optional, Union
 from prefect.blocks.core import Block
 from prefect.blocks.fields import SecretDict
 
-__version__ = "0.0.21"  # Semantic Versioning:  Version = Major.Minor.Patch
+__version__ = "0.0.22"  # Semantic Versioning:  Version = Major.Minor.Patch
 
 # Prefect block document names allow lowercase letters, numbers, and dashes only (no upper/underscore/space/dot).
 _BLOCK_NAME_RE = re.compile(r"^[a-z0-9-]+$")
@@ -30,12 +30,12 @@ _BLOCK_NAME_RE = re.compile(r"^[a-z0-9-]+$")
 
 class Credentials(Block):              # must match pipeline.py exactly (class name + fields).
     minio: SecretDict                  # access_key, secret_key        (endpoint is a prefect Variable)
-    postgresql_catalog: SecretDict     # username, password, database  (host:port is the prefect Variable 'postgresql')
-    postgresql_optuna: SecretDict      # username, password, database  (host:port is the prefect Variable 'postgresql')
+    postgresql_catalog: SecretDict     # username, password, database  (host:port is the prefect Variable 'postgresql_host_port')
+    postgresql_optuna: SecretDict      # username, password, database  (host:port is the prefect Variable 'postgresql_host_port')
 
 
 def register(spec_path: Union[str, Path], name: Optional[str] = None) -> None:
-    """JSON spec 으로 그 팀원의 Credentials 블록을 server 에 save 한다 (이름 우선순위: 인자 > spec['name'] > 파일명)."""
+    """JSON spec 으로 Credentials 블록을 server 에 save 한다 (이름 우선순위: 인자 > spec['name'] > 파일명)."""
     spec_path = Path(spec_path)
     spec = json.loads(spec_path.read_text(encoding="utf-8"))
     name = name or spec.pop("name", None) or spec_path.stem
@@ -67,10 +67,10 @@ def _block_name(value: str) -> str:
 
 def parse_args(argv: Optional[List[str]] = None) -> Optional[argparse.Namespace]:
     """argparse 로 CLI 인자를 파싱한다. 옵션이 없으면 전체 도움말을 출력하고 None 을 돌려준다."""
-    parser = argparse.ArgumentParser(description="Register a team member's Credentials block from a JSON spec.")
+    parser = argparse.ArgumentParser(description="Register a Credentials block from a JSON spec.")
     parser.add_argument(
         "--json-path", required=True, type=_json_path,
-        help="path to an existing <member>.json credential spec",
+        help="path to an existing <name>.json credential spec",
     )
     parser.add_argument(
         "--block-name", default=None, type=_block_name,

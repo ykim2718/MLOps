@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # healthcheck.sh - health & wiring check for the Prefect MLOps stack (per prefect.md "1. Architecture").
-# __version__ = "0.0.28"  # Semantic Versioning:  Version = Major.Minor.Patch  (bash port of healthcheck.ps1)
+# __version__ = "0.0.29"  # Semantic Versioning:  Version = Major.Minor.Patch  (bash port of healthcheck.ps1)
 #
 # Read-only. It inspects, it never changes anything. It verifies the always-on pieces are up and
 # correctly wired, then prints an ASCII diagram of the architecture with live [ OK ] / [WARN] / [FAIL]:
@@ -123,7 +123,6 @@ POSTGRES_PORT="5432"
 NETWORK=""                                # auto-derived from a pool's base job template; fallback mlops
 DISP_IMAGE="prefect-dispatcher:latest"
 POOLS=""                                  # expected pools to assert (empty = auto-discover whatever is registered)
-MEMBERS=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -135,7 +134,6 @@ while [ $# -gt 0 ]; do
         --network)       NETWORK="$2"; shift 2 ;;
         --disp-image)    DISP_IMAGE="$2"; shift 2 ;;
         --pools)         POOLS="${2//,/ }"; shift 2 ;;   # comma- or space-separated
-        --members)       MEMBERS="${2//,/ }"; shift 2 ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
 done
@@ -275,26 +273,20 @@ else
         fi
     done
 
-    # Run-code credentials: one Credentials-type block per team member (block name = lowercase member),
-    # server-wide and independent of any pool. Member names are dynamic, so discover them from block ls.
+    # Run-code credentials: Credentials-type blocks, server-wide and independent of any pool.
+    # Block names are dynamic, so discover them from block ls.
     echo
-    info "CREDENTIALS (run-code credentials; one Credentials block per member, server-wide):"
-    found=$(prefect block ls 2>/dev/null | grep -oE 'credentials/[a-z0-9-]+' | sed 's#credentials/##' | sort -u)
+    info "CREDENTIALS (run-code credential blocks, server-wide):"
+    # COLUMNS widens Rich's table so long slugs (credentials/<name>) don't wrap/truncate when captured.
+    found=$(COLUMNS=200 prefect block ls 2>/dev/null | grep -oE 'credentials/[a-z0-9-]+' | sed 's#credentials/##' | sort -u)
     if [ -n "$found" ]; then
-        members_csv=$(printf '%s' "$found" | paste -sd ',' - | sed 's/,/, /g')
-        node OK "  Credentials blocks present; members: $members_csv"
+        blocks_csv=$(printf '%s' "$found" | paste -sd ',' - | sed 's/,/, /g')
+        node OK "  Credentials blocks present: $blocks_csv"
     elif prefect block type inspect credentials >/dev/null 2>&1; then
-        node WARN "  Credentials type registered, but no member block yet (register with credentials.py)"
+        node WARN "  Credentials type registered, but no block yet (register with credentials.py)"
     else
-        node FAIL "  no Credentials block (register a member with credentials.py)"
+        node FAIL "  no Credentials block (register with credentials.py)"
     fi
-    for m in $MEMBERS; do
-        if printf '%s\n' "$found" | grep -qx "$m"; then
-            node OK "  member block credentials/$m"
-        else
-            node FAIL "  member block credentials/$m  MISSING - register with credentials.py"
-        fi
-    done
 fi
 
 # backing services (own compose stacks; checked by endpoint, not by container name)
