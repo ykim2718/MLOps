@@ -1,6 +1,6 @@
 # MLflow — Experiment Tracking & Model Registry
 
-<sub>rev. 53</sub>
+<sub>rev. 55</sub>
 
 MLflow 는 실험의 **파라미터·지표를 추적** 하고, 학습된 **모델을 레지스트리로 관리·배포·서빙** 하는 도구입니다. 이 스택에서는 저장소를 두 곳으로 나눠, 가벼운 메타데이터는 메타데이터 DB 에, 실제 산출물은 오브젝트 스토리지에 둡니다.
 
@@ -46,7 +46,7 @@ MLflow 는 도커 컨테이너로 실행됩니다. backend 인 PostgreSQL (`mlfl
 
 ```yaml
 # docker-compose.yml
-# __version__ = "0.0.16"  # Semantic Versioning: Major.Minor.Patch
+# __version__ = "0.0.18"  # Semantic Versioning: Major.Minor.Patch
 name: mlflow                        # Fix the project name (prefix of container and volume names).
 
 services:
@@ -59,13 +59,13 @@ services:
       /bin/sh -c "
       pip install --quiet psycopg2-binary boto3 &&
       mlflow server --host 0.0.0.0 --port 5000
-      --backend-store-uri postgresql://$$POSTGRES_USER:$$POSTGRES_PASSWORD@postgres:5432/mlflow
+      --backend-store-uri postgresql://$$POSTGRES_USER:$$POSTGRES_PASSWORD@$$POSTGRES_HOST_PORT/mlflow
       --artifacts-destination s3://mlflow
       --allowed-hosts '*'
       --cors-allowed-origins '*'
       "
     env_file:
-      - docker-compose.env_example          # POSTGRES_USER/PASSWORD, AWS_ACCESS_KEY_ID/SECRET, MLFLOW_S3_ENDPOINT_URL
+      - docker-compose.env_example          # POSTGRES_USER/PASSWORD/HOST_PORT, AWS_ACCESS_KEY_ID/SECRET, MLFLOW_S3_ENDPOINT_URL
     ports:
       - "5000:5000"
     networks:
@@ -81,7 +81,7 @@ networks:
 - `image: ghcr.io/mlflow/mlflow:latest` 는 MLflow 공식 이미지를 씁니다.
 - `command` 는 컨테이너가 뜰 때 PostgreSQL/S3 드라이버를 설치한 뒤 MLflow server 를 띄웁니다. backend 는 `postgres` 서비스명으로 `mlflow` DB 에, artifact 는 `s3://mlflow` 에 연결합니다.
 - `--allowed-hosts '*'` 는 MLflow 3.x 의 DNS-rebinding 보호(요청의 `Host` 헤더 검사) 를 **전체 허용** 으로 엽니다 (`*` 는 fnmatch 와일드카드라 모든 Host 통과 — 플로우의 `mlflow:5000`, UI 의 `localhost`·host IP 모두). 신뢰된 내부망·스터디 전제라 `*` 로 둡니다. **주의: 이 플래그는 위 `command` 가 (모든 줄 같은 들여쓰기의 `>` 폴딩으로) 한 줄로 이어져야만 실제 적용됩니다** — continuation 줄을 더 깊이 들여쓰면 YAML 이 줄바꿈을 보존해 명령이 `--port 5000` 뒤에서 잘리고, 그러면 이 플래그가 통째로 유실되어 MLflow 가 **기본 허용(localhost · 사설 IP)** 만 쓰므로 서비스명 `mlflow` 는 403 으로 막힙니다 (그게 이전 증상이었음). 더 좁히려면 `*` 대신 `host:port` 를 나열하되, 지정 시 **기본값을 덮어쓰므로** UI 용 `localhost:5000` 도 반드시 함께 넣습니다. `--cors-allowed-origins '*'` 는 브라우저 CORS 용으로 별개입니다.
-- `env_file` 은 backend 계정 (`POSTGRES_USER`/`POSTGRES_PASSWORD`) 과 artifact 접속 키 (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`), 그리고 MinIO endpoint (`MLFLOW_S3_ENDPOINT_URL`) 를 주입합니다.
+- `env_file` 은 backend 계정 (`POSTGRES_USER`/`POSTGRES_PASSWORD`) 과 그 host:port (`POSTGRES_HOST_PORT`), artifact 접속 키 (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`), 그리고 MinIO endpoint (`MLFLOW_S3_ENDPOINT_URL`) 를 주입합니다.
 - `networks: mlops` 로 같은 호스트의 `postgres` · `minio` 와 서비스명으로 통신합니다. 그 둘은 별도 compose 라 `depends_on` 을 걸 수 없으므로, `restart: unless-stopped` 로 준비될 때까지 자동 재시도합니다.
 
 #### Execution Command
@@ -105,12 +105,13 @@ docker compose up -d
   # docker-compose.env_example  (all values are CHANGE_ME placeholders — do not expose real values)
   POSTGRES_USER=CHANGE_ME             # backend (PostgreSQL mlflow DB) account — same value as PostgreSQL
   POSTGRES_PASSWORD=CHANGE_ME
+  POSTGRES_HOST_PORT=192.168.0.13:5432  # backend host:port — postgres 가 다른 호스트면 그 LAN IP:포트
   AWS_ACCESS_KEY_ID=CHANGE_ME         # artifact (MinIO/S3) key — same value as the MinIO root account (or an issued key)
   AWS_SECRET_ACCESS_KEY=CHANGE_ME
   MLFLOW_S3_ENDPOINT_URL=http://minio:9000
   ```
 
-  - 명령 안에서 계정을 참조할 때는 `$$POSTGRES_USER` 처럼 `$$` 로 적습니다. `$$` 는 compose 가 `$` 로 바꿔 컨테이너 셸이 `env_file` 값으로 확장합니다.
+  - 명령 안에서 값을 참조할 때는 `$$POSTGRES_USER`·`$$POSTGRES_HOST_PORT` 처럼 `$$` 로 적습니다. `$$` 는 compose 가 `$` 로 바꿔 컨테이너 셸이 `env_file` 값으로 확장합니다 (그래서 host:port 도 compose 를 안 고치고 `docker-compose.env` 로만 바꿀 수 있습니다).
   - 모든 `CHANGE_ME` 는 강한 값으로 교체하고, 실제 `docker-compose.env` 는 git 이 아니라 안전한 채널로 공유합니다.
 
 ## 3. Tracking

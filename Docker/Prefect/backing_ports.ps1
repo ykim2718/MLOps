@@ -1,12 +1,12 @@
 # backing_ports.ps1 — check reachability of, or open the inbound firewall for, one backing service port.
-# __version__ = "0.0.1"  # Semantic Versioning:  Version = Major.Minor.Patch
+# __version__ = "0.0.2"  # Semantic Versioning:  Version = Major.Minor.Patch
 #   check : TCP-test the port. Run from a CONSUMING host (server / dispatcher) to see real reachability;
 #           from the serving host it is a meaningless loopback (always OPEN).
 #   open  : open the inbound firewall (Windows Defender) for the port. Run as Administrator on the host
 #           that SERVES the port. Idempotent (skips an existing rule).
 #
-#   .\backing_ports.ps1 check -host 192.168.0.8 -port 5432
-#   .\backing_ports.ps1 open  -host 192.168.0.8 -port 5432
+#   .\backing_ports.ps1 check -host 192.168.0.13 -port 5432
+#   .\backing_ports.ps1 open  -host 192.168.0.13 -port 5432
 param(
     [Parameter(Mandatory = $true, Position = 0)]
     [ValidateSet("check", "open")]

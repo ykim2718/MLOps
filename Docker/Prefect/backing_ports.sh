@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # backing_ports.sh — check reachability of, or open the inbound firewall (ufw) for, one backing service port.
-# __version__ = "0.0.1"  # Semantic Versioning:  Version = Major.Minor.Patch
+# __version__ = "0.0.2"  # Semantic Versioning:  Version = Major.Minor.Patch
 #   check : TCP-test the port. Run from a CONSUMING host (server / dispatcher) to see real reachability;
 #           from the serving host it is a meaningless loopback (always OPEN).
 #   open  : open the inbound firewall (ufw) for the port. Run on the host that SERVES it (needs sudo). Idempotent.
 #
-#   ./backing_ports.sh check -host 192.168.0.8 -port 5432
-#   sudo ./backing_ports.sh open -host 192.168.0.8 -port 5432
+#   ./backing_ports.sh check -host 192.168.0.13 -port 5432
+#   sudo ./backing_ports.sh open -host 192.168.0.13 -port 5432
 set -euo pipefail
 
 ACTION="${1:-}"; [ $# -gt 0 ] && shift
@@ -31,7 +31,7 @@ if [ "$ACTION" = check ]; then
         echo "$HOST:$PORT BLOCKED"
     fi
 else   # open
-    subnet="${HOST%.*}.0/24"                # derive the LAN /24 from the address (192.168.0.8 -> 192.168.0.0/24)
+    subnet="${HOST%.*}.0/24"                # derive the LAN /24 from the address (192.168.0.13 -> 192.168.0.0/24)
     echo "ensuring inbound $PORT/tcp from $subnet"
     sudo ufw allow from "$subnet" to any port "$PORT" proto tcp   # idempotent: ufw skips a duplicate rule
 fi

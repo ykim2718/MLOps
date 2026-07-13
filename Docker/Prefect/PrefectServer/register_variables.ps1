@@ -1,15 +1,15 @@
 # register_variables.ps1 — register the shared backing-service ADDRESS variables on the Prefect server.
-# __version__ = "0.0.6"  # Semantic Versioning:  Version = Major.Minor.Patch
+# __version__ = "0.0.7"  # Semantic Versioning:  Version = Major.Minor.Patch
 # Single, non-secret source of backing addresses (LAN IP). Flow code and host tools (catalog.py) read
 # them via prefect Variables from the server, so no docker-compose.env is needed outside containers.
 # Run after the server is up (run_server.ps1). Idempotent (--overwrite).
 #
-#   .\register_variables.ps1 -Minio http://192.168.0.8:9000 -Postgresql 192.168.0.8:5432 `
+#   .\register_variables.ps1 -Minio http://192.168.0.8:9000 -Postgresql 192.168.0.13:5432 `
 #                            -Mlflow http://192.168.0.8:5000
 #
 param(
     [string]$Minio      = 'http://192.168.0.8:9000',     # MinIO S3 endpoint (data download / model upload)
-    [string]$Postgresql = '192.168.0.8:5432',            # PostgreSQL host:port (catalog / optuna DBs)
+    [string]$Postgresql = '192.168.0.13:5432',            # PostgreSQL host:port (catalog / optuna DBs)
     [string]$Mlflow     = 'http://192.168.0.8:5000',     # MLflow tracking server
     [string]$Compose    = 'docker-compose.server.yml'    # the server compose (its top-level name: sets the project)
 )

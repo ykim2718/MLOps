@@ -1,6 +1,6 @@
 # Troubleshooting
 
-<sub>rev. 16</sub>
+<sub>rev. 17</sub>
 
 운영 중 마주친 문제를 증상·원인·진단·해결 순으로 모읍니다. 새 이슈는 H2 항목으로 덧붙입니다.
 
@@ -115,13 +115,13 @@
 
   # (2) 컨테이너 안에서 Postgres 5432 도달? (3s 뒤 timeout 이면 도달 불가)
   sudo docker compose -f docker-compose.server.yml exec -T prefect_server \
-    python -c 'import socket; socket.create_connection(("192.168.0.8",5432),3); print("reachable")'
+    python -c 'import socket; socket.create_connection(("192.168.0.13",5432),3); print("reachable")'
 
   # (3) 호스트에서도 안 되나 — 컨테이너 network 문제 vs DB 문제 가르기
-  timeout 3 bash -c '</dev/tcp/192.168.0.8/5432' && echo OPEN || echo "BLOCKED/CLOSED"
+  timeout 3 bash -c '</dev/tcp/192.168.0.13/5432' && echo OPEN || echo "BLOCKED/CLOSED"
 
   # (4) 호스트도 BLOCKED 면 머신 자체는 사나 (응답의 ttl=128 이면 Windows host)
-  ping -c 2 192.168.0.8
+  ping -c 2 192.168.0.13
   ```
 
   (2)(3) 모두 실패 + ping 성공 → 머신은 살아있고 **5432 포트만 막힘** → DB 호스트 방화벽·게시 확인. (3)만 `OPEN` 이고 (2) 실패 → 컨테이너 network 라우팅 문제 (LAN 으로 못 나감).
@@ -138,7 +138,7 @@
   ```
 
   Linux DB 호스트라면 `sudo ufw allow from 192.168.0.0/24 to any port 5432 proto tcp`.
-- **확인** — 방화벽 허용 후 server 머신에서 `timeout 3 bash -c '</dev/tcp/192.168.0.8/5432' && echo OPEN` 가 `OPEN` 이면 도달됩니다. server 를 다시 세워 migration 을 통과시킵니다.
+- **확인** — 방화벽 허용 후 server 머신에서 `timeout 3 bash -c '</dev/tcp/192.168.0.13/5432' && echo OPEN` 가 `OPEN` 이면 도달됩니다. server 를 다시 세워 migration 을 통과시킵니다.
 
   ```bash
   sudo docker compose -f docker-compose.server.yml up -d --force-recreate prefect_server

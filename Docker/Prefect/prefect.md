@@ -1,6 +1,6 @@
 # Prefect Pipeline Orchestration on Docker
 
-<sub>rev. 584</sub>
+<sub>rev. 585</sub>
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
@@ -87,7 +87,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
               docker-pool-template-high.json · docker-pool-template-low.json · prune_loop.sh
      run    : run_server.ps1                      # in PrefectServer/: create network + compose up -d
      config → ../docker-compose.env
-              PREFECT_SERVER_DATABASE_CONNECTION_URL = postgres:5432/prefect
+              PREFECT_SERVER_DATABASE_CONNECTION_URL = 192.168.0.13:5432/prefect
               PREFECT_API_URL                        = http://<server IP>:4200/api   # UI inherits this
        │
        └─ Work Pool Registration ── register_pool.ps1   # routing 2 — pool routing: run → pool (once, after server up)
@@ -148,7 +148,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
 
      ```powershell
      .\run_server.ps1 -Yaml docker-compose.server.yml -Network mlops
-     .\register_variables.ps1 -Minio http://192.168.0.8:9000 -Postgresql 192.168.0.8:5432 -Mlflow http://192.168.0.8:5000
+     .\register_variables.ps1 -Minio http://192.168.0.8:9000 -Postgresql 192.168.0.13:5432 -Mlflow http://192.168.0.8:5000
      .\register_pool.ps1 -PoolName high_performance  -TemplateFile docker-pool-template-high.json -ConcurrencyLimit 16 -Compose docker-compose.server.yml
      .\register_pool.ps1 -PoolName low_performance -TemplateFile docker-pool-template-low.json  -ConcurrencyLimit 8  -Compose docker-compose.server.yml
      ```
@@ -222,7 +222,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
 
   ```powershell
   # on the backing host (Windows: admin PowerShell) — Linux: sudo ./backing_ports.sh open -host ... -port ...
-  .\backing_ports.ps1 open -host 192.168.0.8 -port 5432  # PostgreSQL
+  .\backing_ports.ps1 open -host 192.168.0.13 -port 5432  # PostgreSQL
   .\backing_ports.ps1 open -host 192.168.0.8 -port 9000  # MinIO
   .\backing_ports.ps1 open -host 192.168.0.8 -port 5000  # MLflow
   ```
@@ -231,7 +231,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
 
   ```powershell
   # on a consuming host (NOT the backing host) — Linux: ./backing_ports.sh check -host ... -port ...
-  .\backing_ports.ps1 check -host 192.168.0.8 -port 5432  # PostgreSQL
+  .\backing_ports.ps1 check -host 192.168.0.13 -port 5432  # PostgreSQL
   .\backing_ports.ps1 check -host 192.168.0.8 -port 9000  # MinIO
   .\backing_ports.ps1 check -host 192.168.0.8 -port 5000  # MLflow
   ```
@@ -431,7 +431,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
   backing service 주소 (MinIO·PostgreSQL·MLflow endpoint, 비밀 아님) 는 서버의 **Prefect Variable** 한 곳에 둡니다. flow 코드와 host 툴 (`catalog.py`) 이 모두 **서버에서** 읽으므로 (`Variable.get(...)`), docker-compose.env 를 컨테이너 밖에서 볼 필요가 없습니다. server 기동 후 `register_variables.sh` 로 한 번 등록합니다 (server 호스트에서 `docker compose exec prefect_server` — Work Pool Registration 과 같은 서버 부트스트랩 단계).
 
   ```bash
-  ./register_variables.sh --minio http://192.168.0.8:9000 --postgresql 192.168.0.8:5432 \
+  ./register_variables.sh --minio http://192.168.0.8:9000 --postgresql 192.168.0.13:5432 \
                           --mlflow http://192.168.0.8:5000
   ```
 
@@ -439,7 +439,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
 
   ```text
   Set variable 'minio_endpoint' to "http://192.168.0.8:9000"
-  Set variable 'postgresql_host_port' to "192.168.0.8:5432"
+  Set variable 'postgresql_host_port' to "192.168.0.13:5432"
   Set variable 'mlflow_tracking_uri' to "http://192.168.0.8:5000"
   [register_variables] set: minio_endpoint, postgresql_host_port, mlflow_tracking_uri
   ```
@@ -803,10 +803,10 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
 
   # -- Prefect metadata DB (bootstrap) ----------------------------------------
   # Where the server stores flow runs / deployments / logs. Host = the PostgreSQL host LAN IP.
-  PREFECT_SERVER_DATABASE_CONNECTION_URL=postgresql+asyncpg://CHANGE_ME:CHANGE_ME@192.168.0.8:5432/prefect
+  PREFECT_SERVER_DATABASE_CONNECTION_URL=postgresql+asyncpg://CHANGE_ME:CHANGE_ME@192.168.0.13:5432/prefect
   ```
 
-  - **메타 DB 호스트** 는 PostgreSQL 이 있는 머신의 **LAN IP** (여기선 `192.168.0.8`) — server 와 다른 머신이면 서비스 이름 `postgres` 대신 IP 를 씁니다.
+  - **메타 DB 호스트** 는 PostgreSQL 이 있는 머신의 **LAN IP** (여기선 `192.168.0.13`) — IP 로 두면 server 와 같은 머신이든 다른 머신이든 동작합니다 (같은 머신·같은 `mlops` 망이면 서비스 이름 `postgres` 도 가능).
   - `PREFECT_UI_API_URL` — 브라우저는 docker network 밖이라 `prefect_server` 대신 **LAN IP**.
   - **backing 주소 (MinIO·PostgreSQL·MLflow) 는 여기 없습니다** — 서버 Variable 로 관리합니다 ([§4 Service Address Variables](#service-address-variables)). dispatcher 는 자격증명·주소를 들지 않습니다.
 
@@ -1041,8 +1041,8 @@ backing service 포트 하나를 대상으로, action 에 따라 **도달성 확
 #   open  : open the inbound firewall (Windows Defender) for the port. Run as Administrator on the host
 #           that SERVES the port. Idempotent (skips an existing rule).
 #
-#   .\backing_ports.ps1 check -host 192.168.0.8 -port 5432
-#   .\backing_ports.ps1 open  -host 192.168.0.8 -port 5432
+#   .\backing_ports.ps1 check -host 192.168.0.13 -port 5432
+#   .\backing_ports.ps1 open  -host 192.168.0.13 -port 5432
 param(
     [Parameter(Mandatory = $true, Position = 0)]
     [ValidateSet("check", "open")]
@@ -1145,12 +1145,12 @@ server 에 backing service **주소 Variable** (MinIO·PostgreSQL·MLflow endpoi
 # them via prefect Variables from the server, so no docker-compose.env is needed outside containers.
 # Run after the server is up (run_server.ps1). Idempotent (--overwrite).
 #
-#   .\register_variables.ps1 -Minio http://192.168.0.8:9000 -Postgresql 192.168.0.8:5432 `
+#   .\register_variables.ps1 -Minio http://192.168.0.8:9000 -Postgresql 192.168.0.13:5432 `
 #                            -Mlflow http://192.168.0.8:5000
 #
 param(
     [string]$Minio      = 'http://192.168.0.8:9000',     # MinIO S3 endpoint (data download / model upload)
-    [string]$Postgresql = '192.168.0.8:5432',            # PostgreSQL host:port (catalog / optuna DBs)
+    [string]$Postgresql = '192.168.0.13:5432',            # PostgreSQL host:port (catalog / optuna DBs)
     [string]$Mlflow     = 'http://192.168.0.8:5000',     # MLflow tracking server
     [string]$Compose    = 'docker-compose.server.yml'    # the server compose (its top-level name: sets the project)
 )
