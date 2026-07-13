@@ -1,6 +1,6 @@
 # Git CLI (Command Line Interface)
 
-<sub>rev. 104</sub>
+<sub>rev. 105</sub>
 
 자주 쓰는 git 명령을 **작업 영역**과 **역할**로 분류했습니다. `<branch>` · `<remote>` · `<commit>` · `<file>` 은 실제 이름으로 바꿔 씁니다. 문법은 PowerShell · bash 공통입니다.
 
@@ -252,14 +252,18 @@ git commit -am "<message>"                 # add + commit tracked files at once 
 git commit --amend -m "<message>"          # rewrite the last commit (before it is pushed).
 ```
 
-### History — log · rev-list
+### History — log · rev-list · rev-parse
 
-이력을 훑고 커밋 수를 셉니다.
+이력을 훑고, 커밋 수를 세고, ref 를 커밋 해시로 풀어 봅니다.
 
 ```bash
 git log --oneline                          # browse commits, one line each.
 git rev-list --count HEAD                  # count all commits up to HEAD.
 git rev-list --count HEAD <file>           # count only commits that touched that file.
+
+git rev-parse main                         # print the full commit hash that main points to.
+git rev-parse --short main                 # print the shortened hash.
+git rev-parse HEAD                          # print the current commit's hash.
 ```
 
 ### Stash

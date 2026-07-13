@@ -11,7 +11,7 @@ from prefect.blocks.core import Block
 from prefect.blocks.fields import SecretDict
 from prefect.variables import Variable
 
-__version__ = "0.0.31"  # Semantic Versioning:  Version = Major.Minor.Patch
+__version__ = "0.0.32"  # Semantic Versioning:  Version = Major.Minor.Patch
 
 
 class Credentials(Block):              # ONE block holds a credential set as nested dicts (values hidden);
@@ -75,11 +75,12 @@ def pipeline(*, submitter: str = "", payload: str = "my_flow.py", prefect_block:
         env["POSTGRESQL_OPTUNA_DSN"] = (f"postgresql://{opt['username']}:{opt['password']}"
                                         f"@{opt_host}:{opt_port}/{opt['database']}")
         # run the team's payload in script/; run identity passed as CLI args; output streams to this run's logs.
-        subprocess.run(["python", payload, "--submitter", submitter,
-                        "--data_folder", data], cwd=script, env=env, check=True)
-    except subprocess.CalledProcessError as e:     # payload exited non-zero (crashed)
-        # tag the failure with whose run + message; re-raise -> run marked Failed, logs kept in the UI.
-        log.error(f"payload {payload} crashed (exit {e.returncode}) for {submitter}@{git_commit_hash}: {e}")
-        raise
+        # check=False on purpose: a payload crash is already surfaced (traceback + Failed state) in the
+        # payload's own my_flow run, so re-raising here would duplicate the error on the orchestrator run.
+        result = subprocess.run(["python", payload, "--submitter", submitter,
+                                 "--data_folder", data], cwd=script, env=env)
+        if result.returncode != 0:
+            log.warning(f"payload {payload} exited {result.returncode} for {submitter}; "
+                        f"see the '{submitter}' my_flow run for the traceback")
     finally:
         shutil.rmtree(base, ignore_errors=True)    # one cleanup removes repo/ + script/ + data/
