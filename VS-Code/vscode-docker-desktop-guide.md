@@ -1,6 +1,6 @@
 # VS Code Development with Docker Desktop and a Prebuilt Image
 
-rev. 24
+rev. 25
 <!-- 규칙: 이 파일을 수정할 때마다 위 rev 번호를 1씩 올릴 것 (git commit 여부와 무관). -->
 
 Docker Desktop에서 `yrocket/pipeline-flow:latest` 이미지로 컨테이너를 실행하고, VS Code를 컨테이너 내부에 연결하여 개발 환경으로 사용한다.
@@ -189,3 +189,45 @@ ls -la /workspace   # your opened folder's files are listed (bind mount works)
 - **Digest (다이제스트)**: 이미지 내용을 식별하는 SHA-256 해시값으로 `@sha256:<hash>` 형식으로 표기한다. 이동 가능한 태그(`:latest`)와 달리 내용이 바뀌면 값도 바뀌므로, 특정 이미지 버전을 불변으로 고정(pinning)할 때 사용한다. 예) `yrocket/pipeline-flow@sha256:abc123...`
 - **Bind mount (바인드 마운트)**: 호스트의 특정 폴더를 컨테이너 경로에 직접 연결하는 방식. `-v host:container`. 소스코드 영속화에 사용.
 - **Named volume (네임드 볼륨)**: Docker가 관리하는 영속 저장소. 컨테이너 삭제와 무관하게 데이터가 유지되어 캐시·DB 등에 사용.
+
+---
+
+## Appendix B. Virtual Memory
+
+Docker Desktop(Windows)은 WSL2 경량 VM 위에서 리눅스 엔진을 실행한다. 이 VM이 쓰는 메모리가 작업관리자에 **`vmmem`**(최신 Windows 11에서는 **`vmmemWSL`**)로 표시된다. 유휴 상태에서도 메모리를 잘 반환하지 않아 크게 잡혀 보일 수 있다.
+
+**OS 비교**
+
+| OS | Docker 실행 방식 | `vmmem` 프로세스 | 유휴 메모리 |
+|----|------------------|------------------|-------------|
+| Windows 10 | WSL2 VM 위 리눅스 엔진 | 있음 (`vmmem`) | 잘 안 반환 → 절약 설정 필요 |
+| Windows 11 | 동일 (WSL2) | 있음 (`vmmem` 또는 `vmmemWSL`) | 동일 → 절약 설정 필요 |
+| Ubuntu (리눅스) | Docker Engine 네이티브(호스트 커널) | 없음 | 커널이 자동 회수 → 문제 없음 |
+
+- vmmem 이슈는 Windows 버전이 아니라 **WSL2(VM) 방식** 때문이며 Win10·Win11 공통이다. Windows 11이라고 자동 면제되지 않으며, 관건은 WSL 버전이다.
+- Ubuntu는 VM이 없어 `vmmem` 자체가 없고 별도 조치가 불필요하다.
+
+**메모리 절약 (Windows 10 / 11 공통)**
+
+1. 사용자 홈(`C:\Users\<user>\.wslconfig`)에 설정 파일 생성:
+
+```ini
+[wsl2]
+memory=4GB          # max RAM the WSL2 VM may use (tune to your PC)
+processors=4        # optional CPU limit
+swap=2GB
+
+[experimental]
+autoMemoryReclaim=gradual   # return idle memory back to Windows
+```
+
+2. 적용:
+
+```powershell
+wsl --update      # ensure a recent WSL (autoMemoryReclaim support)
+wsl --shutdown    # then restart Docker Desktop
+```
+
+3. 개발하지 않을 때는 `wsl --shutdown` 또는 Docker Desktop을 **Quit** → `vmmem` 메모리가 즉시 해제된다.
+
+- WSL2 백엔드에서는 Docker Desktop `Settings`에 메모리 슬라이더가 없고 위 `.wslconfig`가 그 역할을 한다. (Hyper-V 백엔드는 `Settings → Resources`에 슬라이더가 있음)
