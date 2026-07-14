@@ -1,6 +1,6 @@
 # VS Code Development with Docker Desktop and a Prebuilt Image
 
-rev. 8
+rev. 9
 <!-- 규칙: 이 파일을 수정할 때마다 위 rev 번호를 1씩 올릴 것 (git commit 여부와 무관). -->
 
 - 목적: Docker Desktop에서 `yrocket/pipeline-flow:latest` 이미지로 컨테이너를 실행하고, VS Code를 컨테이너 내부에 연결하여 개발 환경으로 사용.
@@ -20,12 +20,12 @@ rev. 8
                 ▼
 ┌─────────────────────────────────────────────────────────────┐
 │  CONTAINER  (running instance · ephemeral)                  │
-│  3A. $ docker run --rm -it -v "$(pwd)":/workspace \         │
+│  3.1 .devcontainer/devcontainer.json                        │
+│      → VS Code: open folder → F1 → Reopen in Container      │
+│  3.2 $ docker run --rm -it -v "$(pwd)":/workspace \         │
 │          -w /workspace my-flow:dev bash                     │
-│       → VS Code: F1 → Attach to Running Container           │
-│  3B. .devcontainer/devcontainer.json                        │
-│       → VS Code: open folder → F1 → Reopen in Container     │
-│       (3A and 3B are alternatives — choose one)             │
+│      → VS Code: F1 → Attach to Running Container            │
+│      (3.1 and 3.2 are alternatives — choose one)            │
 └───────────────┬─────────────────────────────────────────────┘
                 │  bind mount / volume (-v)
                 ▼
@@ -113,12 +113,7 @@ VS Code를 컨테이너에 연결하는 방식은 두 가지다.
 3. VS Code가 이미지 pull/빌드 → 컨테이너 실행 → 창을 컨테이너 내부로 다시 연다.
 4. 이후 터미널, 디버깅, 확장이 모두 컨테이너 내부에서 동작.
 
-Ephemeral 관점(이 방식의 한계):
-
-- 여기서 "창"은 **컨테이너에 연결된 VS Code 창**을 말한다. 그 창을 닫으면(또는 `Close Remote Connection` 실행) VS Code는 컨테이너를 **stopped 상태로 만든다 (실행 종료, 메모리에서 삭제).**
-- 초기 상태로 리셋: `F1` → `Dev Containers: Rebuild Container` (또는 `Rebuild Without Cache`) — 기존 컨테이너를 버리고 새로 만든다.
-- 종료 시 **컨테이너가** 자동 삭제되는(이미지는 그대로 유지) 완전한 ephemeral이 필요하면 3.2(Container 사용)를 쓴다.
-- 소스는 호스트에 유지되므로 rebuild 시에도 코드는 보존됨.
+참고: 컨테이너에 연결된 VS Code 창을 닫으면 컨테이너는 stopped 상태가 되고(실행 종료), 삭제되지 않아 다음에 재사용된다. 초기화하려면 `F1` → `Dev Containers: Rebuild Container`. 소스는 호스트에 있으므로 rebuild 해도 보존된다.
 
 ### 3.2 Using a Container (docker run + Attach)
 
@@ -151,31 +146,13 @@ Attach 절차:
 3. `flow-dev` 선택 → 새 VS Code 창이 컨테이너 내부를 연다.
 4. `File → Open Folder → /workspace`.
 
-Ephemeral 관점(캐시 유지):
-
-- `--rm`이면 종료 시 컨테이너가 자동 삭제되어 진정한 일회용이 된다.
-- 문제: pip/npm이 받은 패키지 캐시는 보통 컨테이너 내부 파일시스템에 쌓인다. `--rm`으로 컨테이너를 지우면 그 캐시도 함께 사라지므로, 다음에 다시 실행할 때마다 같은 패키지를 처음부터 새로 내려받게 된다.
-- 해결: 그 캐시 경로를 **named volume**(Docker가 컨테이너 바깥에서 관리하는 영속 저장소)에 연결한다. 그러면 캐시는 컨테이너가 아니라 볼륨에 저장되므로, 컨테이너를 `--rm`으로 지워도 볼륨은 남는다. 다음 실행 때 같은 볼륨이 다시 연결되어 이전에 받은 캐시를 그대로 재사용한다(= 재다운로드 없음). 이것이 "컨테이너를 삭제해도 캐시는 유지된다"의 의미다.
-
-named volume 설정 방법:
-
-- 형식: `-v <볼륨이름>:<컨테이너 내부 경로>` — 예) `-v flow-cache:/path`.
-- 왼쪽 `flow-cache`는 Docker가 관리하는 볼륨 이름(존재하지 않으면 자동 생성), 오른쪽은 캐시가 쌓이는 컨테이너 내부 경로.
-- 바인드 마운트(`-v /호스트절대경로:/컨테이너경로`)와 달리, 왼쪽이 호스트 경로가 아니라 **이름**이면 named volume이 된다.
+참고: `--rm` 컨테이너는 종료 시 사라지므로 컨테이너 안에서 `pip install` 한 것도 함께 없어진다. pip/npm 캐시처럼 재다운로드가 아까운 경로만 named volume(`-v <이름>:<컨테이너경로>`)으로 빼두면 컨테이너와 별개로 유지된다.
 
 ```bash
 docker run --rm -it \
   -v "$(pwd)":/workspace \
-  -v flow-cache:/home/vscode/.cache \   # named volume: cache persists across container removal
+  -v flow-cache:/home/vscode/.cache \   # cache kept in a named volume
   my-flow:dev bash
-```
-
-볼륨 관리 명령:
-
-```bash
-docker volume ls                 # list volumes
-docker volume inspect flow-cache # details
-docker volume rm flow-cache      # remove the cache entirely
 ```
 
 ---
