@@ -1,6 +1,6 @@
 # Docker CLI (Command Line Interface)
 
-<sub>rev. 105</sub>
+<sub>rev. 107</sub>
 
 각 컴포넌트를 도커로 띄우고 운영할 때 공통으로 쓰는 명령을 모았습니다.
 
@@ -81,6 +81,19 @@ docker compose -p <Project Name> -f <file>.yml up -d --scale <service>=3
 > compose 가 만드는 컨테이너 이름은 `<Project Name>-<Service Name>-<Replica Number>` 형식입니다. Replica Number 는 보통 `1` 하나지만, `--scale <service>=3` 처럼 늘리면 `-2`·`-3` 이 추가로 생깁니다.
 
 ## 4. Operations
+
+### Container States
+
+컨테이너는 명령에 따라 아래 상태를 오갑니다.
+
+| State | Command | Process | CPU | Memory | Location |
+|-------|---------|---------|-----|--------|----------|
+| Running | `docker run` · `docker compose up` | 실행 중 | 사용 | 사용 | 메모리 + 디스크 |
+| Stopped | `docker stop` | 종료됨 | 안 씀 | 안 씀 | 디스크에 상태만 |
+| Paused | `docker pause` | 얼려짐 | 안 씀 | 점유 (그대로) | 메모리에 그대로 |
+| Removed | `docker rm` · `docker run --rm` | 없음 | 없음 | 없음 | 완전 삭제 |
+
+> `pause` 는 프로세스를 얼려 CPU 는 안 쓰지만 **RAM 은 그대로 점유**합니다 (`docker unpause` 로 재개). `stop` 은 RAM 을 비우고 디스크에 상태만 남기며, `rm` 은 그 상태까지 완전히 지웁니다.
 
 ### Status & Listing
 
@@ -167,6 +180,17 @@ services:
 ```
 
 > 상한을 넘기면 도커가 그 컨테이너를 강제로 종료합니다 (OOM kill — `docker ps -a` 에서 `Exited` 로 보임). 메모리를 많이 쓰는 학습/추론 작업일수록 상한을 넉넉히 두되, 호스트 전체 메모리보다는 작게 잡아 다른 컨테이너의 몫을 남겨 둡니다.
+
+### Disk & Cleanup
+
+이미지·컨테이너·볼륨·빌드 캐시가 쌓여 디스크를 먹으면 정리합니다.
+
+```powershell
+docker system df                      # show what's using disk (images, containers, volumes, cache).
+docker system prune -a --volumes      # remove unused images/cache/volumes (deletes — careful).
+```
+
+> `prune -a --volumes` 는 **떠 있지 않은** 이미지·컨테이너와 **아무 데도 안 붙은** 볼륨·캐시를 지웁니다. 되살릴 수 없으니 지우기 전에 `docker system df` 로 무엇이 빠지는지 확인합니다.
 
 ## 5. Container Access
 

@@ -1,4 +1,4 @@
-# __version__ = "0.0.13"
+# __version__ = "0.0.14"
 
 # example/dry_run/my_flow_trigger.ps1 — verify the dry-run flow (my_flow.py) at three stages.
 #   -Mode local : run my_flow.py offline here (--run-on local: no Prefect server, no MLflow) - fastest sanity check.
@@ -8,7 +8,7 @@
 #
 #   .\my_flow_trigger.ps1
 #   .\my_flow_trigger.ps1 -Mode serve
-#   .\my_flow_trigger.ps1 -Mode pool -PrefectBlock <block> -GitRepo https://github.com/<u>/<repo>.git -GitCommit <sha>
+#   .\my_flow_trigger.ps1 -Mode pool -PrefectBlock <block> -GitRepo https://github.com/<u>/<repo>.git -GitCommit <sha> [-Payload <file.py>]
 
 param(
     [ValidateSet("local", "serve", "pool")]
@@ -20,7 +20,8 @@ param(
     [string]$GitCommit = "dryrun",  # pool: git_commit_hash (local runs offline, ignores it)
     [string]$DataFolder = "",  # local/serve; default <script>\data
     [string]$GitRepo = "",  # pool: repo pipeline.py fetches
-    [string]$MinioKey = "electric_power_consumption/v0/powerconsumption.csv"  # pool: full OBJECT key (not a prefix)
+    [string]$MinioKey = "electric_power_consumption/v0/powerconsumption.csv",  # pool: full OBJECT key (not a prefix)
+    [string]$Payload = "my_flow.py"  # pool: payload script pipeline.py runs; must exist in the git repo + take --submitter/--data_folder
 )
 
 if (-not $Submitter) {
@@ -68,6 +69,6 @@ switch ($Mode) {
         }
         prefect deployment run "$PrefectDeployment" `
             -p submitter=$Submitter -p prefect_block=$PrefectBlock -p git_repo=$GitRepo `
-            -p git_commit_hash=$GitCommit -p minio_key=$MinioKey
+            -p git_commit_hash=$GitCommit -p minio_key=$MinioKey -p payload=$Payload
     }
 }
