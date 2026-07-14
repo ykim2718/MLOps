@@ -1,6 +1,6 @@
 # VS Code Development with Docker Desktop and a Prebuilt Image
 
-rev. 28
+rev. 29
 <!-- 규칙: 이 파일을 수정할 때마다 위 rev 번호를 1씩 올릴 것 (git commit 여부와 무관). -->
 
 Docker Desktop에서 `yrocket/pipeline-flow:latest` 이미지로 컨테이너를 실행하고, VS Code를 컨테이너 내부에 연결하여 개발 환경으로 사용한다.
@@ -210,14 +210,14 @@ Docker Desktop(Windows)은 WSL2 경량 VM 위에서 리눅스 엔진을 실행�
 
 **메모리 사용량 확인**
 
-VM(리눅스) 내부 관점에서 실제 사용량을 확인한다.
+`wsl --` 뒤의 명령은 Windows 셸(cmd/PowerShell)에서 실행하며, WSL2 리눅스가 보고하는 메모리 사용량을 보여준다.
 
 ```powershell
 wsl -- free -h            # memory the WSL2 VM actually uses (used/free/buff-cache)
 wsl -- cat /proc/meminfo  # more detail
 ```
 
-- 호스트 관점(작업관리자와 동일한 vmmem 크기)은 PowerShell `Get-Process vmmem, vmmemWSL`로 확인한다.
+- 작업관리자에 보이는 `vmmem` 크기는 PowerShell `Get-Process vmmem, vmmemWSL`로 확인한다.
 
 **메모리 절약 (Windows 10 / 11 공통)**
 
