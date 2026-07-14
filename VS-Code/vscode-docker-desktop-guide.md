@@ -1,6 +1,6 @@
 # VS Code Development with Docker Desktop and a Prebuilt Image
 
-rev. 5
+rev. 6
 <!-- 규칙: 이 파일을 수정할 때마다 위 rev 번호를 1씩 올릴 것 (git commit 여부와 무관). -->
 
 - 목적: Docker Desktop에서 `yrocket/pipeline-flow:latest` 이미지로 컨테이너를 실행하고, VS Code를 컨테이너 내부에 연결하여 개발 환경으로 사용.
@@ -35,6 +35,23 @@ rev. 5
 - 이미지: 삭제하지 않고 재사용. `pull` 1회로 로컬 캐시됨.
 - 컨테이너: `--rm` 기반 일회용 사용 권장. 매 실행마다 초기 상태 → 환경 오염 및 재현성 문제 방지.
 - 소스코드: 컨테이너 내부에 두지 않고 호스트 폴더를 볼륨 마운트하여 영속화.
+
+주요 명령 흐름:
+
+```bash
+# 1) Prepare the image (first time only)
+docker pull yrocket/pipeline-flow:latest
+
+# 2) (optional) Build with extra tools
+docker build -t my-flow:dev .
+
+# A) Container approach: ephemeral container + Attach
+docker run --rm -it -v "$(pwd)":/workspace -w /workspace my-flow:dev bash
+#   → VS Code: F1 → Attach to Running Container
+
+# B) Image approach: devcontainer.json
+#   → VS Code: open folder → F1 → Reopen in Container
+```
 
 ---
 
@@ -128,8 +145,9 @@ VS Code를 컨테이너에 연결하는 방식은 두 가지다.
 
 Ephemeral 관점(이 방식의 한계):
 
-- devcontainer.json 방식의 컨테이너는 창을 닫아도 자동 삭제되지 않고 재사용됨.
-- 초기 상태로 리셋: `F1` → `Dev Containers: Rebuild Container` (또는 `Rebuild Without Cache`).
+- 여기서 "창"은 **컨테이너에 연결된 VS Code 창**을 말한다. 그 창을 닫으면(또는 `Close Remote Connection` 실행) VS Code는 컨테이너를 **정지(stop)** 시키지만 **삭제하지는 않는다.**
+- 즉 창을 닫았다고 컨테이너가 계속 실행되는 것은 아니며, **정지된 상태로 남아 있다가** 다음에 `Reopen in Container` 할 때 **같은 컨테이너를 다시 시작해 재사용**한다. (완전히 새로 만드는 것이 아니라 이전 컨테이너를 이어 씀 → 진짜 일회용이 아님)
+- 초기 상태로 리셋: `F1` → `Dev Containers: Rebuild Container` (또는 `Rebuild Without Cache`) — 기존 컨테이너를 버리고 새로 만든다.
 - 종료 시 자동 삭제되는 완전한 ephemeral이 필요하면 4.2(Container 사용)를 쓴다.
 - 소스는 호스트에 유지되므로 rebuild 시에도 코드는 보존됨.
 
@@ -167,7 +185,14 @@ Attach 절차:
 Ephemeral 관점(캐시 유지):
 
 - `--rm`이면 종료 시 컨테이너가 자동 삭제되어 진정한 일회용이 된다.
-- pip/npm 등 무거운 캐시는 named volume으로 분리하면 컨테이너를 삭제해도 캐시는 유지된다.
+- 문제: pip/npm이 받은 패키지 캐시는 보통 컨테이너 내부 파일시스템에 쌓인다. `--rm`으로 컨테이너를 지우면 그 캐시도 함께 사라지므로, 다음에 다시 실행할 때마다 같은 패키지를 처음부터 새로 내려받게 된다.
+- 해결: 그 캐시 경로를 **named volume**(Docker가 컨테이너 바깥에서 관리하는 영속 저장소)에 연결한다. 그러면 캐시는 컨테이너가 아니라 볼륨에 저장되므로, 컨테이너를 `--rm`으로 지워도 볼륨은 남는다. 다음 실행 때 같은 볼륨이 다시 연결되어 이전에 받은 캐시를 그대로 재사용한다(= 재다운로드 없음). 이것이 "컨테이너를 삭제해도 캐시는 유지된다"의 의미다.
+
+named volume 설정 방법:
+
+- 형식: `-v <볼륨이름>:<컨테이너 내부 경로>` — 예) `-v flow-cache:/path`.
+- 왼쪽 `flow-cache`는 Docker가 관리하는 볼륨 이름(존재하지 않으면 자동 생성), 오른쪽은 캐시가 쌓이는 컨테이너 내부 경로.
+- 바인드 마운트(`-v /호스트절대경로:/컨테이너경로`)와 달리, 왼쪽이 호스트 경로가 아니라 **이름**이면 named volume이 된다.
 
 ```bash
 docker run --rm -it \
@@ -176,36 +201,37 @@ docker run --rm -it \
   my-flow:dev bash
 ```
 
----
-
-## 5. Workflow Summary
+볼륨 관리 명령:
 
 ```bash
-# 1) Prepare the image (first time only)
-docker pull yrocket/pipeline-flow:latest
-
-# 2) (optional) Build with extra tools
-docker build -t my-flow:dev .
-
-# A) Container approach: ephemeral container + Attach
-docker run --rm -it -v "$(pwd)":/workspace -w /workspace my-flow:dev bash
-#   → VS Code: F1 → Attach to Running Container
-
-# B) Image approach: devcontainer.json
-#   → VS Code: open folder → F1 → Reopen in Container
+docker volume ls                 # list volumes
+docker volume inspect flow-cache # details
+docker volume rm flow-cache      # remove the cache entirely
 ```
-
-| 목적 | 명령/조작 |
-|------|-----------|
-| 초기 상태로 재시작 | `Dev Containers: Rebuild Container` |
-| 컨테이너 내부 터미널 | VS Code 터미널(`` Ctrl+` ``) |
-| 포트 노출 | `forwardPorts` 또는 `docker run -p` |
-| 캐시 유지 | named volume (`-v flow-cache:/path`) |
-| 이미지 버전 고정 | `@sha256:<digest>` |
 
 ---
 
-## 6. Troubleshooting
+## 5. References
+
+- Dev Containers: https://code.visualstudio.com/docs/devcontainers/containers
+- devcontainer.json 레퍼런스: https://containers.dev/implementors/json_reference/
+- Docker Desktop: https://docs.docker.com/desktop/
+- Docker volumes: https://docs.docker.com/storage/volumes/
+
+---
+
+## Appendix A. Terminology
+
+- **Image (이미지)**: 컨테이너 실행에 필요한 파일시스템과 설정을 담은 읽기 전용 템플릿. `docker pull`로 취득해 로컬에 캐시된다.
+- **Container (컨테이너)**: 이미지로부터 생성된 실행 인스턴스. `docker run` 시마다 새로 만들어진다.
+- **Ephemeral (일회용)**: 종료와 함께 삭제되어 상태가 남지 않는 컨테이너. `docker run --rm`으로 실현한다.
+- **Digest (다이제스트)**: 이미지 내용을 식별하는 SHA-256 해시값으로 `@sha256:<hash>` 형식으로 표기한다. 이동 가능한 태그(`:latest`)와 달리 내용이 바뀌면 값도 바뀌므로, 특정 이미지 버전을 불변으로 고정(pinning)할 때 사용한다. 예) `yrocket/pipeline-flow@sha256:abc123...`
+- **Bind mount (바인드 마운트)**: 호스트의 특정 폴더를 컨테이너 경로에 직접 연결하는 방식. `-v host:container`. 소스코드 영속화에 사용.
+- **Named volume (네임드 볼륨)**: Docker가 관리하는 영속 저장소. 컨테이너 삭제와 무관하게 데이터가 유지되어 캐시·DB 등에 사용.
+
+---
+
+## Appendix B. Troubleshooting
 
 - **`Cannot connect to the Docker daemon`**
   - 원인: Docker Desktop 미실행
@@ -228,23 +254,3 @@ docker run --rm -it -v "$(pwd)":/workspace -w /workspace my-flow:dev bash
 - **디스크 부족**
   - 원인: 이미지/컨테이너 누적
   - 해결: `docker system prune` (삭제 주의)
-
----
-
-## 7. References
-
-- Dev Containers: https://code.visualstudio.com/docs/devcontainers/containers
-- devcontainer.json 레퍼런스: https://containers.dev/implementors/json_reference/
-- Docker Desktop: https://docs.docker.com/desktop/
-- Docker volumes: https://docs.docker.com/storage/volumes/
-
----
-
-## Appendix A. Terminology
-
-- **Image (이미지)**: 컨테이너 실행에 필요한 파일시스템과 설정을 담은 읽기 전용 템플릿. `docker pull`로 취득해 로컬에 캐시된다.
-- **Container (컨테이너)**: 이미지로부터 생성된 실행 인스턴스. `docker run` 시마다 새로 만들어진다.
-- **Ephemeral (일회용)**: 종료와 함께 삭제되어 상태가 남지 않는 컨테이너. `docker run --rm`으로 실현한다.
-- **Digest (다이제스트)**: 이미지 내용을 식별하는 SHA-256 해시값으로 `@sha256:<hash>` 형식으로 표기한다. 이동 가능한 태그(`:latest`)와 달리 내용이 바뀌면 값도 바뀌므로, 특정 이미지 버전을 불변으로 고정(pinning)할 때 사용한다. 예) `yrocket/pipeline-flow@sha256:abc123...`
-- **Bind mount (바인드 마운트)**: 호스트의 특정 폴더를 컨테이너 경로에 직접 연결하는 방식. `-v host:container`. 소스코드 영속화에 사용.
-- **Named volume (네임드 볼륨)**: Docker가 관리하는 영속 저장소. 컨테이너 삭제와 무관하게 데이터가 유지되어 캐시·DB 등에 사용.
