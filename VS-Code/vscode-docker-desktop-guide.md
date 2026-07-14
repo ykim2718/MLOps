@@ -1,6 +1,6 @@
 # VS Code Development with Docker Desktop and a Prebuilt Image
 
-rev. 9
+rev. 10
 <!-- 규칙: 이 파일을 수정할 때마다 위 rev 번호를 1씩 올릴 것 (git commit 여부와 무관). -->
 
 - 목적: Docker Desktop에서 `yrocket/pipeline-flow:latest` 이미지로 컨테이너를 실행하고, VS Code를 컨테이너 내부에 연결하여 개발 환경으로 사용.
@@ -174,29 +174,3 @@ docker run --rm -it \
 - **Digest (다이제스트)**: 이미지 내용을 식별하는 SHA-256 해시값으로 `@sha256:<hash>` 형식으로 표기한다. 이동 가능한 태그(`:latest`)와 달리 내용이 바뀌면 값도 바뀌므로, 특정 이미지 버전을 불변으로 고정(pinning)할 때 사용한다. 예) `yrocket/pipeline-flow@sha256:abc123...`
 - **Bind mount (바인드 마운트)**: 호스트의 특정 폴더를 컨테이너 경로에 직접 연결하는 방식. `-v host:container`. 소스코드 영속화에 사용.
 - **Named volume (네임드 볼륨)**: Docker가 관리하는 영속 저장소. 컨테이너 삭제와 무관하게 데이터가 유지되어 캐시·DB 등에 사용.
-
----
-
-## Appendix B. Troubleshooting
-
-- **`Cannot connect to the Docker daemon`**
-  - 원인: Docker Desktop 미실행
-  - 해결: 실행 상태 확인 후 재시도
-- **`docker: name is already in use`**
-  - 원인: 동일 `--name` 컨테이너 잔존
-  - 해결: `docker rm -f flow-dev` 후 재실행
-- **코드 수정 소실**
-  - 원인: 볼륨 마운트 누락
-  - 해결: `-v host:container` 또는 devcontainer mount 확인
-- **VS Code 확장 미표시**
-  - 원인: 로컬에만 설치됨
-  - 해결: `customizations.vscode.extensions`에 추가
-- **Windows 경로 오류**
-  - 원인: `$(pwd)` 미지원
-  - 해결: PowerShell은 `${PWD}` 사용
-- **pull 지연/재현 불가**
-  - 원인: `:latest` 변동
-  - 해결: digest 고정 (`@sha256:...`)
-- **디스크 부족**
-  - 원인: 이미지/컨테이너 누적
-  - 해결: `docker system prune` (삭제 주의)
