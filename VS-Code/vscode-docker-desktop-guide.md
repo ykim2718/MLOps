@@ -1,6 +1,6 @@
 # VS Code Development with Docker Desktop and a Prebuilt Image
 
-rev. 6
+rev. 7
 <!-- 규칙: 이 파일을 수정할 때마다 위 rev 번호를 1씩 올릴 것 (git commit 여부와 무관). -->
 
 - 목적: Docker Desktop에서 `yrocket/pipeline-flow:latest` 이미지로 컨테이너를 실행하고, VS Code를 컨테이너 내부에 연결하여 개발 환경으로 사용.
@@ -8,7 +8,7 @@ rev. 6
 
 ---
 
-## 1. Concept Model
+## 1. Work Flow
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
@@ -38,19 +38,29 @@ rev. 6
 
 주요 명령 흐름:
 
-```bash
-# 1) Prepare the image (first time only)
-docker pull yrocket/pipeline-flow:latest
-
-# 2) (optional) Build with extra tools
-docker build -t my-flow:dev .
-
-# A) Container approach: ephemeral container + Attach
-docker run --rm -it -v "$(pwd)":/workspace -w /workspace my-flow:dev bash
-#   → VS Code: F1 → Attach to Running Container
-
-# B) Image approach: devcontainer.json
-#   → VS Code: open folder → F1 → Reopen in Container
+```
+┌──────────────────────────────────────────────────────────┐
+│ 1. Pull image (first time only)                          │
+│    $ docker pull yrocket/pipeline-flow:latest            │
+└──────────────────────────────────────────────────────────┘
+                           │
+                           ▼
+┌──────────────────────────────────────────────────────────┐
+│ 2. (optional) Build with extra tools                     │
+│    $ docker build -t my-flow:dev .                       │
+└──────────────────────────────────────────────────────────┘
+                           │
+                           ▼
+┌──────────────────────────────────────────────────────────┐
+│ 3A. Container approach: ephemeral + Attach               │
+│     $ docker run --rm -it -v "$(pwd)":/workspace \       │
+│         -w /workspace my-flow:dev bash                   │
+│     → VS Code: F1 → Attach to Running Container          │
+├──────────────────────────────────────────────────────────┤
+│ 3B. Image approach: devcontainer.json                    │
+│     → VS Code: open folder → F1 → Reopen in Container    │
+└──────────────────────────────────────────────────────────┘
+     (3A and 3B are alternatives — choose one)
 ```
 
 ---
@@ -145,10 +155,9 @@ VS Code를 컨테이너에 연결하는 방식은 두 가지다.
 
 Ephemeral 관점(이 방식의 한계):
 
-- 여기서 "창"은 **컨테이너에 연결된 VS Code 창**을 말한다. 그 창을 닫으면(또는 `Close Remote Connection` 실행) VS Code는 컨테이너를 **정지(stop)** 시키지만 **삭제하지는 않는다.**
-- 즉 창을 닫았다고 컨테이너가 계속 실행되는 것은 아니며, **정지된 상태로 남아 있다가** 다음에 `Reopen in Container` 할 때 **같은 컨테이너를 다시 시작해 재사용**한다. (완전히 새로 만드는 것이 아니라 이전 컨테이너를 이어 씀 → 진짜 일회용이 아님)
+- 여기서 "창"은 **컨테이너에 연결된 VS Code 창**을 말한다. 그 창을 닫으면(또는 `Close Remote Connection` 실행) VS Code는 컨테이너를 **stopped 상태로 만든다 (실행 종료, 메모리에서 삭제).**
 - 초기 상태로 리셋: `F1` → `Dev Containers: Rebuild Container` (또는 `Rebuild Without Cache`) — 기존 컨테이너를 버리고 새로 만든다.
-- 종료 시 자동 삭제되는 완전한 ephemeral이 필요하면 4.2(Container 사용)를 쓴다.
+- 종료 시 **컨테이너가** 자동 삭제되는(이미지는 그대로 유지) 완전한 ephemeral이 필요하면 4.2(Container 사용)를 쓴다.
 - 소스는 호스트에 유지되므로 rebuild 시에도 코드는 보존됨.
 
 ### 4.2 Using a Container (docker run + Attach)
