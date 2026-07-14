@@ -1,6 +1,6 @@
 # VS Code Development with Docker Desktop and a Prebuilt Image
 
-rev. 15
+rev. 16
 <!-- 규칙: 이 파일을 수정할 때마다 위 rev 번호를 1씩 올릴 것 (git commit 여부와 무관). -->
 
 - 목적: Docker Desktop에서 `yrocket/pipeline-flow:latest` 이미지로 컨테이너를 실행하고, VS Code를 컨테이너 내부에 연결하여 개발 환경으로 사용.
@@ -11,27 +11,29 @@ rev. 15
 ## 1. Work Flow
 
 ```
-┌─ Docker Desktop (host runtime) ──────────────────────────────────┐
-│                                                                  │
-│  Prebuilt Image   yrocket/pipeline-flow:latest                   │
-│    2.1 $ docker pull      2.2 (optional) $ docker build          │
-│              │                                                   │
-│              │  run: create a container from the image           │
-│              ▼                                                   │
-│  Container (ephemeral)  ◀────connect────  VS Code                │
-│              │                            3.2 Reopen in Container│
-│              │                            3.3 Attach to Container│
-│              │  bind mount (-v)                                  │
-│              ▼                                                   │
-│  /workspace  ⇄  source folder on host (persistent)               │
-│                                                                  │
-└──────────────────────────────────────────────────────────────────┘
+┌── Docker Desktop (host runtime) ───────────────────────────────┐
+│                                                                │
+│  ┌────────────────────────┐           ┌────────────────────┐   │
+│  │ Prebuilt Image         │           │ Container          │   │
+│  │ yrocket/pipeline-flow  │───run────▶│ (ephemeral)        │   │
+│  │ (docker pull / build)  │           │                    │   │
+│  └────────────────────────┘           └────────────────────┘   │
+│                                                 ▲              │
+└─────────────────────────────────────────────────│──────────────┘
+                                                  │  connect:
+                                                  │  Reopen / Attach
+                                        ┌────────────────────┐
+                                        │ VS Code            │
+                                        │ (Dev Containers)   │
+                                        └────────────────────┘
+
+  bind mount (-v):  host source folder  ⇄  Container:/workspace
 ```
 
 - Docker Desktop: 호스트에서 이미지·컨테이너를 실행하는 엔진. 아래 모든 동작이 그 위에서 일어난다.
-- Prebuilt Image: `docker pull`로 받아 로컬 캐시. 컨테이너의 원본 템플릿(2장).
-- Container: 이미지로부터 생성되는 일회용 실행 인스턴스. VS Code가 여기에 연결된다(3장).
-- VS Code: `Reopen in Container`(3.2) 또는 `Attach`(3.3)로 컨테이너 내부에 붙어 개발.
+- Prebuilt Image: `docker pull`로 받아 로컬 캐시되는 컨테이너의 원본 템플릿.
+- Container: 이미지로부터 생성되는 일회용 실행 인스턴스. VS Code가 여기에 연결된다.
+- VS Code: `Reopen in Container` 또는 `Attach`로 컨테이너 내부에 붙어 개발.
 - Workspace: 호스트 소스 폴더를 컨테이너 `/workspace`에 bind mount → 컨테이너 삭제와 무관하게 영속.
 
 ---
