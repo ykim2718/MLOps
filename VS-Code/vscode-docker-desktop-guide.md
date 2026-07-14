@@ -1,6 +1,6 @@
 # VS Code Development with Docker Desktop and a Prebuilt Image
 
-rev. 10
+rev. 11
 <!-- 규칙: 이 파일을 수정할 때마다 위 rev 번호를 1씩 올릴 것 (git commit 여부와 무관). -->
 
 - 목적: Docker Desktop에서 `yrocket/pipeline-flow:latest` 이미지로 컨테이너를 실행하고, VS Code를 컨테이너 내부에 연결하여 개발 환경으로 사용.
@@ -110,7 +110,7 @@ VS Code를 컨테이너에 연결하는 방식은 두 가지다.
 
 1. VS Code로 프로젝트 폴더를 연다.
 2. `F1` → `Dev Containers: Reopen in Container` (또는 우측 하단 `Reopen in Container` 알림).
-3. VS Code가 이미지 pull/빌드 → 컨테이너 실행 → 창을 컨테이너 내부로 다시 연다.
+3. VS Code가 컨테이너 생성·실행 → 창을 컨테이너 내부로 다시 연다. 이때 이미지가 로컬에 없으면 pull, `build`(Dockerfile)를 지정한 경우에만 build 한다. 이미 이미지를 받아뒀고 도구 추가(Dockerfile)가 없으면 pull/build는 건너뛰고 캐시된 이미지로 바로 컨테이너를 만든다.
 4. 이후 터미널, 디버깅, 확장이 모두 컨테이너 내부에서 동작.
 
 참고: 컨테이너에 연결된 VS Code 창을 닫으면 컨테이너는 stopped 상태가 되고(실행 종료), 삭제되지 않아 다음에 재사용된다. 초기화하려면 `F1` → `Dev Containers: Rebuild Container`. 소스는 호스트에 있으므로 rebuild 해도 보존된다.
