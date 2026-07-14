@@ -1,6 +1,6 @@
 # VS Code Development with Docker Desktop and a Prebuilt Image
 
-rev. 4
+rev. 5
 <!-- 규칙: 이 파일을 수정할 때마다 위 rev 번호를 1씩 올릴 것 (git commit 여부와 무관). -->
 
 - 목적: Docker Desktop에서 `yrocket/pipeline-flow:latest` 이미지로 컨테이너를 실행하고, VS Code를 컨테이너 내부에 연결하여 개발 환경으로 사용.
@@ -48,8 +48,8 @@ rev. 4
 | WSL2 (Windows) | Docker Desktop 백엔드. 설치 시 자동 안내 | `wsl -l -v` |
 
 ```bash
-docker version          # Client / Server 모두 출력되면 정상
-docker run hello-world  # 동작 확인
+docker version          # OK if both Client and Server are shown
+docker run hello-world  # smoke test
 ```
 
 ---
@@ -63,7 +63,7 @@ docker pull yrocket/pipeline-flow:latest
 docker images | grep pipeline-flow
 ```
 
-- `:latest`는 원격 변경 가능성이 있어 재현성이 낮음. 장기 프로젝트는 digest 고정 권장: `docker pull yrocket/pipeline-flow@sha256:<digest>` (digest 정의는 Appendix A 참조).
+- `:latest`는 원격 변경 가능성이 있어 재현성이 낮음. 장기 프로젝트는 digest 고정 권장: `docker pull yrocket/pipeline-flow@sha256:<digest>` (digest 정의는 [Appendix A](#appendix-a-terminology) 참조).
 
 ### 3.2 Wrap with a Dockerfile
 
@@ -73,7 +73,7 @@ docker images | grep pipeline-flow
 # Dockerfile
 FROM yrocket/pipeline-flow:latest
 
-# 추가 도구 예시 (베이스가 apt 계열일 때. 패키지 매니저는 이미지에 맞게 조정)
+# Example: add tools (when the base is apt-based; adjust the package manager to the image)
 # RUN apt-get update && apt-get install -y --no-install-recommends \
 #     git curl vim ca-certificates \
 #  && rm -rf /var/lib/apt/lists/*
@@ -85,8 +85,6 @@ WORKDIR /workspace
 ```bash
 docker build -t my-flow:dev .
 ```
-
-- Dockerfile은 이미지를 생성하며, 영속 컨테이너를 만드는 것이 아님. Dockerfile 사용 여부와 무관하게 컨테이너는 일회용 사용이 원칙.
 
 ---
 
@@ -101,7 +99,7 @@ VS Code를 컨테이너에 연결하는 방식은 두 가지다.
 
 프로젝트 루트에 `.devcontainer/devcontainer.json`을 두면 VS Code가 해당 정의대로 컨테이너를 자동 실행 및 연결한다.
 
-B-1. 이미지 직접 사용(최소 구성):
+이미지 직접 사용(최소 구성):
 
 ```jsonc
 // .devcontainer/devcontainer.json
@@ -118,20 +116,6 @@ B-1. 이미지 직접 사용(최소 구성):
   },
   "forwardPorts": [8080],
   "postCreateCommand": "echo 'container ready'"
-}
-```
-
-B-2. Dockerfile 빌드 사용(3.2와 연결):
-
-```jsonc
-// .devcontainer/devcontainer.json
-{
-  "name": "pipeline-flow-dev",
-  "build": { "dockerfile": "../Dockerfile", "context": ".." },
-  "workspaceFolder": "/workspace",
-  "customizations": {
-    "vscode": { "extensions": ["ms-python.python"] }
-  }
 }
 ```
 
@@ -163,15 +147,14 @@ docker run --rm -it \
   bash
 ```
 
-| 플래그 | 역할 |
-|--------|------|
-| `--rm` | 종료 시 컨테이너 자동 삭제 (ephemeral의 핵심) |
-| `-it` | 인터랙티브 터미널 |
-| `-v host:container` | 바인드 마운트. 코드가 호스트에 유지됨 |
-| `-w` | 시작 작업 디렉터리 |
-| `-p` | 포트 매핑 |
-| `--name` | 컨테이너 이름 (재실행 시 이름 충돌 주의) |
+플래그:
 
+- `--rm` — 종료 시 컨테이너 자동 삭제 (ephemeral의 핵심)
+- `-it` — 인터랙티브 터미널
+- `-v host:container` — 바인드 마운트. 코드가 호스트에 유지됨
+- `-w` — 시작 작업 디렉터리
+- `-p` — 포트 매핑
+- `--name` — 컨테이너 이름 (재실행 시 이름 충돌 주의)
 - Windows PowerShell은 `$(pwd)` 대신 `${PWD}` 사용.
 
 Attach 절차:
@@ -189,7 +172,7 @@ Ephemeral 관점(캐시 유지):
 ```bash
 docker run --rm -it \
   -v "$(pwd)":/workspace \
-  -v flow-cache:/home/vscode/.cache \   # named volume: 컨테이너 삭제와 무관하게 캐시 유지
+  -v flow-cache:/home/vscode/.cache \   # named volume: cache persists across container removal
   my-flow:dev bash
 ```
 
@@ -198,18 +181,18 @@ docker run --rm -it \
 ## 5. Workflow Summary
 
 ```bash
-# 1) 이미지 준비 (최초 1회)
+# 1) Prepare the image (first time only)
 docker pull yrocket/pipeline-flow:latest
 
-# 2) (선택) 도구 추가 빌드
+# 2) (optional) Build with extra tools
 docker build -t my-flow:dev .
 
-# A) Container 방식: CLI 일회용 컨테이너 + Attach
+# A) Container approach: ephemeral container + Attach
 docker run --rm -it -v "$(pwd)":/workspace -w /workspace my-flow:dev bash
 #   → VS Code: F1 → Attach to Running Container
 
-# B) Image 방식: devcontainer.json
-#   → VS Code: 폴더 열기 → F1 → Reopen in Container
+# B) Image approach: devcontainer.json
+#   → VS Code: open folder → F1 → Reopen in Container
 ```
 
 | 목적 | 명령/조작 |
@@ -224,15 +207,27 @@ docker run --rm -it -v "$(pwd)":/workspace -w /workspace my-flow:dev bash
 
 ## 6. Troubleshooting
 
-| 증상 | 원인 | 해결 |
-|------|------|------|
-| `Cannot connect to the Docker daemon` | Docker Desktop 미실행 | 실행 상태 확인 후 재시도 |
-| `docker: name is already in use` | 동일 `--name` 컨테이너 잔존 | `docker rm -f flow-dev` 후 재실행 |
-| 코드 수정 소실 | 볼륨 마운트 누락 | `-v host:container` 또는 devcontainer mount 확인 |
-| VS Code 확장 미표시 | 로컬에만 설치됨 | `customizations.vscode.extensions`에 추가 |
-| Windows 경로 오류 | `$(pwd)` 미지원 | PowerShell은 `${PWD}` 사용 |
-| pull 지연/재현 불가 | `:latest` 변동 | digest 고정 (`@sha256:...`) |
-| 디스크 부족 | 이미지/컨테이너 누적 | `docker system prune` (삭제 주의) |
+- **`Cannot connect to the Docker daemon`**
+  - 원인: Docker Desktop 미실행
+  - 해결: 실행 상태 확인 후 재시도
+- **`docker: name is already in use`**
+  - 원인: 동일 `--name` 컨테이너 잔존
+  - 해결: `docker rm -f flow-dev` 후 재실행
+- **코드 수정 소실**
+  - 원인: 볼륨 마운트 누락
+  - 해결: `-v host:container` 또는 devcontainer mount 확인
+- **VS Code 확장 미표시**
+  - 원인: 로컬에만 설치됨
+  - 해결: `customizations.vscode.extensions`에 추가
+- **Windows 경로 오류**
+  - 원인: `$(pwd)` 미지원
+  - 해결: PowerShell은 `${PWD}` 사용
+- **pull 지연/재현 불가**
+  - 원인: `:latest` 변동
+  - 해결: digest 고정 (`@sha256:...`)
+- **디스크 부족**
+  - 원인: 이미지/컨테이너 누적
+  - 해결: `docker system prune` (삭제 주의)
 
 ---
 
