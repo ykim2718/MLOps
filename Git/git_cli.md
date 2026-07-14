@@ -1,3 +1,5 @@
+> ⚠️ **This is an auto-synced copy.** Do not edit here.
+
 # Git CLI (Command Line Interface)
 
 <sub>rev. 105</sub>

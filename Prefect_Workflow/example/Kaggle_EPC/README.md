@@ -1,3 +1,5 @@
+> ⚠️ **This is an auto-synced copy.** Do not edit here.
+
 # Kaggle Electric Power Consumption - Power Forecasting (LightGBM)
 
 <sub>rev. 18</sub>

@@ -1,3 +1,5 @@
+> ⚠️ **This is an auto-synced copy.** Do not edit here.
+
 # Prefect Secret
 
 <sub>rev. 10</sub>

@@ -1,3 +1,5 @@
+> ⚠️ **This is an auto-synced copy.** Do not edit here.
+
 # Statement of Work (작업 명세서)
 
 <sub>rev. 11</sub>

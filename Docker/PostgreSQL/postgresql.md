@@ -1,3 +1,5 @@
+> ⚠️ **This is an auto-synced copy.** Do not edit here.
+
 # PostgreSQL — Backend Metadata Store
 
 <sub>rev. 52</sub>

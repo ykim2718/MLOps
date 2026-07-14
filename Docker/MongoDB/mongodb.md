@@ -1,3 +1,5 @@
+> ⚠️ **This is an auto-synced copy.** Do not edit here.
+
 # MongoDB — Document Database
 
 <sub>rev. 55</sub>

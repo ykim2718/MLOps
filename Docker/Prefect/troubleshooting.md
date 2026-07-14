@@ -1,3 +1,5 @@
+> ⚠️ **This is an auto-synced copy.** Do not edit here.
+
 # Troubleshooting
 
 <sub>rev. 17</sub>

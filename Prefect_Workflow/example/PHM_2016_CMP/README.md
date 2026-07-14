@@ -1,3 +1,5 @@
+> ⚠️ **This is an auto-synced copy.** Do not edit here.
+
 # PHM 2016 CMP - Virtual Metrology (LightGBM)
 
 <sub>rev. 32</sub>
