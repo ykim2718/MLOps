@@ -1,6 +1,6 @@
 # VS Code Development with Docker Desktop and a Prebuilt Image
 
-rev. 27
+rev. 28
 <!-- 규칙: 이 파일을 수정할 때마다 위 rev 번호를 1씩 올릴 것 (git commit 여부와 무관). -->
 
 Docker Desktop에서 `yrocket/pipeline-flow:latest` 이미지로 컨테이너를 실행하고, VS Code를 컨테이너 내부에 연결하여 개발 환경으로 사용한다.
@@ -207,6 +207,17 @@ Docker Desktop(Windows)은 WSL2 경량 VM 위에서 리눅스 엔진을 실행�
 
 - vmmem 이슈는 Windows 버전이 아니라 **WSL2(VM) 방식** 때문이며 Win10·Win11 공통이다. Windows 11이라고 자동 면제되지 않으며, 관건은 WSL 버전이다.
 - Ubuntu는 VM이 없어 `vmmem` 자체가 없고 별도 조치가 불필요하다.
+
+**메모리 사용량 확인**
+
+VM(리눅스) 내부 관점에서 실제 사용량을 확인한다.
+
+```powershell
+wsl -- free -h            # memory the WSL2 VM actually uses (used/free/buff-cache)
+wsl -- cat /proc/meminfo  # more detail
+```
+
+- 호스트 관점(작업관리자와 동일한 vmmem 크기)은 PowerShell `Get-Process vmmem, vmmemWSL`로 확인한다.
 
 **메모리 절약 (Windows 10 / 11 공통)**
 
