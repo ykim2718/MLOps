@@ -1,6 +1,6 @@
 # VS Code Development with Docker Desktop and a Prebuilt Image
 
-rev. 30
+rev. 31
 <!-- 규칙: 이 파일을 수정할 때마다 위 rev 번호를 1씩 올릴 것 (git commit 여부와 무관). -->
 
 Docker Desktop에서 `yrocket/pipeline-flow:latest` 이미지로 컨테이너를 실행하고, VS Code를 컨테이너 내부에 연결하여 개발 환경으로 사용한다.
@@ -189,11 +189,34 @@ ls -la /workspace   # your opened folder's files are listed (bind mount works)
 - **Ephemeral**: 종료와 함께 삭제되어 상태가 남지 않는 컨테이너. `docker run --rm`으로 실현한다.
 - **Image**: 컨테이너 실행에 필요한 파일시스템과 설정을 담은 읽기 전용 템플릿. `docker pull`로 취득해 로컬에 캐시된다.
 - **Named volume**: Docker가 관리하는 영속 저장소. 컨테이너 삭제와 무관하게 데이터가 유지되어 캐시·DB 등에 사용.
-- **WSL (Windows Subsystem for Linux)**: Windows에서 리눅스를 실행하는 기능. WSL2는 경량 가상머신(VM)으로 리눅스 커널을 돌리며, Windows용 Docker Desktop의 리눅스 엔진이 이 위에서 동작한다. 이 VM의 메모리가 작업관리자에 `vmmem`으로 표시된다(Appendix B 참조).
+- **WSL (Windows Subsystem for Linux)**: Windows에서 리눅스를 실행하는 기능. WSL2는 경량 가상머신(VM)으로 리눅스 커널을 돌리며, Windows용 Docker Desktop의 리눅스 엔진이 이 위에서 동작한다. 이 VM의 메모리가 작업관리자에 `vmmem`으로 표시된다(Appendix C 참조).
 
 ---
 
-## Appendix B. Virtual Memory
+## Appendix B. WSL CLI
+
+Windows에서 Docker Desktop은 WSL2 위에서 동작하므로, 엔진 상태 확인·재기동·메모리 관리는 대부분 `wsl` 명령으로 한다. `wsl` 명령은 Windows 셸(cmd/PowerShell)에서 실행한다. 이 문서에서 사용한 명령을 정리한다.
+
+| Command | 설명 |
+|---------|------|
+| `wsl -l -v` | 설치된 배포판 목록과 상태(`Running`/`Stopped`)·WSL 버전 표시. `docker-desktop`이 `Running`이어야 엔진이 살아 있다. |
+| `wsl --shutdown` | 모든 WSL 배포판과 VM을 즉시 종료. 엔진 hang 복구, `vmmem` 메모리 즉시 해제에 사용. |
+| `wsl --update` | WSL 커널·구성 요소를 최신화. WSLg·`autoMemoryReclaim` 등 최신 기능 확보. |
+| `wsl -d <distro>` | 특정 배포판을 실행. 예) `wsl -d Ubuntu`. |
+| `wsl -- <command>` | 기본 배포판 안에서 명령 실행. 예) `wsl -- free -h`, `wsl -- cat /proc/meminfo`. |
+
+전형적인 엔진 재기동/점검 흐름:
+
+```powershell
+wsl -l -v          # docker-desktop / Ubuntu 상태 확인
+wsl --shutdown     # 멈춘 엔진·VM 완전 종료 (이후 Docker Desktop 재실행)
+wsl --update       # 필요 시 WSL 최신화
+wsl -- free -h     # WSL2 VM의 실제 메모리 사용량 확인
+```
+
+---
+
+## Appendix C. Virtual Memory
 
 Docker Desktop(Windows)은 WSL2 경량 VM 위에서 리눅스 엔진을 실행한다. 이 VM이 쓰는 메모리가 작업관리자에 **`vmmem`**(최신 Windows 11에서는 **`vmmemWSL`**)로 표시된다. 유휴 상태에서도 메모리를 잘 반환하지 않아 크게 잡혀 보일 수 있다.
 
