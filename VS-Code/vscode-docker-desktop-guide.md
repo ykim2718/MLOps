@@ -1,6 +1,6 @@
 # VS Code Development with Docker Desktop and a Prebuilt Image
 
-rev. 12
+rev. 13
 <!-- 규칙: 이 파일을 수정할 때마다 위 rev 번호를 1씩 올릴 것 (git commit 여부와 무관). -->
 
 - 목적: Docker Desktop에서 `yrocket/pipeline-flow:latest` 이미지로 컨테이너를 실행하고, VS Code를 컨테이너 내부에 연결하여 개발 환경으로 사용.
@@ -76,6 +76,8 @@ docker build -t my-flow:dev .
 ---
 
 ## 3. VS Code Environment Setup
+
+사전 필수: VS Code에 **Dev Containers 확장**(`ms-vscode-remote.remote-containers`)을 설치해야 한다. 아래 두 방식 모두 이 확장이 있어야 동작한다. (확장 탭 `Ctrl/Cmd + Shift + X`에서 "Dev Containers" 검색 → 설치)
 
 VS Code를 컨테이너에 연결하는 방식은 두 가지다.
 
