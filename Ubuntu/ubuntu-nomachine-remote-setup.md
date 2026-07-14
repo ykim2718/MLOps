@@ -1,3 +1,5 @@
+> ⚠️ **This is an auto-synced copy.** Source: ykim2718/claude · Do not edit here.
+
 # 우분투 노트북 원격 접속 서버 구축 기록
 
 rev. 17
