@@ -1,6 +1,6 @@
 # VS Code Development with Docker Desktop and a Prebuilt Image
 
-rev. 23
+rev. 24
 <!-- 규칙: 이 파일을 수정할 때마다 위 rev 번호를 1씩 올릴 것 (git commit 여부와 무관). -->
 
 Docker Desktop에서 `yrocket/pipeline-flow:latest` 이미지로 컨테이너를 실행하고, VS Code를 컨테이너 내부에 연결하여 개발 환경으로 사용한다.
@@ -150,7 +150,7 @@ Attach 절차:
 ```bash
 docker run --rm -it \
   -v "$(pwd)":/workspace \
-  -v flow-cache:/home/vscode/.cache \   # cache kept in a named volume
+  -v flow-cache:/root/.cache \   # cache kept in a named volume (image user = root)
   my-flow:dev bash
 ```
 
