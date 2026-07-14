@@ -1,6 +1,6 @@
 # VS Code Development with Docker Desktop and a Prebuilt Image
 
-rev. 13
+rev. 14
 <!-- 규칙: 이 파일을 수정할 때마다 위 rev 번호를 1씩 올릴 것 (git commit 여부와 무관). -->
 
 - 목적: Docker Desktop에서 `yrocket/pipeline-flow:latest` 이미지로 컨테이너를 실행하고, VS Code를 컨테이너 내부에 연결하여 개발 환경으로 사용.
@@ -8,42 +8,40 @@ rev. 13
 
 ---
 
-## 1. Work Flow
+## 1. Docker Image
+
+### 1.1 Work Flow
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  IMAGE  (read-only template, cached locally · reusable)     │
-│  1. $ docker pull yrocket/pipeline-flow:latest              │
-│  2. (optional) $ docker build -t my-flow:dev .   # add tools│
-└───────────────┬─────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│  IMAGE  (read-only template, cached locally · reusable)      │
+│  1.2 $ docker pull yrocket/pipeline-flow:latest              │
+│  1.3 (optional) $ docker build -t my-flow:dev .   # add tools│
+└───────────────┬──────────────────────────────────────────────┘
                 │  create a container from the image
                 ▼
-┌─────────────────────────────────────────────────────────────┐
-│  CONTAINER  (running instance · ephemeral)                  │
-│  3.1 .devcontainer/devcontainer.json                        │
-│      → VS Code: open folder → F1 → Reopen in Container      │
-│  3.2 $ docker run --rm -it -v "$(pwd)":/workspace \         │
-│          -w /workspace my-flow:dev bash                     │
-│      → VS Code: F1 → Attach to Running Container            │
-│      (3.1 and 3.2 are alternatives — choose one)            │
-└───────────────┬─────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│  CONTAINER  (running instance · ephemeral)                   │
+│  2.2 .devcontainer/devcontainer.json                         │
+│      → VS Code: open folder → F1 → Reopen in Container       │
+│  2.3 $ docker run --rm -it -v "$(pwd)":/workspace \          │
+│          -w /workspace my-flow:dev bash                      │
+│      → VS Code: F1 → Attach to Running Container             │
+│      (2.2 and 2.3 are alternatives — choose one)             │
+└───────────────┬──────────────────────────────────────────────┘
                 │  bind mount / volume (-v)
                 ▼
-┌─────────────────────────────────────────────────────────────┐
-│  WORKSPACE  (host disk · persistent)                        │
-│  source code lives here → survives container removal        │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│  WORKSPACE  (host disk · persistent)                         │
+│  source code lives here → survives container removal         │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 - 이미지: 삭제하지 않고 재사용. `pull` 1회로 로컬 캐시됨.
 - 컨테이너: `--rm` 기반 일회용 사용 권장. 매 실행마다 초기 상태 → 환경 오염 및 재현성 문제 방지.
 - 소스코드: 컨테이너 내부에 두지 않고 호스트 폴더를 볼륨 마운트하여 영속화.
 
----
-
-## 2. Docker Image
-
-### 2.1 Pull the Image
+### 1.2 Pull the Image
 
 ```bash
 docker pull yrocket/pipeline-flow:latest
@@ -52,7 +50,7 @@ docker images | grep pipeline-flow
 
 - `:latest`는 원격 변경 가능성이 있어 재현성이 낮음. 장기 프로젝트는 digest 고정 권장: `docker pull yrocket/pipeline-flow@sha256:<digest>` (digest 정의는 [Appendix A](#appendix-a-terminology) 참조).
 
-### 2.2 Wrap with a Dockerfile
+### 1.3 Wrap with a Dockerfile
 
 베이스 이미지에 추가 CLI·설정 등 도구를 얹을 때 Dockerfile로 `FROM` 하여 새 이미지를 만든다.
 
@@ -75,16 +73,18 @@ docker build -t my-flow:dev .
 
 ---
 
-## 3. VS Code Environment Setup
-
-사전 필수: VS Code에 **Dev Containers 확장**(`ms-vscode-remote.remote-containers`)을 설치해야 한다. 아래 두 방식 모두 이 확장이 있어야 동작한다. (확장 탭 `Ctrl/Cmd + Shift + X`에서 "Dev Containers" 검색 → 설치)
+## 2. VS Code
 
 VS Code를 컨테이너에 연결하는 방식은 두 가지다.
 
 - Image 사용: `.devcontainer/devcontainer.json`에 이미지(또는 Dockerfile)를 지정하면 VS Code가 컨테이너를 자동 생성·관리. 환경 재현성이 높아 권장.
 - Container 사용: 사용자가 `docker run`으로 컨테이너를 직접 실행하고 VS Code가 Attach. 일회용(`--rm`) 수명을 직접 제어.
 
-### 3.1 Using an Image (devcontainer.json)
+### 2.1 Prerequisites
+
+VS Code에 **Dev Containers 확장**(`ms-vscode-remote.remote-containers`)을 설치해야 한다. 아래 두 방식 모두 이 확장이 있어야 동작한다. (확장 탭 `Ctrl/Cmd + Shift + X`에서 "Dev Containers" 검색 → 설치)
+
+### 2.2 Using an Image (devcontainer.json)
 
 프로젝트 루트에 `.devcontainer/devcontainer.json`을 두면 VS Code가 해당 정의대로 컨테이너를 자동 실행 및 연결한다.
 
@@ -117,7 +117,7 @@ VS Code를 컨테이너에 연결하는 방식은 두 가지다.
 
 참고: 컨테이너에 연결된 VS Code 창을 닫으면 컨테이너는 stopped 상태가 되고(실행 종료), 삭제되지 않아 다음에 재사용된다. 초기화하려면 `F1` → `Dev Containers: Rebuild Container`. 소스는 호스트에 있으므로 rebuild 해도 보존된다.
 
-### 3.2 Using a Container (docker run + Attach)
+### 2.3 Using a Container (docker run + Attach)
 
 컨테이너를 직접 일회용으로 띄운 뒤 VS Code로 Attach 한다.
 
@@ -159,7 +159,7 @@ docker run --rm -it \
 
 ---
 
-## 4. References
+## 3. References
 
 - Dev Containers: https://code.visualstudio.com/docs/devcontainers/containers
 - devcontainer.json 레퍼런스: https://containers.dev/implementors/json_reference/
