@@ -1,6 +1,6 @@
 # VS Code Development with Docker Desktop and a Prebuilt Image
 
-rev. 31
+rev. 32
 <!-- 규칙: 이 파일을 수정할 때마다 위 rev 번호를 1씩 올릴 것 (git commit 여부와 무관). -->
 
 Docker Desktop에서 `yrocket/pipeline-flow:latest` 이미지로 컨테이너를 실행하고, VS Code를 컨테이너 내부에 연결하여 개발 환경으로 사용한다.
@@ -197,22 +197,11 @@ ls -la /workspace   # your opened folder's files are listed (bind mount works)
 
 Windows에서 Docker Desktop은 WSL2 위에서 동작하므로, 엔진 상태 확인·재기동·메모리 관리는 대부분 `wsl` 명령으로 한다. `wsl` 명령은 Windows 셸(cmd/PowerShell)에서 실행한다. 이 문서에서 사용한 명령을 정리한다.
 
-| Command | 설명 |
-|---------|------|
-| `wsl -l -v` | 설치된 배포판 목록과 상태(`Running`/`Stopped`)·WSL 버전 표시. `docker-desktop`이 `Running`이어야 엔진이 살아 있다. |
-| `wsl --shutdown` | 모든 WSL 배포판과 VM을 즉시 종료. 엔진 hang 복구, `vmmem` 메모리 즉시 해제에 사용. |
-| `wsl --update` | WSL 커널·구성 요소를 최신화. WSLg·`autoMemoryReclaim` 등 최신 기능 확보. |
-| `wsl -d <distro>` | 특정 배포판을 실행. 예) `wsl -d Ubuntu`. |
-| `wsl -- <command>` | 기본 배포판 안에서 명령 실행. 예) `wsl -- free -h`, `wsl -- cat /proc/meminfo`. |
-
-전형적인 엔진 재기동/점검 흐름:
-
-```powershell
-wsl -l -v          # docker-desktop / Ubuntu 상태 확인
-wsl --shutdown     # 멈춘 엔진·VM 완전 종료 (이후 Docker Desktop 재실행)
-wsl --update       # 필요 시 WSL 최신화
-wsl -- free -h     # WSL2 VM의 실제 메모리 사용량 확인
-```
+- `wsl -- <command>` — 기본 배포판 안에서 명령 실행. 예) `wsl -- free -h`(WSL2 VM의 실제 메모리 사용량), `wsl -- cat /proc/meminfo`(상세).
+- `wsl --shutdown` — 모든 WSL 배포판과 VM을 즉시 종료. 멈춘(hang) 엔진 복구, `vmmem` 메모리 즉시 해제에 사용. 이후 Docker Desktop을 다시 실행한다.
+- `wsl --update` — WSL 커널·구성 요소를 최신화. WSLg·`autoMemoryReclaim` 등 최신 기능 확보.
+- `wsl -d <distro>` — 특정 배포판을 실행. 예) `wsl -d Ubuntu`.
+- `wsl -l -v` — 설치된 배포판 목록과 상태(`Running`/`Stopped`)·WSL 버전 표시. `docker-desktop`이 `Running`이어야 엔진이 살아 있다.
 
 ---
 
