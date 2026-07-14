@@ -1,6 +1,6 @@
 # VS Code Development with Docker Desktop and a Prebuilt Image
 
-rev. 25
+rev. 26
 <!-- 규칙: 이 파일을 수정할 때마다 위 rev 번호를 1씩 올릴 것 (git commit 여부와 무관). -->
 
 Docker Desktop에서 `yrocket/pipeline-flow:latest` 이미지로 컨테이너를 실행하고, VS Code를 컨테이너 내부에 연결하여 개발 환경으로 사용한다.
@@ -183,12 +183,13 @@ ls -la /workspace   # your opened folder's files are listed (bind mount works)
 
 ## Appendix A. Terminology
 
-- **Image (이미지)**: 컨테이너 실행에 필요한 파일시스템과 설정을 담은 읽기 전용 템플릿. `docker pull`로 취득해 로컬에 캐시된다.
-- **Container (컨테이너)**: 이미지로부터 생성된 실행 인스턴스. `docker run` 시마다 새로 만들어진다.
-- **Ephemeral (일회용)**: 종료와 함께 삭제되어 상태가 남지 않는 컨테이너. `docker run --rm`으로 실현한다.
-- **Digest (다이제스트)**: 이미지 내용을 식별하는 SHA-256 해시값으로 `@sha256:<hash>` 형식으로 표기한다. 이동 가능한 태그(`:latest`)와 달리 내용이 바뀌면 값도 바뀌므로, 특정 이미지 버전을 불변으로 고정(pinning)할 때 사용한다. 예) `yrocket/pipeline-flow@sha256:abc123...`
 - **Bind mount (바인드 마운트)**: 호스트의 특정 폴더를 컨테이너 경로에 직접 연결하는 방식. `-v host:container`. 소스코드 영속화에 사용.
+- **Container (컨테이너)**: 이미지로부터 생성된 실행 인스턴스. `docker run` 시마다 새로 만들어진다.
+- **Digest (다이제스트)**: 이미지 내용을 식별하는 SHA-256 해시값으로 `@sha256:<hash>` 형식으로 표기한다. 이동 가능한 태그(`:latest`)와 달리 내용이 바뀌면 값도 바뀌므로, 특정 이미지 버전을 불변으로 고정(pinning)할 때 사용한다. 예) `yrocket/pipeline-flow@sha256:abc123...`
+- **Ephemeral (일회용)**: 종료와 함께 삭제되어 상태가 남지 않는 컨테이너. `docker run --rm`으로 실현한다.
+- **Image (이미지)**: 컨테이너 실행에 필요한 파일시스템과 설정을 담은 읽기 전용 템플릿. `docker pull`로 취득해 로컬에 캐시된다.
 - **Named volume (네임드 볼륨)**: Docker가 관리하는 영속 저장소. 컨테이너 삭제와 무관하게 데이터가 유지되어 캐시·DB 등에 사용.
+- **WSL (Windows Subsystem for Linux)**: Windows에서 리눅스를 실행하는 기능. WSL2는 경량 가상머신(VM)으로 리눅스 커널을 돌리며, Windows용 Docker Desktop의 리눅스 엔진이 이 위에서 동작한다. 이 VM의 메모리가 작업관리자에 `vmmem`으로 표시된다(Appendix B 참조).
 
 ---
 
