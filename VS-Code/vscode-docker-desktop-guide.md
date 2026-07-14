@@ -1,6 +1,6 @@
 # VS Code Development with Docker Desktop and a Prebuilt Image
 
-rev. 22
+rev. 23
 <!-- 규칙: 이 파일을 수정할 때마다 위 rev 번호를 1씩 올릴 것 (git commit 여부와 무관). -->
 
 Docker Desktop에서 `yrocket/pipeline-flow:latest` 이미지로 컨테이너를 실행하고, VS Code를 컨테이너 내부에 연결하여 개발 환경으로 사용한다.
@@ -153,6 +153,22 @@ docker run --rm -it \
   -v flow-cache:/home/vscode/.cache \   # cache kept in a named volume
   my-flow:dev bash
 ```
+
+### 3.4 Verification
+
+컨테이너에 제대로 연결됐는지 VS Code 통합 터미널(`` Ctrl+` ``)에서 확인한다.
+
+```bash
+whoami              # container user (e.g. root or vscode)
+hostname            # random container ID = you are inside the container
+pwd                 # expected: /workspace
+python --version    # the image's runtime is available
+ls -la /workspace   # your opened folder's files are listed (bind mount works)
+```
+
+- 프롬프트가 리눅스이고 `hostname`이 랜덤 문자열이면 컨테이너 내부에 붙은 것이다.
+- `pwd`가 `/workspace`이고 `ls /workspace`에 연 폴더의 파일이 보이면 bind mount가 정상이다.
+- VS Code 좌측 하단 초록 배지에 `Dev Container: pipeline-flow` 표시도 함께 확인한다.
 
 ---
 
