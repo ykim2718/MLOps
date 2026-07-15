@@ -1,11 +1,13 @@
-> ⚠️ **This is an auto-synced copy.** Do not edit here.
+> ⚠️ **This is an auto-synced copy. Do not edit here.**
 
 # VS Code Development with Docker Desktop and a Prebuilt Image
 
-rev. 34
+rev. 35
 <!-- 규칙: 이 파일을 수정할 때마다 위 rev 번호를 1씩 올릴 것 (git commit 여부와 무관). -->
 
 Docker Desktop에서 `yrocket/pipeline-flow:latest` 이미지로 컨테이너를 실행하고, VS Code를 컨테이너 내부에 연결하여 개발 환경으로 사용한다.
+
+이 문서는 Docker Desktop을 사용하는 **Windows 10/11**을 기준으로 기술한다. **Ubuntu(리눅스)** 에서도 이미지·컨테이너·`devcontainer.json`·VS Code 연결 방식은 동일하며, 다만 Docker Desktop 대신 **Docker Engine을 네이티브로 사용**한다는 점만 다르다. 이 차이에서 비롯되는 WSL·`vmmem` 관련 내용(Appendix B, C)은 Windows에만 해당한다.
 
 ---
 
@@ -258,4 +260,4 @@ wsl --shutdown    # then restart Docker Desktop
 
 3. 개발하지 않을 때는 `wsl --shutdown` 또는 Docker Desktop을 **Quit** → `vmmem` 메모리가 즉시 해제된다.
 
-- WSL2 백엔드에서는 Docker Desktop `Settings`에 메모리 슬라이더가 없고 위 `.wslconfig`가 그 역할을 한다. (Hyper-V 백엔드는 `Settings → Resources`에 슬라이더가 있음)
+- WSL2 백엔드에서는 Docker Desktop `Settings`에 메모리 슬라이더가 없고 위 `.wslconfig`가 그 역할을 한다.

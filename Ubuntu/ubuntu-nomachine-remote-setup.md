@@ -1,4 +1,4 @@
-> ⚠️ **This is an auto-synced copy.** Do not edit here.
+> ⚠️ **This is an auto-synced copy. Do not edit here.**
 
 # 우분투 노트북 원격 접속 서버 구축 기록
 
