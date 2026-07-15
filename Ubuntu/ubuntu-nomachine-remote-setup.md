@@ -1,8 +1,8 @@
 > ⚠️ **This is an auto-synced copy. Do not edit here.**
 
-# 우분투 노트북 원격 접속 서버 구축 기록
+# 우분투 원격 접속 서버 구축
 
-rev. 17
+rev. 18
 <!-- 규칙: 이 파일을 수정할 때마다 위 rev 번호를 1씩 올릴 것 (git commit 여부와 무관). -->
 
 <table width="100%">
