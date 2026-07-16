@@ -1,14 +1,14 @@
-# __version__ = "0.0.14"
+# __version__ = "0.0.15"
 
-# example/dry_run/my_flow_trigger.ps1 — verify the dry-run flow (my_flow.py) at three stages.
+# example/dry_run/my_trigger.ps1 — verify the dry-run flow (my_flow.py) at three stages.
 #   -Mode local : run my_flow.py offline here (--run-on local: no Prefect server, no MLflow) - fastest sanity check.
 #   -Mode serve : flow.serve() — a serve process on THIS machine runs my_flow.py (no work pool).
 #   -Mode pool  : trigger the real pipeline deployment; pipeline.py (on a work-pool worker) git-fetches
 #                 the repo and runs my_flow.py in a container - verifies the full code+data delivery path.
 #
-#   .\my_flow_trigger.ps1
-#   .\my_flow_trigger.ps1 -Mode serve
-#   .\my_flow_trigger.ps1 -Mode pool -PrefectBlock <block> -GitRepo https://github.com/<u>/<repo>.git -GitCommit <sha> [-Payload <file.py>]
+#   .\my_trigger.ps1
+#   .\my_trigger.ps1 -Mode serve
+#   .\my_trigger.ps1 -Mode pool -PrefectBlock <block> -GitRepo https://github.com/<u>/<repo>.git -GitCommit <sha> [-Payload <file.py>]
 
 param(
     [ValidateSet("local", "serve", "pool")]
