@@ -1,3 +1,5 @@
+> ⚠️ **This is an auto-synced copy.** Do not edit here.
+
 # Ubuntu CLI
 
 <sub>rev. 11</sub>

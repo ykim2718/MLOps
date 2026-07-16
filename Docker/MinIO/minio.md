@@ -1,3 +1,5 @@
+> ⚠️ **This is an auto-synced copy.** Do not edit here.
+
 # MinIO — Object Storage
 
 <sub>rev. 108</sub>

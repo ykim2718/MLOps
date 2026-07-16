@@ -1,3 +1,5 @@
+> ⚠️ **This is an auto-synced copy.** Do not edit here.
+
 # Docker Network
 
 <sub>rev. 1</sub>

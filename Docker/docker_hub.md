@@ -1,3 +1,5 @@
+> ⚠️ **This is an auto-synced copy.** Do not edit here.
+
 # Docker Hub (Image Registry)
 
 <sub>rev. 5</sub>
