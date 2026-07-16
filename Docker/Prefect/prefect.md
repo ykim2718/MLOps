@@ -1,6 +1,6 @@
 # Prefect Pipeline Orchestration on Docker
 
-<sub>rev. 589</sub>
+<sub>rev. 590</sub>
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
@@ -289,7 +289,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
 
   ```yaml
   # docker-compose.server.yml
-  # __version__ = "0.0.11"
+  # __version__ = "0.0.12"
   name: prefect-server   # compose project name baked in (replaces -p); run_server.sh / register_pool.sh rely on it
   services:
     prefect_server:
@@ -360,20 +360,48 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
     "variables": {
       "type": "object",
       "properties": {
-        "image":   { "type": "string", "default": "pipeline-flow:latest" },
-        "env":     { "type": "object", "additionalProperties": { "type": "string" },
-                     "default": { "PREFECT_API_URL": "http://prefect_server:4200/api" } },
-        "networks":{ "type": "array",  "items": { "type": "string" }, "default": ["mlops"] },
-        "auto_remove": { "type": "boolean", "default": true },
-        "mem_limit":   { "type": "string", "default": "16g" }
+        "name": { "title": "Name", "type": "string" },
+        "image": {
+          "title": "Image",
+          "type": "string",
+          "default": "pipeline-flow:latest"
+        },
+        "image_pull_policy": {
+          "title": "Image Pull Policy",
+          "type": "string",
+          "enum": ["IfNotPresent", "Always", "Never"],
+          "default": "IfNotPresent"
+        },
+        "env": {
+          "title": "Environment Variables",
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "default": {
+            "PREFECT_API_URL": "http://prefect_server:4200/api"
+          }
+        },
+        "networks": {
+          "title": "Networks",
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["mlops"]
+        },
+        "network_mode": { "title": "Network Mode", "type": "string" },
+        "auto_remove": { "title": "Auto Remove", "type": "boolean", "default": true },
+        "mem_limit": { "title": "Memory Limit", "type": "string", "default": "16g" },
+        "stream_output": { "title": "Stream Output", "type": "boolean", "default": true }
       }
     },
     "job_configuration": {
-      "image":       "{{ image }}",
-      "env":         "{{ env }}",
-      "networks":    "{{ networks }}",
+      "name": "{{ name }}",
+      "image": "{{ image }}",
+      "image_pull_policy": "{{ image_pull_policy }}",
+      "env": "{{ env }}",
+      "networks": "{{ networks }}",
+      "network_mode": "{{ network_mode }}",
       "auto_remove": "{{ auto_remove }}",
-      "mem_limit":   "{{ mem_limit }}"
+      "mem_limit": "{{ mem_limit }}",
+      "stream_output": "{{ stream_output }}"
     }
   }
   ```
@@ -381,6 +409,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
   > **`properties` vs `job_configuration`** — `variables.properties` 는 **변수 선언** (타입 + `default`) 이고, `job_configuration` 은 그 변수를 `{{ }}` 로 받아 **실제 도커 job 설정에 끼워 넣는 틀** 입니다. 같은 키가 양쪽에 보이는 건 '선언 ↔ 사용' 한 쌍이기 때문이고, 값 우선순위는 **deployment 의 `job_variables` override > 템플릿 `default`** 입니다 (override 가 없으면 `default` 가 `{{ }}` 자리에 들어갑니다).
 
   - `image` — flow 컨테이너로 쓸 Pipeline Flow 이미지 ([§6.1](#61-image)). 태그 (`pipeline-flow:latest`) 가 곧 **런타임 버전** (라이브러리 + orchestrator) 입니다.
+  - `image_pull_policy` — flow 이미지를 언제 pull 할지입니다. `pipeline-flow:latest` 는 dispatcher 호스트에서 **로컬로 빌드** 하므로 `IfNotPresent` (있으면 pull 안 함) 로 둬야 registry 로 나가지 않습니다. `Always` 면 매번 pull 을 시도해 로컬 전용 이미지에 대해 실패합니다.
   - `env` — flow 컨테이너가 server·Secret 을 찾는 `PREFECT_API_URL` 을 줍니다.
   - `mem_limit` — flow 컨테이너 메모리 상한입니다. 등급별 pool 의 핵심 차이값입니다 (high 크게·low 작게). `16g` 의 `g` 는 기가바이트 (GiB) 를 뜻합니다.
 
@@ -500,20 +529,34 @@ dispatcher 는 **`docker` work pool** 을 polling 해 job 마다 `pipeline_flow`
   #### Yaml
 
   ```yaml
-  # docker-compose.dispatcher.yml
+  # Prefect Dispatcher — polls a docker-type work pool and, per job, spawns a pipeline_flow container
+  # to run the code, then cleans it up. This container never runs code itself.
+  #
+  # - Mounts the host docker socket to spawn sibling containers.
+  #   (Windows/Docker Desktop also exposes /var/run/docker.sock to Linux containers.)
+  # - prefect + prefect-docker are baked into the image (Dockerfile.dispatcher), so there is no per-boot install.
+  # - The work pool + base job template are registered on the server (see docker-compose.server.yml),
+  #   so the dispatcher only polls the pool — no pool creation here.
+  #
+  # Build (once):  docker build -f Dockerfile.dispatcher -t prefect-dispatcher:latest .
+  # Start:         ./run_dispatcher.sh --work-pool high_performance
+  # __version__ = "0.0.10"
   name: prefect-dispatcher   # compose project name baked in (replaces -p); run_dispatcher.sh relies on it
   services:
     prefect_dispatcher:
       image: prefect-dispatcher:latest   # built once from Dockerfile.dispatcher (prefect + prefect-docker)
       env_file:
-        - ../docker-compose.env_example       # PREFECT_API_URL (shared, at Docker/Prefect root)
+        - ../docker-compose.env_example       # PREFECT_API_URL (shared, kept at Docker/Prefect root)
       command: prefect worker start --type docker --pool ${WORK_POOL:-high_performance} --limit ${WORKER_LIMIT:-8} --no-create-pool-if-not-found
       volumes:
         - /var/run/docker.sock:/var/run/docker.sock   # host docker socket, to spawn sibling containers
       networks:
-        - mlops
+        - mlops                        # same host: reach prefect_server/minio by service name
+      # If the control node (API) starts late and the connection fails, restart and reconnect automatically.
       restart: unless-stopped
 
+  # On the same host this shares the Control Node services' network. run_server.sh creates it beforehand (run_dispatcher.sh also creates it if missing).
+  # (For a dispatcher on another machine, remove the networks block and set PREFECT_API_URL to http://<host IP>:4200/api.)
   networks:
     mlops:
       external: true
@@ -609,6 +652,7 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
 
   ```yaml
   # high_deployment.yml - high-tier deployment definition
+  # __version__ = "0.0.6"    # Semantic Versioning : Major.Minor.Patch
   deployments:
     - name: high_deployment
       entrypoint: pipeline.py:pipeline       # <file>:<@flow function>
@@ -618,6 +662,9 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
           image: pipeline-flow:latest
       parameters:
         payload: my_flow.py
+      pull:                                    # override Prefect's auto-injected /opt/prefect
+        - prefect.deployments.steps.set_working_directory:
+            directory: /work                   # pipeline.py lives at /work in pipeline-flow:latest (WORKDIR)
   ```
 
   - `name: high_deployment` — deployment 이름입니다 (등급별로 `high_deployment`·`low_deployment`).
@@ -625,6 +672,7 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
   - `work_pool.name: high_performance` — 이 deployment 가 제출될 work pool 입니다.
   - `job_variables.image: pipeline-flow:latest` — flow 를 띄울 이미지입니다 ([§6.1](#61-image)). 이 `job_variables` 블록은 `work_pool.name` 으로 등록된 work pool 의 **base job template 을 override** 합니다. `job_variables.image` 는 `job_configuration.image` 를 override 합니다 ([§4](#work-pool-registration)).
   - `parameters.payload: my_flow.py` — flow 파라미터 기본값입니다 (`git_repo`·`git_commit_hash`·`minio_key`·`submitter`·`prefect_block` 은 trigger 때 줍니다).
+  - `pull` — flow 컨테이너가 시작할 때 실행하는 스텝입니다. Prefect 는 기본으로 작업 디렉터리를 `/opt/prefect` 로 잡는데, `pipeline.py` 는 이미지의 `WORKDIR` 인 `/work` 에 있으므로 `set_working_directory: /work` 로 덮어써 entrypoint (`pipeline.py:pipeline`) 를 찾게 합니다 (run log 의 `set_working_directory` 스텝이 이것).
 
   `job_variables.image` 가 base job template 을 덮어쓰는 흐름 — template 은 `image` 변수 (기본값 `pipeline-flow:latest`) 를 선언하고 `job_configuration` 에서 `"image": "{{ image }}"` 로 받습니다. job 제출 때 Prefect 가 그 `{{ image }}` 자리를 채우는데, deployment 에 `job_variables.image` 가 있으면 **템플릿 `default` 대신 이 값** 이 들어가 컨테이너가 그 이미지로 뜹니다 (`cpu`·`mem_limit`·`env` 등 다른 변수도 같은 방식; 우선순위 `job_variables` > `default` 는 [§4](#work-pool-registration)).
 
