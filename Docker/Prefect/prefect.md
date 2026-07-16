@@ -1,6 +1,6 @@
 # Prefect Pipeline Orchestration on Docker
 
-<sub>rev. 586</sub>
+<sub>rev. 589</sub>
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
@@ -83,14 +83,14 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
 
   ══ DOCKER 1 ── PREFECT SERVER ════════════════════════════════════════════
      dir    : PrefectServer/
-     files  : docker-compose.server.yml · run_server.ps1 · register_pool.ps1
+     files  : docker-compose.server.yml · run_server.sh · register_pool.sh
               docker-pool-template-high.json · docker-pool-template-low.json · prune_loop.sh
-     run    : run_server.ps1                      # in PrefectServer/: create network + compose up -d
+     run    : run_server.sh                       # in PrefectServer/: create network + compose up -d
      config → ../docker-compose.env
               PREFECT_SERVER_DATABASE_CONNECTION_URL = 192.168.0.13:5432/prefect
               PREFECT_API_URL                        = http://<server IP>:4200/api   # UI inherits this
        │
-       └─ Work Pool Registration ── register_pool.ps1   # routing 2 — pool routing: run → pool (once, after server up)
+       └─ Work Pool Registration ── register_pool.sh    # routing 2 — pool routing: run → pool (once, after server up)
           config → base job template (docker-pool-template-{high,low}.json)
                    image    = pipeline-flow:latest
                    env      = { PREFECT_API_URL: http://prefect_server:4200/api }
@@ -99,9 +99,9 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
        ▼
   ══ DOCKER 2 ── PREFECT DISPATCHER ════════════════════════════════════════
      dir    : PrefectDispatcher/
-     files  : Dockerfile.dispatcher · docker-compose.dispatcher.yml · run_dispatcher.ps1
+     files  : Dockerfile.dispatcher · docker-compose.dispatcher.yml · run_dispatcher.sh
      run    : docker build -f Dockerfile.dispatcher -t prefect-dispatcher:latest .   # in PrefectDispatcher/
-              run_dispatcher.ps1 -WorkPool <tier>  # compose up -d
+              run_dispatcher.sh --work-pool <tier>  # compose up -d
      config → ../docker-compose.env + shell
               PREFECT_API_URL = http://prefect_server:4200/api
               WORK_POOL = high_performance | low_performance
@@ -136,9 +136,9 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
      ```
      PrefectServer/
      ├─ docker-compose.server.yml      server container definition (port 4200 · mounts the base job templates)
-     ├─ run_server.ps1                 start: create network + compose up
-     ├─ register_variables.ps1         register backing-address variables (once, after the server is up)
-     ├─ register_pool.ps1              register work pools (once, after the server is up)
+     ├─ run_server.sh                  start: create network + compose up
+     ├─ register_variables.sh          register backing-address variables (once, after the server is up)
+     ├─ register_pool.sh               register work pools (once, after the server is up)
      ├─ prune_loop.sh                  worker_pruner sidecar loop (prunes OFFLINE worker records)
      ├─ docker-pool-template-high.json   high-tier base job template (mem_limit 16g · = flow container settings)
      └─ docker-pool-template-low.json    low-tier base job template (mem_limit 4g)
@@ -146,11 +146,11 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
 
      Run (from `PrefectServer/`):
 
-     ```powershell
-     .\run_server.ps1 -Yaml docker-compose.server.yml -Network mlops
-     .\register_variables.ps1 -Minio http://192.168.0.8:9000 -Postgresql 192.168.0.13:5432 -Mlflow http://192.168.0.8:5000
-     .\register_pool.ps1 -PoolName high_performance  -TemplateFile docker-pool-template-high.json -ConcurrencyLimit 16 -Compose docker-compose.server.yml
-     .\register_pool.ps1 -PoolName low_performance -TemplateFile docker-pool-template-low.json  -ConcurrencyLimit 8  -Compose docker-compose.server.yml
+     ```bash
+     ./run_server.sh --yaml docker-compose.server.yml --network mlops
+     ./register_variables.sh --minio http://192.168.0.8:9000 --postgresql 192.168.0.13:5432 --mlflow http://192.168.0.8:5000
+     ./register_pool.sh --pool-name high_performance --template-file docker-pool-template-high.json --concurrency-limit 16 --compose docker-compose.server.yml
+     ./register_pool.sh --pool-name low_performance --template-file docker-pool-template-low.json  --concurrency-limit 8  --compose docker-compose.server.yml
      ```
 
   2) **[PREFECT DISPATCHER](#5-prefect-dispatcher-container)** — 작업 머신마다 1대 · 직접 빌드
@@ -159,15 +159,15 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
      PrefectDispatcher/
      ├─ Dockerfile.dispatcher          image recipe (python + prefect + prefect-docker)
      ├─ docker-compose.dispatcher.yml  container definition (mounts docker.sock)
-     └─ run_dispatcher.ps1             start: compose up
+     └─ run_dispatcher.sh              start: compose up
      ```
 
      Run (from `PrefectDispatcher/`):
 
-     ```powershell
+     ```bash
      docker build -f Dockerfile.dispatcher -t prefect-dispatcher:latest .    # build the image once
-     .\run_dispatcher.ps1 -WorkPool high_performance -WorkerLimit 8
-     .\run_dispatcher.ps1 -WorkPool low_performance -WorkerLimit 4
+     ./run_dispatcher.sh --work-pool high_performance --worker-limit 8
+     ./run_dispatcher.sh --work-pool low_performance --worker-limit 4
      ```
 
   3) **[PIPELINE FLOW](#6-pipeline-flow-container)** — job 마다 떴다 사라지는 컨테이너 · 직접 빌드
@@ -182,7 +182,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
 
      Run (from `PipelineFlow/`):
 
-     ```powershell
+     ```bash
      docker build -f Dockerfile.pipeline_flow -t pipeline-flow:latest .   # build the image once
      prefect deploy --prefect-file high_deployment.yml --name high_deployment --no-prompt   # register a deployment (host shell, once; repeat for low_deployment)
      ```
@@ -196,7 +196,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
 
      Run (from `Docker/Prefect/`, `PREFECT_API_URL` → server):
 
-     ```powershell
+     ```bash
      python credentials.py --json-path yrocket.json --block-name yrocket     # save a block named "yrocket" (lowercase)
      ```
 
@@ -216,24 +216,24 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
 
   방화벽 열기와 도달성 검증은 **서로 다른 호스트**의 일입니다 — 여는 것은 그 backing 호스트의 로컬 방화벽이라 거기서, 검증은 자기 자신이 아닌 **소비 호스트**에서 해야 실제 네트워크 도달성을 봅니다 (backing 호스트에서 자기 LAN IP 로의 접속은 loopback 이라 방화벽과 무관하게 늘 열린 것처럼 보입니다). 순서대로:
 
-  `backing_ports` 스크립트에 action (`open` · `check`) 과 `-host`·`-port` 를 줘서 포트 하나씩 처리합니다 (Windows 는 `.ps1`, Linux 는 `./backing_ports.sh` 로 grammar 동일). 코드는 [Appendix D](#appendix-d-backing_portsps1).
+  `backing_ports.sh` 에 action (`open` · `check`) 과 `-host`·`-port` 를 줘서 포트 하나씩 처리합니다. 코드는 [Appendix D](#appendix-d-backing_portssh).
 
   **① backing 호스트에서 인바운드 열기** (`open`, 멱등) — 주소에서 뽑은 LAN subnet 으로 제한합니다.
 
-  ```powershell
-  # on the backing host (Windows: admin PowerShell) — Linux: sudo ./backing_ports.sh open -host ... -port ...
-  .\backing_ports.ps1 open -host 192.168.0.13 -port 5432  # PostgreSQL
-  .\backing_ports.ps1 open -host 192.168.0.8 -port 9000  # MinIO
-  .\backing_ports.ps1 open -host 192.168.0.8 -port 5000  # MLflow
+  ```bash
+  # on the backing host (needs sudo for the ufw rule)
+  sudo ./backing_ports.sh open -host 192.168.0.13 -port 5432  # PostgreSQL
+  sudo ./backing_ports.sh open -host 192.168.0.8 -port 9000  # MinIO
+  sudo ./backing_ports.sh open -host 192.168.0.8 -port 5000  # MLflow
   ```
 
   **② 소비 호스트 (server·dispatcher) 에서 도달성 검증** (`check`) — backing 호스트가 **아닌** 다른 호스트에서 실행해야 loopback 이 아닌 실제 도달성을 봅니다.
 
-  ```powershell
-  # on a consuming host (NOT the backing host) — Linux: ./backing_ports.sh check -host ... -port ...
-  .\backing_ports.ps1 check -host 192.168.0.13 -port 5432  # PostgreSQL
-  .\backing_ports.ps1 check -host 192.168.0.8 -port 9000  # MinIO
-  .\backing_ports.ps1 check -host 192.168.0.8 -port 5000  # MLflow
+  ```bash
+  # on a consuming host (NOT the backing host), to see real reachability
+  ./backing_ports.sh check -host 192.168.0.13 -port 5432  # PostgreSQL
+  ./backing_ports.sh check -host 192.168.0.8 -port 9000  # MinIO
+  ./backing_ports.sh check -host 192.168.0.8 -port 5000  # MLflow
   ```
 
   모든 포트가 `OPEN` 이면 다음으로 넘어갑니다 (backing service 자체의 설치·포트 게시는 각 서비스 문서를 따릅니다).
@@ -264,16 +264,16 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
 
   어느 Prefect server 에 연결할지 (`PREFECT_API_URL`) 를 최초 1회 설정하면 이후 모든 client 명령이 이 server 를 향합니다. 설정 방법은 두 가지이며, 환경변수가 프로필보다 우선합니다 (환경변수 > 프로필 > 기본값). 같은 컴퓨터면 `<Host IP>` 는 `localhost`.
 
-  1) **환경변수** — OS 환경변수로 지정. Windows 에서 영구 등록은 `setx` (또는 시스템 속성), 현재 셸에만 임시로 줄 땐 `$env:`.
+  1) **환경변수** — OS 환경변수로 지정. 영구 등록은 shell 프로필 (`~/.bashrc` 등) 에 `export` 를 추가하고, 현재 셸에만 임시로 줄 땐 `export` 를 바로 실행합니다.
 
-  ```powershell
-  setx PREFECT_API_URL "http://<Host IP>:4200/api"     # persist (User scope) — applies to newly opened shells
-  $env:PREFECT_API_URL = "http://<Host IP>:4200/api"   # temporary - current PowerShell only
+  ```bash
+  echo 'export PREFECT_API_URL="http://<Host IP>:4200/api"' >> ~/.bashrc   # persist — applies to newly opened shells
+  export PREFECT_API_URL="http://<Host IP>:4200/api"                       # temporary — current shell only
   ```
 
   2) **prefect CLI** — Prefect 프로필 (`~/.prefect/profiles.toml`) 에 저장.
 
-  ```powershell
+  ```bash
   prefect config set PREFECT_API_URL="http://<Host IP>:4200/api"
   ```
 
@@ -290,7 +290,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
   ```yaml
   # docker-compose.server.yml
   # __version__ = "0.0.11"
-  name: prefect-server   # compose project name baked in (replaces -p); run_server.ps1 / register_pool.ps1 rely on it
+  name: prefect-server   # compose project name baked in (replaces -p); run_server.sh / register_pool.sh rely on it
   services:
     prefect_server:
       image: prefecthq/prefect:3-latest
@@ -335,13 +335,13 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
 
   `PrefectServer/` 에서 실행합니다.
 
-  ```powershell
-  .\run_server.ps1 -Yaml docker-compose.server.yml -Network mlops
+  ```bash
+  ./run_server.sh --yaml docker-compose.server.yml --network mlops
   ```
 
-  - `run_server.ps1` (코드는 [Appendix E](#appendix-e-run_serverps1)) — 네트워크 생성과 `docker compose up` 을 한 번에 처리합니다.
-  - `-Yaml` — 띄울 compose 파일. 프로젝트명은 이 파일의 top-level `name:` (`prefect-server`) 이 정합니다.
-  - `-Network` — 붙을 공유 네트워크.
+  - `run_server.sh` (코드는 [Appendix E](#appendix-e-run_serversh)) — 네트워크 생성과 `docker compose up` 을 한 번에 처리합니다.
+  - `--yaml` — 띄울 compose 파일. 프로젝트명은 이 파일의 top-level `name:` (`prefect-server`) 이 정합니다.
+  - `--network` — 붙을 공유 네트워크.
 
   실행 후 대시보드는 **`http://<Host IP>:4200`** 에서 열립니다 (같은 컴퓨터는 `localhost`).
 
@@ -394,23 +394,23 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
   > |---|---|---|---|---|
   > | `mem_limit` | memory | `16g` | `4g` | base job template (`docker-pool-template-high.json`·`docker-pool-template-low.json`) |
   > | `--limit` | dispatcher | `8` | `4` | `prefect worker start` (`WORKER_LIMIT`) |
-  > | `--concurrency-limit` | pool | `16` | `8` | `work-pool set-concurrency-limit` (`register_pool.ps1`) |
+  > | `--concurrency-limit` | pool | `16` | `8` | `work-pool set-concurrency-limit` (`register_pool.sh`) |
 
   #### Registration
 
-  server 안 prefect CLI 로 pool 마다 등록합니다 (`PrefectServer/` 에서 실행; `<Pool Name>`·`<Template File>` 변수화; 코드는 [Appendix F](#appendix-f-register_poolps1)).
+  server 안 prefect CLI 로 pool 마다 등록합니다 (`PrefectServer/` 에서 실행; `<Pool Name>`·`<Template File>` 변수화; 코드는 [Appendix F](#appendix-f-register_poolsh)).
 
-  ```powershell
+  ```bash
   # Register each tier (run once, after the server is up; from PrefectServer/).
-  .\register_pool.ps1 -PoolName high_performance  -TemplateFile docker-pool-template-high.json -ConcurrencyLimit 16
-  .\register_pool.ps1 -PoolName low_performance -TemplateFile docker-pool-template-low.json  -ConcurrencyLimit 8
+  ./register_pool.sh --pool-name high_performance --template-file docker-pool-template-high.json --concurrency-limit 16
+  ./register_pool.sh --pool-name low_performance --template-file docker-pool-template-low.json  --concurrency-limit 8
   ```
 
   #### Verification
 
   등록 직후 pool 이 server 에 올라갔는지 (`docker` 타입·동시성 한도) 확인합니다.
 
-  ```powershell
+  ```bash
   prefect work-pool ls
   ```
 
@@ -485,12 +485,12 @@ dispatcher 는 **`docker` work pool** 을 polling 해 job 마다 `pipeline_flow`
 
   `PrefectDispatcher/` 에서 `docker build` 를 1회 합니다.
 
-  ```powershell
+  ```bash
   docker build -f Dockerfile.dispatcher -t prefect-dispatcher:latest .
   ```
 
   - `docker build CLI -f` — 빌드할 Dockerfile.
-  - `docker build CLI -t` — image tag. 이미지에 붙이는 이름:태그 (`prefect-dispatcher:latest`) 로, dispatcher compose (`run_dispatcher.ps1`) 가 이 이름으로 컨테이너를 띄웁니다.
+  - `docker build CLI -t` — image tag. 이미지에 붙이는 이름:태그 (`prefect-dispatcher:latest`) 로, dispatcher compose (`run_dispatcher.sh`) 가 이 이름으로 컨테이너를 띄웁니다.
   - `docker build CLI .` — build context. 빌드 시 Docker 데몬에 보내는 파일 루트입니다 (`.` 는 현재 폴더; 이 Dockerfile 은 `COPY` 가 없어 보낼 파일은 없지만 인자는 필요).
 
 ### 5.2 Container
@@ -501,7 +501,7 @@ dispatcher 는 **`docker` work pool** 을 polling 해 job 마다 `pipeline_flow`
 
   ```yaml
   # docker-compose.dispatcher.yml
-  name: prefect-dispatcher   # compose project name baked in (replaces -p); run_dispatcher.ps1 relies on it
+  name: prefect-dispatcher   # compose project name baked in (replaces -p); run_dispatcher.sh relies on it
   services:
     prefect_dispatcher:
       image: prefect-dispatcher:latest   # built once from Dockerfile.dispatcher (prefect + prefect-docker)
@@ -527,12 +527,12 @@ dispatcher 는 **`docker` work pool** 을 polling 해 job 마다 `pipeline_flow`
 
   `PrefectDispatcher/` 에서 실행합니다.
 
-  ```powershell
-  .\run_dispatcher.ps1 -WorkPool <tier>
+  ```bash
+  ./run_dispatcher.sh --work-pool <tier>
   ```
 
-  - `run_dispatcher.ps1 -WorkPool <tier>` (코드는 [Appendix H](#appendix-h-run_dispatcherps1)) — yaml 을 띄웁니다 (머신마다 1회).
-  - `-WorkPool <tier>` — 이 dispatcher 가 붙을 work pool 등급입니다 (예: `high_performance`).
+  - `run_dispatcher.sh --work-pool <tier>` (코드는 [Appendix H](#appendix-h-run_dispatchersh)) — yaml 을 띄웁니다 (머신마다 1회).
+  - `--work-pool <tier>` — 이 dispatcher 가 붙을 work pool 등급입니다 (예: `high_performance`).
   - **pool 검증** — 기동 전에 server 에 등록된 **docker 타입** work pool 목록과 대조해, 없는 이름이면 목록을 번호로 보여주고 그중에서 고르게 합니다 (오타·미등록 pool, 그리고 자동 생성된 process pool 까지 걸러 헛도는 것을 막습니다). 조회는 host 의 `prefect` CLI (`work-pool ls --output json`) 로 합니다.
   - `docker compose up` (스크립트 내부) — 컨테이너가 뜨면 그 `command` 인 `prefect worker start` 가 컨테이너 안에서 실행됩니다.
 
@@ -550,7 +550,7 @@ dispatcher 는 **`docker` work pool** 을 polling 해 job 마다 `pipeline_flow`
 
   dispatcher 가 ONLINE 인지 확인합니다 (pool 등록 확인은 [§4 Work Pool Registration](#work-pool-registration)).
 
-  ```powershell
+  ```bash
   prefect work-pool inspect high_performance
   ```
 
@@ -589,7 +589,7 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
 
   `PipelineFlow/` 에서 `docker build` 를 셋업 때 1회 합니다.
 
-  ```powershell
+  ```bash
   docker build -f Dockerfile.pipeline_flow -t pipeline-flow:latest .
   ```
 
@@ -632,7 +632,7 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
 
   `prefect deploy` 는 yaml 정의를 server 에 등록합니다. 실행 폴더에는 `pipeline.py` 와 `high_deployment.yml` 가 있어야 합니다.
 
-  ```powershell
+  ```bash
   cd PipelineFlow                                      # the folder with pipeline.py and high_deployment.yml
   prefect deploy --prefect-file high_deployment.yml --name high_deployment --no-prompt
   ```
@@ -649,7 +649,7 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
 
   deployment 이 server 에 등록됐는지 확인합니다.
 
-  ```powershell
+  ```bash
   prefect deployment ls
   prefect deployment inspect "pipeline/low_deployment"
   ```
@@ -848,7 +848,7 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
   }
   ```
 
-  ```powershell
+  ```bash
   # Register a Credentials block (admin) — PREFECT_API_URL must point at the server.
   # Block name must be lowercase (Prefect rule); pass --block-name (any lowercase id).
   prefect block delete credentials/yrocket                              # drop the old block first (clears stale fields)
@@ -857,7 +857,7 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
 
   등록이 성공하면 `[credentials] saved block 'yrocket'` 이 찍힙니다. 블록은 server DB 에 저장되므로, 등록에 쓴 **같은 프로필** (`PREFECT_API_URL` → server) 로 확인합니다. slug 는 `<block-type-slug>/<block-document-name>` 이라 클래스 `Credentials` → `credentials/yrocket` 입니다.
 
-  ```powershell
+  ```bash
   prefect config view                       # PREFECT_API_URL 이 server 를 가리키는지 확인
   prefect block ls                            # Name=yrocket, Type=Credentials (Slug 열에 credentials/yrocket)
   prefect block inspect credentials/yrocket   # 세 섹션 확인 (SecretDict 라 비밀 값은 *** 로 가려짐)
@@ -888,9 +888,9 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
 
   사람이 셸에서, 또는 CI 의 한 스텝으로 직접 trigger 합니다. 필요한 것은 그 셸의 `prefect` CLI 와 `PREFECT_API_URL` 설정뿐입니다.
 
-  ```powershell
-  prefect deployment run "pipeline/high_deployment" `
-    -p git_repo=https://github.com/team/repo.git -p git_commit_hash=a1b2c3d `
+  ```bash
+  prefect deployment run "pipeline/high_deployment" \
+    -p git_repo=https://github.com/team/repo.git -p git_commit_hash=a1b2c3d \
     -p minio_key="SYDNEY/Bennelong Point" -p submitter=alice -p prefect_block=yrocket
   ```
 
@@ -1004,14 +1004,17 @@ Flow Runs
   - `prefect profile ls` — 프로필 목록을 출력합니다. 등록·조회가 어긋날 때 어떤 프로필 (어떤 `PREFECT_API_URL`) 이 활성이었는지 되짚습니다.
   - `prefect server start --host 0.0.0.0` — Prefect server 를 기동합니다.
   - `prefect work-pool create <name> --type docker --base-job-template <file> [--overwrite]` — `docker` work pool 을 server 에 등록합니다.
-  - `prefect work-pool ls [--output json]` — 등록된 work pool 을 표 (또는 JSON) 로 출력합니다 (이름·type·동시성 한도; JSON 은 `run_dispatcher.ps1` 의 pool 검증이 파싱).
+  - `prefect work-pool ls [--output json]` — 등록된 work pool 을 표 (또는 JSON) 로 출력합니다 (이름·type·동시성 한도; JSON 은 `run_dispatcher.sh` 의 pool 검증이 파싱).
 - **§5 Dispatcher**
   - `prefect work-pool get-default-base-job-template --type docker` — 도커 dispatcher 의 기본 base job template 을 출력합니다 (§5.1).
   - `prefect worker start --pool <name> [--limit N]` — dispatcher 를 기동해 그 pool 을 polling 하며 job 을 실행합니다 (§5.2).
   - `prefect work-pool set-concurrency-limit <pool> <N>` — pool 전체 동시 실행 상한을 설정합니다 (§5.3).
 - **§6 Pipeline Flow**
   - `prefect deploy` (또는 `flow.deploy(...)`) — deployment 를 등록합니다 (§6.2).
+  - `prefect deployment ls` — server 에 등록된 deployment 를 표 (이름·ID·Work Pool) 로 출력합니다. 등급별 `high`·`low` 가 각자 pool 로 올라갔는지 확인합니다 (§6.2).
+  - `prefect deployment inspect "<flow>/<deployment>"` — deployment 하나의 상세 (entrypoint·work pool·parameters·job_variables 등) 를 출력합니다 (예: `prefect deployment inspect "pipeline/high_deployment"`). `pipeline` 시그니처가 바뀐 뒤 파라미터 스키마가 새로 반영됐는지 확인합니다 (§6.2).
   - `prefect deployment run "<flow>/<deployment>" -p <key>=<value>` — 등록된 deployment 를 파라미터와 함께 trigger 합니다 (§6.3).
+  - `prefect deployment delete "<flow>/<deployment>"` — 등록된 deployment 를 server 에서 삭제합니다 (예: `prefect deployment delete "pipeline/high_deployment"`). 시그니처를 바꿔 다시 올릴 때는 삭제 없이 `prefect deploy` 로 덮어써도 되며, 등급을 폐기할 때만 삭제합니다.
 - **§7 Credentials**
   - `prefect block ls` — server 에 등록된 블록 (`Credentials` 등) 을 표 (ID·Type·Name·Slug) 로 출력합니다. run-code 자격증명 (Credentials 블록, 예 `yrocket`) 이 등록됐는지 확인합니다 (§7). 블록은 **그 server 의 DB 에 저장** 되므로 server 마다 따로 등록해야 하며, 등록 시점의 `PREFECT_API_URL` 이 가리킨 server 에 들어갑니다.
   - `prefect variable ls` — server 에 등록된 Variable 을 출력합니다. 자격증명을 Secret 블록 대신 Variable 로 넣었는지 확인합니다 (§7).
@@ -1031,233 +1034,302 @@ Prefect 실행 모드는 **serve mode** 와 **work pool mode** 이고, 차이는
 - **핵심 차이 — 실행 주체** — work pool type 이 실행 주체를 정합니다. `process` 는 worker 가 자기 컨테이너 안 subprocess 로, `docker` 는 job 마다 뜨는 flow 컨테이너가, `kubernetes` 는 job 마다 뜨는 pod 가 실행합니다. 그 실행 주체의 이미지에 라이브러리가 있어야 합니다.
 - **serve mode** — 단일 머신·소규모 구성에는 work pool 없이 `flow.serve()` 만 띄우는 serve mode 가 더 단순합니다.
 
-## Appendix D. backing_ports.ps1
+## Appendix D. backing_ports.sh
 
-backing service 포트 하나를 대상으로, action 에 따라 **도달성 확인 (`check`)** 또는 **인바운드 방화벽 개방 (`open`)** 을 하는 스크립트입니다 ([§3 Reachability to backing service](#reachability-to-backing-service)). `open` 은 그 포트를 **serving 하는 호스트**에서 (관리자 PowerShell), `check` 는 backing 호스트가 **아닌 소비 호스트**에서 실행합니다 — serving 호스트에서 자기 IP 로의 접속은 loopback 이라 방화벽과 무관하게 늘 열린 것처럼 보이기 때문입니다. `open` 은 멱등입니다. Linux 는 sibling `backing_ports.sh` (ufw) 로 grammar 동일합니다.
+backing service 포트 하나를 대상으로, action 에 따라 **도달성 확인 (`check`)** 또는 **인바운드 방화벽 개방 (`open`)** 을 하는 스크립트입니다 ([§3 Reachability to backing service](#reachability-to-backing-service)). `open` 은 그 포트를 **serving 하는 호스트**에서 `sudo` 로 (ufw 규칙 추가), `check` 는 backing 호스트가 **아닌 소비 호스트**에서 실행합니다 — serving 호스트에서 자기 IP 로의 접속은 loopback 이라 방화벽과 무관하게 늘 열린 것처럼 보이기 때문입니다. `open` 은 멱등입니다.
 
-```powershell
-# backing_ports.ps1 — check reachability of, or open the inbound firewall for, one backing service port.
-# __version__ = "0.0.1"  # Semantic Versioning:  Version = Major.Minor.Patch
+```bash
+#!/usr/bin/env bash
+# backing_ports.sh — check reachability of, or open the inbound firewall (ufw) for, one backing service port.
+# __version__ = "0.0.2"  # Semantic Versioning:  Version = Major.Minor.Patch
 #   check : TCP-test the port. Run from a CONSUMING host (server / dispatcher) to see real reachability;
 #           from the serving host it is a meaningless loopback (always OPEN).
-#   open  : open the inbound firewall (Windows Defender) for the port. Run as Administrator on the host
-#           that SERVES the port. Idempotent (skips an existing rule).
+#   open  : open the inbound firewall (ufw) for the port. Run on the host that SERVES it (needs sudo). Idempotent.
 #
-#   .\backing_ports.ps1 check -host 192.168.0.13 -port 5432
-#   .\backing_ports.ps1 open  -host 192.168.0.13 -port 5432
-param(
-    [Parameter(Mandatory = $true, Position = 0)]
-    [ValidateSet("check", "open")]
-    [string]$Action,
-    [Parameter(Mandatory = $true)] [Alias("host")] [string]$HostName,   # backing service host (LAN IP)
-    [Parameter(Mandatory = $true)] [int]$Port                           # service port, e.g. 5432 / 9000 / 5000
-)
-$ErrorActionPreference = "Stop"
+#   ./backing_ports.sh check -host 192.168.0.13 -port 5432
+#   sudo ./backing_ports.sh open -host 192.168.0.13 -port 5432
+set -euo pipefail
 
-if ($Action -eq "check") {
-    $ok = (Test-NetConnection -ComputerName $HostName -Port $Port -WarningAction SilentlyContinue).TcpTestSucceeded
-    if ($ok) { Write-Host "${HostName}:${Port} OPEN" }
-    else     { Write-Host "${HostName}:${Port} BLOCKED" }
-}
-else {   # open
-    $subnet = ($HostName -replace '\.\d+$', '.0') + "/24"   # derive the LAN /24 from the address
-    $rule   = "mlops backing $Port inbound"
-    Write-Host "ensuring inbound $Port/tcp from $subnet"
-    if (-not (Get-NetFirewallRule -DisplayName $rule -ErrorAction SilentlyContinue)) {   # idempotent
-        New-NetFirewallRule -DisplayName $rule -Direction Inbound `
-            -Protocol TCP -LocalPort $Port -Action Allow -RemoteAddress $subnet | Out-Null
-    }
-}
+ACTION="${1:-}"; [ $# -gt 0 ] && shift
+HOST=""; PORT=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -host) HOST="$2"; shift 2 ;;
+        -port) PORT="$2"; shift 2 ;;
+        *) echo "Unknown option: $1" >&2; exit 1 ;;
+    esac
+done
+
+if { [ "$ACTION" != check ] && [ "$ACTION" != open ]; } || [ -z "$HOST" ] || [ -z "$PORT" ]; then
+    echo "Usage: $0 <check|open> -host <ip> -port <port>" >&2
+    exit 1
+fi
+
+if [ "$ACTION" = check ]; then
+    if timeout 3 bash -c "</dev/tcp/$HOST/$PORT" 2>/dev/null; then
+        echo "$HOST:$PORT OPEN"
+    else
+        echo "$HOST:$PORT BLOCKED"
+    fi
+else   # open
+    subnet="${HOST%.*}.0/24"                # derive the LAN /24 from the address (192.168.0.13 -> 192.168.0.0/24)
+    echo "ensuring inbound $PORT/tcp from $subnet"
+    sudo ufw allow from "$subnet" to any port "$PORT" proto tcp   # idempotent: ufw skips a duplicate rule
+fi
 ```
 
-## Appendix E. run_server.ps1
+## Appendix E. run_server.sh
 
-제어 노드에서 Prefect server compose 스택을 띄우는 기동 스크립트입니다 ([§4 Server Setup](#server-setup)). 공유 `mlops` 네트워크가 없으면 만들고 `docker-compose.server.yml` 을 올립니다. work pool 등록은 별도입니다 (`register_pool.ps1` — [Appendix F](#appendix-f-register_poolps1)).
+제어 노드에서 Prefect server compose 스택을 띄우는 기동 스크립트입니다 ([§4 Server Setup](#server-setup)). 공유 `mlops` 네트워크가 없으면 만들고 `docker-compose.server.yml` 을 올립니다. work pool 등록은 별도입니다 (`register_pool.sh` — [Appendix F](#appendix-f-register_poolsh)).
 
-```powershell
-# run_server.ps1 — bring up the Prefect server compose stack on the Control Node.
+```bash
+#!/usr/bin/env bash
+# run_server.sh — bring up the Prefect server compose stack on the Control Node.
 # __version__ = "0.0.20"  # Semantic Versioning:  Version = Major.Minor.Patch
-param(
-    [string]$Yaml    = 'docker-compose.server.yml', # the server compose file (its top-level name: sets the project)
-    [string]$Network = 'mlops'                      # shared external network
-)
+set -euo pipefail
 
-$ErrorActionPreference = "Stop"
+YAML="docker-compose.server.yml"   # the server compose file (its top-level name: sets the project)
+NETWORK="mlops"                    # shared external network
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --yaml)    YAML="$2"; shift 2 ;;
+        --network) NETWORK="$2"; shift 2 ;;
+        *) echo "Unknown option: $1" >&2; exit 1 ;;
+    esac
+done
 
 # Create the shared network only if it does not exist yet.
-docker network inspect $Network *> $null
-if ($LASTEXITCODE -ne 0) { docker network create $Network | Out-Null }
+docker network inspect "$NETWORK" >/dev/null 2>&1 || docker network create "$NETWORK" >/dev/null
 
-docker compose -f $Yaml up -d   # project name comes from the compose file's top-level name: (prefect-server)
+docker compose -f "$YAML" up -d   # project name comes from the compose file's top-level name: (prefect-server)
 ```
 
-## Appendix F. register_pool.ps1
+## Appendix F. register_pool.sh
 
 server 에 work pool 을 등록 (또는 갱신) 하는 스크립트입니다 ([§4 Work Pool Registration](#work-pool-registration)).
 
 `--overwrite` 가 **템플릿 동기** 를 맡습니다 — pool 이 이미 있으면 오류 없이 그 pool 의 **base job template 을 현재 파일** (`docker-pool-template-high.json`·`docker-pool-template-low.json`) **내용으로 갱신** 합니다 (idempotent). 그래서 템플릿을 고친 뒤 다시 실행하면 server 쪽 설정이 로컬 파일과 같아집니다 (`--overwrite` 가 없으면 이미 있는 pool 에 대해 등록이 실패).
 
-```powershell
-# register_pool.ps1 — register (or update) one Prefect work pool on the running server.
-# __version__ = "0.0.20"  # Semantic Versioning:  Version = Major.Minor.Patch
-# Idempotent: --overwrite keeps the base job template in sync. Run after the server is up (run_server.ps1).
+```bash
+#!/usr/bin/env bash
+# register_pool.sh — register (or update) one Prefect work pool on the running server.
+# __version__ = "0.0.22"  # Semantic Versioning:  Version = Major.Minor.Patch
+# Idempotent: --overwrite keeps the base job template in sync. Run after the server is up (run_server.sh).
+# The base job template env PREFECT_API_URL is filled from docker-compose.env, so flow containers know
+# where the server is. Backing addresses (MinIO / PostgreSQL / MLflow) live as prefect Variables
+# (register_variables.sh), not here.
 #
-#   .\register_pool.ps1 -PoolName high_performance  -TemplateFile docker-pool-template-high.json -ConcurrencyLimit 16
-#   .\register_pool.ps1 -PoolName low_performance -TemplateFile docker-pool-template-low.json  -ConcurrencyLimit 8
+#   ./register_pool.sh --pool-name high_performance --template-file docker-pool-template-high.json --concurrency-limit 16
+#   ./register_pool.sh --pool-name low_performance  --template-file docker-pool-template-low.json  --concurrency-limit 8
 #
-param(
-    [Parameter(Mandatory = $true)] [string]$PoolName,      # work pool name, e.g. high_performance | low_performance
-    [Parameter(Mandatory = $true)] [string]$TemplateFile,  # base job template mounted into the server at /templates, e.g. docker-pool-template-high.json
-    [int]$ConcurrencyLimit = 0,                            # pool-wide max concurrent runs (0 = no limit)
-    [string]$Compose       = 'docker-compose.server.yml'   # the server compose (its top-level name: sets the project)
-)
+set -euo pipefail
 
-$ErrorActionPreference = "Stop"
+POOL_NAME=""                           # work pool name, e.g. high_performance | low_performance
+TEMPLATE_FILE=""                       # base job template on the host, e.g. docker-pool-template-high.json
+CONCURRENCY_LIMIT=0                    # pool-wide max concurrent runs (0 = no limit)
+COMPOSE="docker-compose.server.yml"   # the server compose (its top-level name: sets the project)
+ENV_FILE="../docker-compose.env"      # shared address source; falls back to the committed _example
 
-# Build the create command. --overwrite keeps the base job template in sync on re-runs.
-# (work-pool create has no --concurrency-limit in Prefect 3; the pool-wide limit is set separately below.)
-$create = @('work-pool', 'create', $PoolName, '--type', 'docker',
-            '--base-job-template', "/templates/$TemplateFile", '--overwrite')
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --pool-name)         POOL_NAME="$2"; shift 2 ;;
+        --template-file)     TEMPLATE_FILE="$2"; shift 2 ;;
+        --concurrency-limit) CONCURRENCY_LIMIT="$2"; shift 2 ;;
+        --compose)           COMPOSE="$2"; shift 2 ;;
+        --env-file)          ENV_FILE="$2"; shift 2 ;;
+        *) echo "Unknown option: $1" >&2; exit 1 ;;
+    esac
+done
 
-# The server container has the prefect CLI and the mounted templates (/templates/<TemplateFile>).
-# The API may need a moment after startup, so retry a few times.
-$created = $false
-for ($i = 1; $i -le 10; $i++) {
-    docker compose -f $Compose exec -T prefect_server prefect @create
-    if ($?) { $created = $true; break }
-    Start-Sleep -Seconds 3
-}
+if [ -z "$POOL_NAME" ] || [ -z "$TEMPLATE_FILE" ]; then
+    echo "Usage: $0 --pool-name <name> --template-file <file> [--concurrency-limit N] [--compose file] [--env-file file]" >&2
+    exit 1
+fi
+
+command -v jq >/dev/null 2>&1 || { echo "jq is required to build the base job template env. Install jq and retry." >&2; exit 1; }
+
+# Use the real env if present, otherwise the committed _example (placeholders).
+[ -f "$ENV_FILE" ] || ENV_FILE="../docker-compose.env_example"
+[ -f "$ENV_FILE" ] || { echo "env file not found: $ENV_FILE" >&2; exit 1; }
+
+# Load the addresses (exported) from the single source, then inject them into the template's env.default.
+set -a; . "$ENV_FILE"; set +a
+
+TPL_JSON="$(jq \
+    --arg api "${PREFECT_API_URL:-}" \
+    '.variables.properties.env.default = { PREFECT_API_URL: $api }' "$TEMPLATE_FILE")"
+
+# Register (or update) the pool with the generated template. The API may need a moment after startup,
+# so retry a few times. The template is pushed into the server container, then created from there.
+# --overwrite keeps the base job template in sync on re-runs.
+created=false
+for _ in $(seq 1 10); do
+    if printf '%s' "$TPL_JSON" | docker compose -f "$COMPOSE" exec -T prefect_server sh -c 'cat > /tmp/pool-template.json' \
+       && docker compose -f "$COMPOSE" exec -T prefect_server \
+            prefect work-pool create "$POOL_NAME" --type docker \
+            --base-job-template /tmp/pool-template.json --overwrite; then
+        created=true; break
+    fi
+    sleep 3
+done
 
 # Pool-wide concurrency limit is a separate command (create does not accept it).
-if ($created -and $ConcurrencyLimit -gt 0) {
-    docker compose -f $Compose exec -T prefect_server prefect work-pool set-concurrency-limit $PoolName "$ConcurrencyLimit"
-}
+if [ "$created" = true ] && [ "$CONCURRENCY_LIMIT" -gt 0 ]; then
+    docker compose -f "$COMPOSE" exec -T prefect_server \
+        prefect work-pool set-concurrency-limit "$POOL_NAME" "$CONCURRENCY_LIMIT"
+fi
 ```
 
-## Appendix G. register_variables.ps1
+## Appendix G. register_variables.sh
 
 server 에 backing service **주소 Variable** (MinIO·PostgreSQL·MLflow endpoint, 비밀 아님) 을 등록하는 스크립트입니다 ([§4 Service Address Variables](#service-address-variables)).
 
 `--overwrite` 라 재실행하면 값이 동기화됩니다 (idempotent). 등록한 각 값을 stdout 에 그대로 찍습니다. `--postgresql` 은 `host:port` 한 덩어리로 받아 **단일 Variable `postgresql_host_port`** 로 저장하고, 소비 코드 (`catalog.py`·`pipeline.py`) 가 host·port 로 분리합니다.
 
-```powershell
-# register_variables.ps1 — register the shared backing-service ADDRESS variables on the Prefect server.
-# __version__ = "0.0.4"  # Semantic Versioning:  Version = Major.Minor.Patch
+```bash
+#!/usr/bin/env bash
+# register_variables.sh — register the shared backing-service ADDRESS variables on the Prefect server.
+# __version__ = "0.0.7"  # Semantic Versioning:  Version = Major.Minor.Patch
 # Single, non-secret source of backing addresses (LAN IP). Flow code and host tools (catalog.py) read
 # them via prefect Variables from the server, so no docker-compose.env is needed outside containers.
-# Run after the server is up (run_server.ps1). Idempotent (--overwrite).
+# Run after the server is up (run_server.sh). Idempotent (--overwrite).
 #
-#   .\register_variables.ps1 -Minio http://192.168.0.8:9000 -Postgresql 192.168.0.13:5432 `
-#                            -Mlflow http://192.168.0.8:5000
+#   ./register_variables.sh --minio http://192.168.0.8:9000 --postgresql 192.168.0.13:5432 \
+#                           --mlflow http://192.168.0.8:5000
 #
-param(
-    [string]$Minio      = 'http://192.168.0.8:9000',     # MinIO S3 endpoint (data download / model upload)
-    [string]$Postgresql = '192.168.0.13:5432',            # PostgreSQL host:port (catalog / optuna DBs)
-    [string]$Mlflow     = 'http://192.168.0.8:5000',     # MLflow tracking server
-    [string]$Compose    = 'docker-compose.server.yml'    # the server compose (its top-level name: sets the project)
-)
+set -euo pipefail
 
-$ErrorActionPreference = "Stop"
+COMPOSE="docker-compose.server.yml"          # the server compose (its top-level name: sets the project)
+MINIO_ENDPOINT="http://192.168.0.8:9000"     # MinIO S3 endpoint (data download / model upload)
+POSTGRESQL_HOST_PORT="192.168.0.13:5432"      # PostgreSQL host:port (catalog / optuna DBs)
+MLFLOW_TRACKING_URI="http://192.168.0.8:5000"   # MLflow tracking server
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --minio)      MINIO_ENDPOINT="$2"; shift 2 ;;
+        --postgresql) POSTGRESQL_HOST_PORT="$2"; shift 2 ;;
+        --mlflow)     MLFLOW_TRACKING_URI="$2"; shift 2 ;;
+        --compose)    COMPOSE="$2"; shift 2 ;;
+        *) echo "Unknown option: $1" >&2; exit 1 ;;
+    esac
+done
 
 # set one variable on the server (overwrite so re-runs keep it in sync); echo the value we registered.
-function Set-Var($name, $value) {
-    docker compose -f $Compose exec -T prefect_server prefect variable set $name $value --overwrite | Out-Null
-    Write-Host "Set variable '$name' to `"$value`""
+set_var() {
+    docker compose -f "$COMPOSE" exec -T prefect_server \
+        prefect variable set "$1" "$2" --overwrite >/dev/null   # hush prefect's value-less line
+    echo "Set variable '$1' to \"$2\""
 }
 
-Set-Var 'minio_endpoint'      $Minio
-Set-Var 'postgresql_host_port' $Postgresql   # host:port; consumers (catalog.py / pipeline.py) split it
-Set-Var 'mlflow_tracking_uri' $Mlflow
-Write-Host "[register_variables] set: minio_endpoint, postgresql_host_port, mlflow_tracking_uri"
+set_var minio_endpoint      "$MINIO_ENDPOINT"
+set_var postgresql_host_port "$POSTGRESQL_HOST_PORT"  # host:port; consumers (catalog.py / pipeline.py) split it
+set_var mlflow_tracking_uri "$MLFLOW_TRACKING_URI"
+echo "[register_variables] set: minio_endpoint, postgresql_host_port, mlflow_tracking_uri"
 ```
 
-## Appendix H. run_dispatcher.ps1
+## Appendix H. run_dispatcher.sh
 
-각 dispatcher 머신에서 dispatcher compose 스택을 띄우는 기동 스크립트입니다 ([§5.2](#52-container)). server 기동과 work pool 등록은 별도입니다 (server 는 [Appendix E](#appendix-e-run_serverps1), pool 은 `register_pool.ps1` — [Appendix F](#appendix-f-register_poolps1)).
+각 dispatcher 머신에서 dispatcher compose 스택을 띄우는 기동 스크립트입니다 ([§5.2](#52-container)). server 기동과 work pool 등록은 별도입니다 (server 는 [Appendix E](#appendix-e-run_serversh), pool 은 `register_pool.sh` — [Appendix F](#appendix-f-register_poolsh)).
 
-```powershell
-# run_dispatcher.ps1 — start the Prefect dispatcher compose stack on a worker machine.
+```bash
+#!/usr/bin/env bash
+# run_dispatcher.sh — start the Prefect dispatcher compose stack on a worker machine.
 # __version__ = "0.0.20"  # Semantic Versioning:  Version = Major.Minor.Patch
 #
-# Brings up prefect_dispatcher, which polls the given WorkPool. WORK_POOL/WORKER_LIMIT are read from
+# Brings up prefect_dispatcher, which polls the given work pool. WORK_POOL/WORKER_LIMIT are read from
 # this shell at "docker compose up" (compose interpolation), so they are exported below.
 # (PREFECT_API_URL etc. are read directly by the container from env_file=docker-compose.env.)
-# Work pools live on the server and are registered there (register_pool.ps1), not here. Before starting,
-# this script checks WorkPool against the pools registered on the server; if it is missing, it lists the
-# registered pools and lets you pick one (guards against typos / not-yet-registered pools).
+# Work pools live on the server and are registered there (register_pool.sh), not here. Before starting,
+# this script checks the work pool against the pools registered on the server; if it is missing, it lists
+# the registered pools and lets you pick one (guards against typos / not-yet-registered pools).
 #
-#   .\run_dispatcher.ps1 -WorkPool high_performance    # a high-tier machine
-#   .\run_dispatcher.ps1 -WorkPool low_performance   # a low-tier machine
+#   ./run_dispatcher.sh --work-pool high_performance    # a high-tier machine
+#   ./run_dispatcher.sh --work-pool low_performance     # a low-tier machine
 #
-param(
-    [string]$WorkPool = 'high_performance',  # the work pool this machine polls: high_performance | low_performance
-    [int]$WorkerLimit = 8                     # max pipeline_flow containers this machine spawns concurrently
-)
+set -euo pipefail
 
-$ErrorActionPreference = "Stop"
+WORK_POOL="high_performance"   # the work pool this machine polls: high_performance | low_performance
+WORKER_LIMIT=8                 # max pipeline_flow containers this machine spawns concurrently
 
-$compose = "docker-compose.dispatcher.yml"
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --work-pool)    WORK_POOL="$2"; shift 2 ;;
+        --worker-limit) WORKER_LIMIT="$2"; shift 2 ;;
+        *) echo "Unknown option: $1" >&2; exit 1 ;;
+    esac
+done
+
+COMPOSE="docker-compose.dispatcher.yml"
+
+command -v jq >/dev/null 2>&1 || { echo "jq is required to parse 'prefect work-pool ls --output json'. Install jq and retry." >&2; exit 1; }
+
+# The pool validation below uses the host 'prefect' CLI, so it must be installed and on PATH.
+if ! command -v prefect >/dev/null 2>&1; then
+    echo "prefect CLI not found on this host (needed to validate the work pool against the server)." >&2
+    echo "Install it, then retry:" >&2
+    echo "  pipx install prefect && pipx ensurepath     # then open a new shell, or: export PATH=\"\$HOME/.local/bin:\$PATH\"" >&2
+    echo "  export PREFECT_API_URL=http://127.0.0.1:4200/api   # point at the running server (run_server.sh)" >&2
+    exit 1
+fi
 
 # On the same host, dispatcher/pipeline_flow containers reach the server by service name over the shared mlops network.
 # (For a dispatcher on another machine, remove the networks block in the dispatcher compose and set PREFECT_API_URL to http://<host IP>:4200/api.)
-docker network inspect mlops *> $null
-if ($LASTEXITCODE -ne 0) { docker network create mlops | Out-Null }
+docker network inspect mlops >/dev/null 2>&1 || docker network create mlops >/dev/null
 
-# --- Validate WorkPool against the pools registered on the server ------------------------------
+# --- Validate the work pool against the pools registered on the server --------------------------
 # Read the registered pools with the host prefect CLI (configured via its PREFECT_API_URL profile).
-# EAP=Continue so the CLI's stderr (progress / version warnings) does not abort the script under Stop.
-function Get-PoolsJsonText {
-    $old = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    try {
-        $raw = prefect work-pool ls --output json 2>$null
-    } finally {
-        $ErrorActionPreference = $old
-    }
-    $text = ($raw -join "`n")
-    $s = $text.IndexOf('['); $e = $text.LastIndexOf(']')
-    if ($s -lt 0 -or $e -le $s) { return $null }       # no JSON => prefect CLI missing or server unreachable
-    return $text.Substring($s, $e - $s + 1)
-}
-
-$jsonText = Get-PoolsJsonText
-if ($null -eq $jsonText) {
-    throw "Could not read work pools via the host 'prefect' CLI. Ensure prefect is installed and PREFECT_API_URL points at a running server (run_server.ps1), then retry."
-}
+# stderr (progress / version warnings) is dropped so only the JSON on stdout is parsed.
+pools_json="$(prefect work-pool ls --output json 2>/dev/null || true)"
+if [ -z "$pools_json" ]; then
+    echo "Could not read work pools via the host 'prefect' CLI. Ensure prefect is installed and PREFECT_API_URL points at a running server (run_server.sh), then retry." >&2
+    exit 1
+fi
 
 # This dispatcher spawns docker containers, so only docker-type pools are valid
 # (a name that exists only as a process pool — e.g. one auto-created by a typo — is rejected here).
-$pools = @($jsonText | ConvertFrom-Json | Where-Object { $_.type -eq 'docker' })
-if ($pools.Count -eq 0) {
-    throw "No docker-type work pools are registered on the server. Run register_pool.ps1 (it registers --type docker) first."
-}
+pools=()
+while IFS= read -r line; do
+    [ -n "$line" ] && pools+=("$line")
+done < <(printf '%s' "$pools_json" | jq -r '.[] | select(.type == "docker") | .name')
 
-$match = $pools | Where-Object { $_.name -eq $WorkPool } | Select-Object -First 1
-if ($match) {
-    $WorkPool = $match.name                              # normalize to the exact registered name
-} else {
-    Write-Warning "'$WorkPool' is not a registered docker work pool."
-    Write-Host "Registered docker work pools:" -ForegroundColor Cyan
-    for ($i = 0; $i -lt $pools.Count; $i++) {
-        Write-Host ("{0,3}) {1}" -f ($i + 1), $pools[$i].name)
-    }
-    $sel = Read-Host "Pick a pool number (Enter to abort)"
-    $idx = 0
-    if (-not [int]::TryParse($sel, [ref]$idx) -or $idx -lt 1 -or $idx -gt $pools.Count) {
-        throw "Aborted: no valid work pool selected."
-    }
-    $WorkPool = $pools[$idx - 1].name
-    Write-Host "Using work pool '$WorkPool'." -ForegroundColor Green
-}
+if [ "${#pools[@]}" -eq 0 ]; then
+    echo "No docker-type work pools are registered on the server. Run register_pool.sh (it registers --type docker) first." >&2
+    exit 1
+fi
 
-# For the dispatcher compose ${...} interpolation — export to the current shell env (applies to this docker compose up).
-$env:WORK_POOL    = $WorkPool
-$env:WORKER_LIMIT = "$WorkerLimit"
+match=""
+for p in "${pools[@]}"; do
+    if [ "$p" = "$WORK_POOL" ]; then match="$p"; break; fi
+done
+
+if [ -n "$match" ]; then
+    WORK_POOL="$match"                                   # normalize to the exact registered name
+else
+    echo "Warning: '$WORK_POOL' is not a registered docker work pool." >&2
+    echo "Registered docker work pools:"
+    i=1
+    for p in "${pools[@]}"; do
+        printf '%3d) %s\n' "$i" "$p"
+        i=$((i + 1))
+    done
+    read -r -p "Pick a pool number (Enter to abort): " sel
+    if ! printf '%s' "$sel" | grep -qE '^[0-9]+$' || [ "$sel" -lt 1 ] || [ "$sel" -gt "${#pools[@]}" ]; then
+        echo "Aborted: no valid work pool selected." >&2
+        exit 1
+    fi
+    WORK_POOL="${pools[$((sel - 1))]}"
+    echo "Using work pool '$WORK_POOL'."
+fi
+
+# For the dispatcher compose ${...} interpolation — export so this docker compose up sees them.
+export WORK_POOL
+export WORKER_LIMIT
 
 # Bring the dispatcher stack down (keeping volumes) and back up in the background.
 # project name comes from the compose file's top-level name: (prefect-dispatcher), so down only ever touches this stack.
-docker compose -f $compose down
-docker compose -f $compose up -d
+docker compose -f "$COMPOSE" down
+docker compose -f "$COMPOSE" up -d
 ```
 
 ## Appendix I. credentials.py
