@@ -1,11 +1,27 @@
 import express from 'express';
 import { MongoClient } from 'mongodb';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 const app = express();
 
 // 환경 변수 설정
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://host.docker.internal:27017/yControl';
 const API_PORT = process.env.API_PORT || 3000;
+
+// single credential source shared by every environment; no file = no authentication
+const CREDENTIALS_PATH = path.join(os.homedir(), '.config', 'y', 'mongo_credentials.json');
+
+function readMongoCredentials() {
+  if (!fs.existsSync(CREDENTIALS_PATH)) return null;
+  const loaded = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, 'utf-8'));
+  if (!loaded.username || !loaded.password) {
+    // fail loudly instead of silently falling back to no-auth
+    throw new Error(`invalid credential file ${CREDENTIALS_PATH}: expected non-empty username and password`);
+  }
+  return { username: loaded.username, password: loaded.password };
+}
 
 // 허용된 컬렉션 목록 설정
 const rawCollections = process.env.ALLOWED_COLLECTIONS || 'log';
@@ -30,7 +46,10 @@ app.use((req, res, next) => {
 
 
 // MongoDB 연결
-const client = new MongoClient(MONGO_URI);
+const credentials = readMongoCredentials();
+const client = credentials
+  ? new MongoClient(MONGO_URI, { auth: credentials, authSource: 'admin' })
+  : new MongoClient(MONGO_URI);
 let db;
 
 async function startServer() {

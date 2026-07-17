@@ -1,11 +1,12 @@
 # docker-compose.yml
-# __version__ = "0.0.10"
+# __version__ = "0.0.12"
 
 name: mongodb                       # Fix the project name (prefix of container and volume names).
 
 services:
   mongo:
     image: mongo:7
+    command: ["mongod", "--auth"]   # enforce authentication (root user already created in the volume)
     env_file:
       - docker-compose.env_example          # injects MONGO_INITDB_ROOT_USERNAME / MONGO_INITDB_ROOT_PASSWORD
     ports:
@@ -13,7 +14,8 @@ services:
     volumes:
       - mongo-data:/data/db
     healthcheck:
-      test: ["CMD-SHELL", "mongosh -u $$MONGO_INITDB_ROOT_USERNAME -p $$MONGO_INITDB_ROOT_PASSWORD --quiet --eval 'db.adminCommand({ ping: 1 })'"]
+      # ping needs no authentication even when auth is enabled, so no credentials here
+      test: ["CMD-SHELL", "mongosh --quiet --eval 'db.adminCommand({ ping: 1 })'"]
       interval: 5s
       retries: 10
     networks:
