@@ -1,6 +1,6 @@
 # docker-compose.server.yml
-# __version__ = "0.0.12"
-name: prefect-server   # compose project name baked in (replaces -p); run_server.ps1 / register_pool.ps1 rely on it
+# __version__ = "0.0.13"
+name: prefect-server   # compose project name baked in (replaces -p); run_server.sh / register_pool.sh rely on it
 services:
   prefect_server:
     image: prefecthq/prefect:3-latest

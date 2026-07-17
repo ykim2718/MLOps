@@ -1,6 +1,6 @@
 # Prefect Pipeline Orchestration on Docker
 
-<sub>rev. 590</sub>
+<sub>rev. 592</sub>
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
@@ -289,7 +289,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
 
   ```yaml
   # docker-compose.server.yml
-  # __version__ = "0.0.12"
+  # __version__ = "0.0.13"
   name: prefect-server   # compose project name baked in (replaces -p); run_server.sh / register_pool.sh rely on it
   services:
     prefect_server:
@@ -410,10 +410,12 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
 
   - `image` — flow 컨테이너로 쓸 Pipeline Flow 이미지 ([§6.1](#61-image)). 태그 (`pipeline-flow:latest`) 가 곧 **런타임 버전** (라이브러리 + orchestrator) 입니다.
   - `image_pull_policy` — flow 이미지를 언제 pull 할지입니다. `pipeline-flow:latest` 는 dispatcher 호스트에서 **로컬로 빌드** 하므로 `IfNotPresent` (있으면 pull 안 함) 로 둬야 registry 로 나가지 않습니다. `Always` 면 매번 pull 을 시도해 로컬 전용 이미지에 대해 실패합니다.
-  - `env` — flow 컨테이너가 server·Secret 을 찾는 `PREFECT_API_URL` 을 줍니다.
+  - `env` — flow 컨테이너가 server·Secret 을 찾는 `PREFECT_API_URL` 을 줍니다. 이 값은 템플릿에 **하드코딩하지 않습니다** — `register_pool.sh` 가 등록 시 server 호스트의 `docker-compose.env` 에 있는 `PREFECT_API_URL` 로 `env.default` 를 덮어씁니다. 위 JSON 의 `http://prefect_server:4200/api` 는 register_pool.sh 없이 등록할 때만 쓰이는 fallback 이고, 실제 주소는 `docker-compose.env` 한 곳에서 관리합니다.
   - `mem_limit` — flow 컨테이너 메모리 상한입니다. 등급별 pool 의 핵심 차이값입니다 (high 크게·low 작게). `16g` 의 `g` 는 기가바이트 (GiB) 를 뜻합니다.
 
   `networks` 는 flow 컨테이너가 붙을 네트워크로, `mlops` 면 `minio`·`prefect_server` 를 서비스명으로 찾습니다. `auto_remove: true` 면 run 이 끝날 때 컨테이너가 자동으로 삭제됩니다.
+
+  > **`PREFECT_API_URL` 은 `docker-compose.env` 한 곳에서** — flow 컨테이너의 이 값은 register_pool.sh 가 server 호스트의 `docker-compose.env` 에서 읽어 template 에 주입하므로, 주소를 template JSON 이나 여러 곳에 직접 넣지 않습니다. flow 컨테이너가 **server 와 같은 호스트**면 서비스명 `http://prefect_server:4200/api`, dispatcher 가 **다른 호스트**면 서버 LAN IP (`http://<server IP>:4200/api`) 를 `docker-compose.env` 에 두고 register_pool.sh 를 (재)실행하면 됩니다. 서비스명은 server 와 같은 호스트에서만 풀리므로, 여러 호스트에 dispatcher 가 걸치면 LAN IP 로 둡니다.
 
   > base job template 필드는 Prefect 버전마다 다를 수 있으니, `prefect work-pool get-default-base-job-template --type docker` 로 최신 템플릿을 받아 `image`·`env`·`networks` 의 `default` 만 채우길 권장합니다.
 
@@ -540,7 +542,7 @@ dispatcher 는 **`docker` work pool** 을 polling 해 job 마다 `pipeline_flow`
   #
   # Build (once):  docker build -f Dockerfile.dispatcher -t prefect-dispatcher:latest .
   # Start:         ./run_dispatcher.sh --work-pool high_performance
-  # __version__ = "0.0.10"
+  # __version__ = "0.0.11"
   name: prefect-dispatcher   # compose project name baked in (replaces -p); run_dispatcher.sh relies on it
   services:
     prefect_dispatcher:
