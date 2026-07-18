@@ -1,9 +1,11 @@
 # pipeline.py — orchestrator; Prefect runs this as the deployment entrypoint.
+import collections
 import os
 import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+from typing import Dict
 
 import boto3
 from prefect import flow, get_run_logger
@@ -11,13 +13,40 @@ from prefect.blocks.core import Block
 from prefect.blocks.fields import SecretDict
 from prefect.variables import Variable
 
-__version__ = "0.0.32"  # Semantic Versioning:  Version = Major.Minor.Patch
+__version__ = "0.0.33"  # Semantic Versioning:  Version = Major.Minor.Patch
 
 
 class Credentials(Block):              # ONE block holds a credential set as nested dicts (values hidden);
     minio: SecretDict                  # access_key, secret_key        (endpoint is a prefect Variable)
     postgresql_catalog: SecretDict     # username, password, database  (host:port is the prefect Variable 'postgresql_host_port')
     postgresql_optuna: SecretDict      # username, password, database  (host:port is the prefect Variable 'postgresql_host_port')
+
+
+def run_payload(*, payload: str, submitter: str, data: Path, script: Path, env: Dict[str, str]) -> None:
+    """Run the team's payload in script/, streaming its output to this run's logs line-by-line and
+    keeping the tail so the crash reason is visible even when the payload never created a flow run.
+
+    A payload that dies BEFORE entering its @flow (import error, __main__ exception, bad CLI args)
+    registers no Prefect flow run: in the dashboard Runs there is NO payload flow error to see - only
+    this pipeline flow error. Raises RuntimeError on a non-zero exit; the tail carries the traceback."""
+    log = get_run_logger()
+    tail = collections.deque(maxlen=50)              # last N output lines -> attached to the error
+    # -u: unbuffered so lines arrive live; stderr -> stdout so the traceback streams inline, in order.
+    proc = subprocess.Popen(
+        ["python", "-u", payload, "--submitter", submitter, "--data_folder", str(data)],
+        cwd=script, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    for line in proc.stdout:                          # stream each line to this run's UI logs as it arrives
+        line = line.rstrip()
+        log.info(line)
+        tail.append(line)
+    returncode = proc.wait()
+    if returncode != 0:
+        raise RuntimeError(
+            f"payload {payload} exited {returncode} for {submitter}; last {len(tail)} output line(s):\n"
+            + "\n".join(tail)
+            + "\n-- if the payload died before entering its @flow (import error, __main__ exception, "
+              "bad CLI args), no payload flow run is created: the Prefect dashboard Runs shows NO "
+              "payload flow error, only this pipeline flow error.")
 
 
 # flow_run_name shows who submitted the run (e.g. alice@a1b2c3d).
@@ -74,13 +103,8 @@ def pipeline(*, submitter: str = "", payload: str = "my_flow.py", prefect_block:
         opt_port = opt_port or "5432"                                               # tolerate a bare host with no ':port'
         env["POSTGRESQL_OPTUNA_DSN"] = (f"postgresql://{opt['username']}:{opt['password']}"
                                         f"@{opt_host}:{opt_port}/{opt['database']}")
-        # run the team's payload in script/; run identity passed as CLI args; output streams to this run's logs.
-        # check=False on purpose: a payload crash is already surfaced (traceback + Failed state) in the
-        # payload's own my_flow run, so re-raising here would duplicate the error on the orchestrator run.
-        result = subprocess.run(["python", payload, "--submitter", submitter,
-                                 "--data_folder", data], cwd=script, env=env)
-        if result.returncode != 0:
-            log.warning(f"payload {payload} exited {result.returncode} for {submitter}; "
-                        f"see the '{submitter}' my_flow run for the traceback")
+        # run the team's payload in script/; run identity passed as CLI args. run_payload streams the
+        # output to this run's logs and raises on a non-zero exit so the failure can't pass silently.
+        run_payload(payload=payload, submitter=submitter, data=data, script=script, env=env)
     finally:
         shutil.rmtree(base, ignore_errors=True)    # one cleanup removes repo/ + script/ + data/

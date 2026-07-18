@@ -721,11 +721,13 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
 
   ```python
   # pipeline.py — orchestrator; Prefect runs this as the deployment entrypoint.
+  import collections
   import os
   import shutil
   import subprocess
   import tempfile
   from pathlib import Path
+  from typing import Dict
 
   import boto3
   from prefect import flow, get_run_logger
@@ -733,13 +735,40 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
   from prefect.blocks.fields import SecretDict
   from prefect.variables import Variable
 
-  __version__ = "0.0.32"  # Semantic Versioning:  Version = Major.Minor.Patch
+  __version__ = "0.0.33"  # Semantic Versioning:  Version = Major.Minor.Patch
 
 
   class Credentials(Block):              # ONE block holds a credential set as nested dicts (values hidden);
       minio: SecretDict                  # access_key, secret_key        (endpoint is a prefect Variable)
       postgresql_catalog: SecretDict     # username, password, database  (host:port is the prefect Variable 'postgresql_host_port')
       postgresql_optuna: SecretDict      # username, password, database  (host:port is the prefect Variable 'postgresql_host_port')
+
+
+  def run_payload(*, payload: str, submitter: str, data: Path, script: Path, env: Dict[str, str]) -> None:
+      """Run the team's payload in script/, streaming its output to this run's logs line-by-line and
+      keeping the tail so the crash reason is visible even when the payload never created a flow run.
+
+      A payload that dies BEFORE entering its @flow (import error, __main__ exception, bad CLI args)
+      registers no Prefect flow run: in the dashboard Runs there is NO payload flow error to see - only
+      this pipeline flow error. Raises RuntimeError on a non-zero exit; the tail carries the traceback."""
+      log = get_run_logger()
+      tail = collections.deque(maxlen=50)              # last N output lines -> attached to the error
+      # -u: unbuffered so lines arrive live; stderr -> stdout so the traceback streams inline, in order.
+      proc = subprocess.Popen(
+          ["python", "-u", payload, "--submitter", submitter, "--data_folder", str(data)],
+          cwd=script, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+      for line in proc.stdout:                          # stream each line to this run's UI logs as it arrives
+          line = line.rstrip()
+          log.info(line)
+          tail.append(line)
+      returncode = proc.wait()
+      if returncode != 0:
+          raise RuntimeError(
+              f"payload {payload} exited {returncode} for {submitter}; last {len(tail)} output line(s):\n"
+              + "\n".join(tail)
+              + "\n-- if the payload died before entering its @flow (import error, __main__ exception, "
+                "bad CLI args), no payload flow run is created: the Prefect dashboard Runs shows NO "
+                "payload flow error, only this pipeline flow error.")
 
 
   # flow_run_name shows who submitted the run (e.g. alice#a1b2c3d).
@@ -794,21 +823,16 @@ Pipeline Flow 는 dispatcher 가 job 마다 띄우는 per-flow 컨테이너입�
           opt_port = opt_port or "5432"                                # tolerate a bare host with no ':port'
           env["POSTGRESQL_OPTUNA_DSN"] = (f"postgresql://{opt['username']}:{opt['password']}"
                                           f"@{opt_host}:{opt_port}/{opt['database']}")
-          # run the team's payload in script/; run identity passed as CLI args; output streams to this run's logs.
-          # check=False on purpose: a payload crash is already surfaced (traceback + Failed state) in the
-          # payload's own my_flow run, so re-raising here would duplicate the error on the orchestrator run.
-          result = subprocess.run(["python", payload, "--submitter", submitter,
-                                   "--data_folder", data], cwd=script, env=env)
-          if result.returncode != 0:
-              log.warning(f"payload {payload} exited {result.returncode} for {submitter}; "
-                          f"see the '{submitter}' my_flow run for the traceback")
+          # run the team's payload in script/; run identity passed as CLI args. run_payload streams the
+          # output to this run's logs and raises on a non-zero exit so the failure can't pass silently.
+          run_payload(payload=payload, submitter=submitter, data=data, script=script, env=env)
       finally:
           shutil.rmtree(base, ignore_errors=True)    # one cleanup removes repo/ + script/ + data/
   ```
 
   - **자유로운 코드** — `payload` 로 팀원이 자기 스크립트를 지정하므로 코드를 정해진 틀에 맞출 필요가 없습니다. 입력은 CLI 인자 (`--submitter`·`--data_folder`) 로 받으므로, 팀원 스크립트는 `argparse` 로 그 값만 읽으면 됩니다. (payload 는 이미 체크아웃된 `script/` 안에서 돌므로 git 정보는 넘기지 않고, MLflow 서버 주소만 Variable `mlflow_tracking_uri` 를 `MLFLOW_TRACKING_URI` 환경변수로 넘깁니다.)
   - **데이터 이력** — `minio_bucket`·`minio_key` 가 **flow 파라미터** 라서 Prefect 가 run 마다 입력값을 `prefect` DB 에 자동 저장합니다 (어느 버킷·객체를 썼는지 lineage 로 남습니다).
-  - **crash 확인** — payload 가 0 이 아닌 코드로 끝나도 `pipeline` 은 **다시 raise 하지 않습니다** (`subprocess.run` 은 `check=False`). payload 의 실패는 이미 payload **자신의 `my_flow` run** 에 traceback + **Failed** 상태로 남으므로, orchestrator run 에 중복으로 띄우지 않고 한 줄 경고 (`payload ... exited N ... see the '<submitter>' my_flow run`) 만 남긴 뒤 orchestrator run 은 **Completed** 로 끝납니다. 팀원은 자기 이름이 붙은 `my_flow` run (예 `alice`) 의 **Logs** 에서 crash 원인을 봅니다 (payload 가 `@task` 를 쓰면 [§9](#9-prefect-ui) 에서 **어느 단계** 가 깨졌는지까지). 단 git·MinIO 등 orchestrator **자신의** 오류는 그대로 raise 되어 pipeline run 이 **Failed** 로 표시됩니다.
+  - **crash 확인** — payload 가 0 이 아닌 코드로 끝나면 `run_payload` 이 `RuntimeError` 를 raise 해 **pipeline run 이 `Failed` 로 표시됩니다**. payload 가 도는 동안 그 출력은 한 줄씩 pipeline run 의 **Logs** 로 스트리밍되고, 실패하면 마지막 출력 (stdout·stderr, traceback 포함) 이 예외 메시지에도 함께 담깁니다. payload 가 `@flow` 로 감싸여 자기 `my_flow` run 을 만든 경우엔 그 run 도 **Failed** 로 남아 [§9](#9-prefect-ui) 에서 **어느 단계** 가 깨졌는지 함께 보입니다. 반면 payload 가 **`@flow` 에 진입하기 전에** 죽으면 (import error·`__main__` 예외·잘못된 CLI 인자) payload flow run 자체가 만들어지지 않으므로, dashboard 의 **Runs** 에는 payload flow error 가 **안 보이고 pipeline flow error 만** 보입니다 — 이때 crash 원인은 pipeline run 의 Logs·예외 메시지에서 확인합니다. git·MinIO 등 orchestrator **자신의** 오류도 그대로 raise 되어 pipeline run 이 **Failed** 로 표시됩니다.
   - **이력 자동 저장** — `@flow` 진입 시 Prefect 가 run 의 상태·로그·파라미터를 자동 기록합니다. 지표·모델은 팀원 코드가 MLflow 로 로깅하면 함께 남습니다 — pipeline.py 가 Variable `mlflow_tracking_uri` 를 `MLFLOW_TRACKING_URI` env 로 넘기므로 payload 는 그 tracking 서버로 로깅합니다 (없으면 로컬 `./mlruns` 로 빠지니 `mlflow_tracking_uri` Variable 을 등록해야 대시보드에 뜹니다). 마찬가지로 블록의 `postgresql_optuna` 비밀 + Variable `postgresql_host_port` 로 DSN 을 조립해 `POSTGRESQL_OPTUNA_DSN` env 로 넘기므로, Optuna 를 쓰는 payload 는 공유 postgres study 에 연결합니다 ([Appendix M](#appendix-m-prefect-task)).
 
   [§6.2](#62-deployment) 의 deployment 가 entrypoint 를 **`pipeline.py:pipeline`** 로 가리킵니다. 이 문자열은 server 의 deployment 레코드 (`prefect` DB) 에 저장되고, dispatcher 가 띄운 컨테이너 안에서 Prefect 런타임이 이미지 작업 디렉터리 (`/work`, `Dockerfile.pipeline_flow` 가 `pipeline.py` 를 COPY 한 곳) 기준으로 `pipeline.py` 를 import 해 콜론 뒤 **`@flow` 함수 `pipeline`** 을 run 파라미터 (`git_repo`·`git_commit_hash`·`minio_key`·`minio_bucket`·`submitter`·`prefect_block`·`payload`) 와 함께 호출합니다. 그래서 deployment entrypoint 가 곧 이 `pipeline.py` 입니다.
