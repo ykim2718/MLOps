@@ -4,7 +4,7 @@ REM Launch the pool-mode dry-run trigger. cmd.exe can't run a .ps1 directly,
 REM so invoke PowerShell explicitly. %~dp0 = this .bat's folder (so the .ps1
 REM is found regardless of the current directory).
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0my_trigger.ps1" ^
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0trigger.ps1" ^
   -Mode pool -PrefectBlock yrocket -Submitter "" ^
   -PrefectApiUrl "http://192.168.0.13:4200/api" ^
   -PrefectDeployment pipeline/low_deployment ^
