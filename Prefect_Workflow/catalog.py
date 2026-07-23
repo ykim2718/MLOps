@@ -108,8 +108,9 @@ from typing import Any, List, Optional, Tuple
 
 import psycopg2
 from psycopg2.extras import Json, RealDictCursor
+from tqdm import tqdm
 
-__version__ = "0.0.50"  # Semantic Versioning:  Version = Major.Minor.Patch
+__version__ = "0.0.51"  # Semantic Versioning:  Version = Major.Minor.Patch
 
 _BLOCK = None       # credential block name (-b); set by CLI or set_block(), used to read creds
 _PG_HOST = None      # CLI --pg-host: override the postgresql endpoint host only (creds unchanged)
@@ -392,11 +393,13 @@ def upload(manifest: dict, path: Optional[str] = None, block: Optional[str] = No
                 Bucket=bucket, Prefix=prefix, MaxKeys=1).get("KeyCount", 0):
             raise FileExistsError(f"minio_key already exists: {minio_path} "
                                   "(use a new key, or --register-only to register existing objects)")
-        n_files, size_bytes = 0, 0
+        n_files = len(files)
+        size_bytes = sum(fp.stat().st_size for fp, _ in files)
+        pbar = tqdm(total=size_bytes, ncols=100, unit="B", unit_scale=True, unit_divisor=1024)
         for fp, rel in files:                      # upload each resolved file (key suffix relative to path base)
-            s3.upload_file(str(fp), bucket, prefix + rel)
-            n_files += 1
-            size_bytes += fp.stat().st_size
+            pbar.set_description(f"Uploading {Path(rel).name}")
+            s3.upload_file(str(fp), bucket, prefix + rel, Callback=pbar.update)   # bytes-transferred callback
+        pbar.close()
         action = f"uploaded {n_files} file(s), {size_bytes} B and registered"
 
     doc = dict(manifest)                               # store the manifest verbatim -> doc JSONB
