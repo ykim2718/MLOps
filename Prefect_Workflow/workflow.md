@@ -2,7 +2,7 @@
 
 # Prefect AI/ML Workflow Automation
 
-<sub>rev. 96</sub>
+<sub>rev. 113</sub>
 
 Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환경입니다. 이 문서는 **전체 워크플로우의 인덱스 (개요)** 이고, 도구별 상세는 컴포넌트 문서로 잇습니다.
 
@@ -78,13 +78,13 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
 
 ## 4. Data
 
-### Flow
+### 4.1 Flow
 
-  데이터가 실제로 오가는 두 지점의 endpoint · parameter 입니다 — **upload 은 host 의 `catalog.py` 가 `spec.json` 으로**, **download 은 컨테이너 안 `pipeline.py` 가 Prefect Secret 블록으로** 합니다.
+  데이터가 실제로 오가는 두 지점의 endpoint · parameter 입니다 — **upload 은 host 의 `catalog.py` 가 `manifest.json` 으로**, **download 은 컨테이너 안 `pipeline.py` 가 Prefect Secret 블록으로** 합니다.
 
   ```text
-  UPLOAD — host: catalog.py upload spec.json --path <p>  (-b <block> [--pg-host/--minio-host localhost])
-    input: spec.json { minio_key, bucket, ...free-form } + --path <p> (file/folder/glob)
+  UPLOAD — host: catalog.py upload manifest.json --path <p>  (-b <block> [--pg-host/--minio-host localhost])
+    input: manifest.json { minio_key, bucket, ...free-form } + --path <p> (file/folder/glob)
     creds: Credentials block (-b <block>) — minio + postgresql_catalog sections
   ┌────────────┐                        ┌─────────────┐
   │ catalog.py │─ upload file ────────> │ MinIO :9000 │  → s3://<bucket>/<minio_key>/<files>
@@ -101,55 +101,83 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
   └─────────────┘                       └──────────────────┘
   ```
 
-### Upload
+  host 쪽의 upload 와 download 는 모두 `catalog.py` 가 담당합니다 (flow 실행 중의 자동 download 만 컨테이너 안 `pipeline.py` 담당). 명령·옵션 상세는 [Appendix A. catalog.py CLI](#appendix-a-catalogpy-cli) 를 참고합니다.
 
-  `catalog.py upload <spec.json> --path <경로>` 는 **`--path` 가 가리키는 파일**을 MinIO 에 올리고 `catalog` 에 레코드를 등록합니다. spec 은 **자유 형식 문서**로, 예약 키(`minio_key`·`bucket`·`member`)만 해석하고 나머지는 그대로 `doc`(JSONB) 로 보존합니다 (임의 키·중첩 허용). host 에서는 `-b <block>` 로 자격증명 블록을 고르고 컨테이너용 endpoint 를 `--pg-host/--minio-host localhost` 로 덮어씁니다. spec.json 하나에 여러 spec 을 `{minio_key: spec, ...}` 로 담았다면 `--minio-key <key>` 로 그중 하나만 올립니다 (그 키가 minio_key 가 됨).
+### 4.2 Manifest.json, Manifests.json
+
+  manifest 는 **자유 형식 문서**입니다 — 예약 키만 해석하고 나머지는 그대로 `doc` (JSONB) 로 보존합니다 (임의 키·중첩 허용 — 아래 `description` 처럼 객체도 가능). 예약 키는 다음 **두 개뿐**이며, manifest.json 엔 `path` 를 넣지 않습니다 (자격증명 블록은 manifest 가 아니라 CLI `-b <block>` 로만 지정 — manifest 에 `block` 이 있으면 오류로 중단).
+
+  - **`minio_key`** — 필수 키입니다. MinIO key prefix 이자 catalog key 가 됩니다.
+  - **`bucket`** — 대상 bucket 입니다 (기본 `datasets`).
+
+  manifest.json 은 manifest 하나를 담은 파일입니다 (필수 키는 `minio_key`, 나머지는 자유 형식).
+
+  ```json
+  {
+      "minio_key": "epc/v1",
+      "bucket": "datasets",
+      "provider": "zoo",
+      "description": {
+          "fab": "fab2",
+          "chamber": "CH3",
+          "rows": 52416
+      }
+  }
+  ```
+
+  manifests.json 은 여러 manifest 를 `{minio_key: manifest, ...}` 로 담은 파일이며, `--minio-key <key>` 로 그중 하나를 골라 올립니다 (그 최상위 key 가 `minio_key` 로 쓰이므로 각 manifest 안에는 `minio_key` 를 넣지 않습니다). 최상위 `__common__` key 는 데이터셋이 아니라 **공통 필드**입니다 — 선택된 manifest 에 `{**common, **manifest}` 으로 병합되며, 같은 필드는 선택 manifest 가 이깁니다 (`__common__` 에 `minio_key` 를 넣으면 오류로 중단).
+
+  ```json
+  {
+      "__common__": {
+          "bucket": "datasets",
+          "provider": "zoo"
+      },
+      "epc/v1": {
+          "description": {
+              "fab": "fab2",
+              "chamber": "CH3",
+              "rows": 52416
+          }
+      },
+      "epc/v2": {
+          "description": {
+              "fab": "fab3",
+              "chamber": "CH1",
+              "rows": 61024
+          }
+      }
+  }
+  ```
+
+### 4.3 Upload
+
+  `catalog.py upload <manifest.json> --path <경로>` 는 **`--path` 가 가리키는 파일**을 MinIO 에 올리고 PostgreSQL의 `catalog` 에 레코드를 등록합니다. host 에서는 `-b <block>` 로 자격증명 블록을 고르고 컨테이너용 endpoint 를 `--pg-host/--minio-host localhost` 로 덮어씁니다.
 
   ```python
-  # catalog.py  upload(spec, path, block) — key steps (path from CLI --path; minio_key/bucket from spec)
+  # catalog.py  upload(manifest, path, block) — key steps (path from CLI --path; minio_key/bucket from manifest)
   files = _resolve_sources(path)               # file | folder (recursive) | glob (dir/*.csv, **)
   ensure_schema()                              # create the datasets table if missing
   if get(minio_key):                           # minio_key is immutable -> stop if it exists
       raise FileExistsError("minio_key already exists")
   for fp, rel in files:                        # upload each file -> s3://<bucket>/<minio_key>/<rel>
       s3.upload_file(str(fp), bucket, prefix + rel)
-  doc = {k: v for k, v in spec.items() if k != "block"}    # store the spec verbatim -> doc JSONB
+  doc = dict(manifest)                             # store the manifest verbatim -> doc JSONB
   register(minio_key, minio_path, doc,         # register the catalog row (path + counts + doc)
            n_files=n_files, size_bytes=size_bytes)
   ```
 
-  ```powershell
-  python catalog.py spec spec.json                                                          # scaffold an empty spec
-  python catalog.py upload spec.json --path ./data -b <block> --pg-host localhost --minio-host localhost
-  python catalog.py upload specs.json --minio-key epc/v1 --path ./data -b <block> --minio-host localhost  # pick one
+  ```bash
+  python catalog.py manifest manifest.json                                                          # scaffold an empty manifest
+  python catalog.py upload manifest.json --path ./data -b <block> --pg-host localhost --minio-host localhost
+  python catalog.py upload manifests.json --minio-key epc/v1 --path ./data -b <block> --minio-host localhost  # pick one
   ```
 
-  올릴 대상은 **`--path` 하나**로 정하고, 파일 한 개·여러 개·와일드카드는 그 값으로 구별됩니다 (별도 목록 없음).
+  > manifest 의 규칙·예시는 위 [4.2 Manifest.json, Manifests.json](#42-manifestjson-manifestsjson) 을, `--path` 해석 4 가지 경우는 [A.1 Upload](#a1-upload) 를 참고합니다. 매치가 0건이면 `FileNotFoundError` 로 중단하고, 같은 `minio_key` 가 이미 있으면 덮지 않고 중단합니다.
 
-  | --path | files | MinIO key |
-  |---|---|---|
-  | single file `data/powerconsumption.csv` | 그 파일 1개 | `<minio_key>/powerconsumption.csv` |
-  | folder `data` | 폴더 아래 전부 (재귀) | `<minio_key>/<상대경로>` |
-  | wildcard `data/*.parquet` | 매치 파일 (비재귀) | `<minio_key>/<파일명>` |
-  | recursive wildcard `data/**/*.parquet` | 하위까지 매치 | `<minio_key>/<상대경로>` |
+### 4.4 Download
 
-  ```json
-  {
-    "minio_key": "epc/v1",
-    "bucket": "datasets",
-    "provider": "alice",
-    "description": {
-      "source": "kaggle",
-      "rows": 52416
-    }
-  }
-  ```
-
-  > 예약 키(`minio_key`·`bucket`·`block`) 외의 필드(`provider`·`description{…}` 등)는 형식 제약 없이 `doc` 에 그대로 저장됩니다. `--path` 값만 바꿔 위 네 경우를 씁니다 (`--path data` · `--path data/*.parquet` · `--path data/**/*.parquet`). 매치가 0건이면 `FileNotFoundError` 로 중단하고, 같은 `minio_key` 가 이미 있으면 덮지 않고 중단합니다. spec.json 엔 `path` 를 넣지 않습니다 (필수 키는 `minio_key`).
-
-### Download
-
-  `catalog.py download <minio_key> [dest]` 은 catalog 에서 그 key 의 `minio_path` 를 찾아 그 아래 객체를 `dest` (기본 `./<minio_key>`) 로 내려받습니다.
+  `catalog.py download <minio_key> [dest]` 은 PostgreSQL의 catalog 에서 그 key 의 `minio_path` 를 찾아 그 아래 객체를 `dest` (기본 `./<minio_key>`) 로 내려받습니다.
 
   ```python
   # catalog.py  download(minio_key, dest, block) — key steps
@@ -159,17 +187,15 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
       s3.download_file(bucket, obj["Key"], dest_path)   # -> dest/<relative key>
   ```
 
-  ```powershell
+  ```bash
   python catalog.py download <minio_key> ./out -b <block> --pg-host localhost --minio-host localhost
   ```
-
-  > flow 실행 중의 자동 download 는 CLI 가 아니라 컨테이너 안 `pipeline.py` 가 Prefect Secret 블록으로 합니다 (위 [Flow](#flow) 다이어그램).
 
 ---
 
 ## 5. Run
 
-### Script Structure
+### 5.1 Script Structure
 
 `pipeline.py` 가 `pipeline_flow` 컨테이너 안에서 run 마다 만드는 폴더 구조입니다.
 
@@ -187,30 +213,30 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
    └─ *.parquet
 ```
 
-### Server Connection
+### 5.2 Server Connection
 
   trigger 에 앞서 client (dispatcher 또는 job 을 trigger 하는 노드) 가 **어느 Prefect server 에 연결할지** (`PREFECT_API_URL`) 를 정합니다. **최초 1회** 설정하면 이후 모든 client 명령이 이 server 를 향합니다. 설정 방법은 두 가지이며, **환경변수가 프로필보다 우선**합니다 (환경변수 > 프로필 > 기본값). 같은 컴퓨터면 `<Host IP>` 는 `localhost`.
 
-  **1) 환경변수** — OS 환경변수로 지정. Windows 에서 영구 등록은 `setx` (또는 시스템 속성), 현재 셸에만 임시로 줄 땐 `$env:`.
+  **1) 환경변수** — OS 환경변수로 지정. 영구 등록은 `~/.bashrc` 에 `export` 줄을 추가하고, 현재 shell 에만 임시로 줄 땐 `export` 를 바로 실행합니다.
 
-  ```powershell
-  setx PREFECT_API_URL "http://<Host IP>:4200/api"     # persistent (User scope) - applies to newly opened shells
-  $env:PREFECT_API_URL = "http://<Host IP>:4200/api"   # temporary - current PowerShell only
+  ```bash
+  echo 'export PREFECT_API_URL="http://<Host IP>:4200/api"' >> ~/.bashrc   # persistent - applies to newly opened shells
+  export PREFECT_API_URL="http://<Host IP>:4200/api"                       # temporary - current shell only
   ```
 
   **2) prefect CLI** — Prefect 프로필 (`~/.prefect/profiles.toml`) 에 저장.
 
-  ```powershell
+  ```bash
   prefect config set PREFECT_API_URL="http://<Host IP>:4200/api"
   ```
 
-  이 주소는 job 을 **trigger** 할 때 (`prefect deployment run ...`), **deployment 를 등록** 할 때, **Prefect Secret 블록을 등록/조회** 할 때 등 server 와 통신하는 client 작업 전반에 쓰입니다. 단 이 값은 **접속 주소일 뿐**이라, 그 URL 에 Prefect 서버가 실제로 떠 있어야 합니다.
+  이 주소는 job 을 **trigger** 할 때 (`prefect deployment run ...`), **deployment 를 등록** 할 때, **Prefect Secret 블록을 등록/조회** 할 때 등 server 와 통신하는 client 작업 전반에 쓰입니다. 단 이 값은 **접속 주소일 뿐**이라, 그 URL 에 Prefect server 가 실제로 떠 있어야 합니다.
 
-### Trigger
+### 5.3 Trigger
 
   등록된 deployment 를 파라미터와 함께 실행(trigger)합니다 — 팀원·코드·데이터는 `git_repo`·`git_commit_hash`·`minio_key` 파라미터로, `prefect deployment ls` 명령으로 관리자가 등록한 deployment 를 고릅니다.
 
-  ```powershell
+  ```bash
   # Trigger — pick the tier by deployment; heavy -> high, light -> low (params otherwise identical).
   prefect deployment run "pipeline/pipelineflow-high" -p submitter=alice -p prefect_block=yrocket -p git_repo=https://github.com/<user>/<repo>.git -p git_commit_hash=a1b2c3d -p minio_key=SYDNEY/001.parquet
   prefect deployment run "pipeline/pipelineflow-low"  -p submitter=alice -p prefect_block=yrocket -p git_repo=https://github.com/<user>/<repo>.git -p git_commit_hash=a1b2c3d -p minio_key=SYDNEY/001.parquet
@@ -234,7 +260,7 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
 
 ## 6. my_flow.py
 
-  Prefect orchestrator (`pipeline.py`) 가 `script/` 와 `data/` 를 미리 받아 두고 실행 정보 (`--submitter`) 와 데이터 경로 (`--data_folder`) 를 CLI 인자로 넘기므로, payload 는 `argparse` 로 받아 씁니다. 서버·MLflow 없이 로컬에서 배선만 빠르게 확인할 땐 `--run-on local` 로 ephemeral 실행합니다. 아래는 각 단계 함수·설정 변수가 실제 파일 (`train_prepare.py` … `optuna.json`) 을 대신하는 **dry run** 으로, 실 ML 없이 workflow 배선만 검증합니다 (실제 파일은 [example/dry_run/my_flow.py](example/dry_run/my_flow.py)).
+  Prefect orchestrator (`pipeline.py`) 가 `script/` 와 `data/` 를 미리 받아 두고 실행 정보 (`--submitter`) 와 데이터 경로 (`--data_folder`) 를 CLI 인자로 넘기므로, payload 는 `argparse` 로 받아 씁니다. server·MLflow 없이 로컬에서 배선만 빠르게 확인할 땐 `--run-on local` 로 ephemeral 실행합니다. 아래는 각 단계 함수·설정 변수가 실제 파일 (`train_prepare.py` … `optuna.json`) 을 대신하는 **dry run** 으로, 실 ML 없이 workflow 배선만 검증합니다 (실제 파일은 [example/dry_run/my_flow.py](example/dry_run/my_flow.py)).
 
   ```python
   """example/dry_run/my_flow.py — git-delivered ML payload, Prefect dry run.
@@ -451,7 +477,7 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
 
 여러 팀원이 결과를 잃지 않고 추적·재현·재사용하도록, 한 실행의 **입력·관계·산출물** 을 파라미터·태그·장부로 못 박습니다. Prefect 는 orchestrator 일 뿐 버전을 보관하지 않으므로, 아래 다섯 축을 명시적으로 고정합니다.
 
-### Lineage
+### 7.1 Lineage
 
 데이터·코드·결과를 양방향으로 추적합니다. `catalog` 레코드 (`minio_key`·`doc`·`prefect_run_id`) 와 MLflow run 태그 (입력 `input_minio_key`, git 커밋 SHA) 를 **서로 참조** 해 두면 세 축이 한 실행에서 묶입니다.
 
@@ -466,11 +492,11 @@ data (minio_key) ──used by──> code (Prefect run @ git SHA) ──produce
 - **Model ↔ code** — MLflow 는 git repo 안에서 run 을 돌리면 커밋 SHA 를 자동 태그하므로 "이 모델이 어떤 코드로 학습됐나" 가 남습니다.
 - **History** — `python catalog.py list`·`find <minio_key>` (데이터·메타·등록 시각, [Appendix A](#appendix-a-catalogpy-cli)) · `git log <git_commit_hash>` (코드 이력) · MLflow UI (run·파라미터·메트릭·모델 단계) 로 각 축의 이력을 봅니다.
 
-### Persistence
+### 7.2 Persistence
 
 모델·데이터를 catalog 에 등록해 보존하고 검색·선택 다운로드합니다 — 메타는 PostgreSQL `catalog` 장부에, 실데이터·아티팩트는 MinIO 에 남습니다. 컨테이너는 run 마다 파괴돼도 결과는 이 두 저장소에 남아 나중에 `minio_key` 로 되찾습니다.
 
-### Versioning
+### 7.3 Versioning
 
 코드·런타임·데이터 버전을 고정합니다.
 
@@ -484,11 +510,11 @@ data (minio_key) ──used by──> code (Prefect run @ git SHA) ──produce
 - **Runtime** — 이미지 태그가 라이브러리 + orchestrator 를 고정합니다. 라이브러리를 바꾸면 새 태그로 빌드합니다 (`latest` 는 가변이라 재현엔 명시 태그).
 - **Data** — `minio_key` 는 불변이라 같은 key = 같은 바이트입니다. catalog 가 그 key ↔ 메타(`doc`)·등록 시각을 장부로 보관합니다.
 
-### Reproducibility
+### 7.4 Reproducibility
 
 데이터 버전·하이퍼파라미터·시드를 고정해 동일 결과를 보장합니다. 과거 실행을 되살리려면 그때의 **세 좌표** (코드 SHA · 런타임 태그 · 데이터 key) 를 그대로 넘겨 다시 trigger 합니다.
 
-```powershell
+```bash
 # same SHA/key as before; if the runtime tag changed, target the deployment registered under that tag.
 prefect deployment run "pipeline/pipelineflow-high" -p git_repo=<repo> -p git_commit_hash=<recorded SHA> -p minio_key=<recorded key>
 ```
@@ -497,7 +523,7 @@ prefect deployment run "pipeline/pipelineflow-high" -p git_repo=<repo> -p git_co
 
 > **Private repo** — 런타임 `git fetch` 대상이 private 이면 토큰이 필요합니다. Prefect Secret 으로 토큰을 받아 인증 URL (`git_repo`) 로 fetch 하거나 git credential helper 를 설정합니다. public repo 면 그대로 됩니다.
 
-### Reusability
+### 7.5 Reusability
 
 워크플로우·피처를 다른 프로젝트에서 다시 씁니다. 공통 단계·유틸·catalog 접근 계층을 common repo (nested repository, [Appendix B](#appendix-b-common-repo-nested-repository)) 로 묶어 여러 팀원 repo 가 `git subtree` 로 함께 심어 씁니다.
 
@@ -529,66 +555,78 @@ def inference_flow():
 
 ## Appendix A. catalog.py CLI
 
-`catalog.py` 는 데이터 카탈로그 (PostgreSQL `catalog` DB 장부) 와 MinIO 객체를 함께 다루는 접근 계층이자 CLI 입니다. flow 에서 라이브러리로 import 해 쓰거나 ([§4 Data](#4-data)), 아래 CLI 로 직접 둘러보기·업로드·다운로드·삭제합니다. **catalog.py 는 컨테이너 밖에서 실행** 되므로 자격증명은 Prefect 프로필 ([§5 Server Connection](#server-connection) 의 `prefect config set PREFECT_API_URL=...`) 로 연결된 **Prefect Secret 블록** 에서 가져옵니다 (멤버별 `Credentials` 블록은 아래 [Credentials](#credentials-prefect-block), 없으면 default). 프로세스 환경변수나 `docker-compose.env` 파일은 쓰지 않습니다 (그 파일은 컨테이너 스택용이라 host 의 catalog.py 가 찾을 수 없음). 업로드·다운로드·삭제는 boto3 로 처리하므로 `mc` 가 필요 없습니다.
+`catalog.py` 는 데이터 catalog (PostgreSQL `catalog` DB 장부) 와 MinIO 객체를 함께 다루는 접근 계층이자 CLI 입니다. flow 에서 라이브러리로 import 해 쓰거나 ([§4 Data](#4-data)), 아래 CLI 로 직접 둘러보기·업로드·다운로드·삭제합니다. 자격증명은 Prefect Secret 블록에서 가져옵니다 (아래 [A.3 Credentials](#a3-credentials)). 업로드·다운로드·삭제는 boto3 로 처리하므로 `mc` 가 필요 없습니다.
 
-**Target** 은 명령이 접속하는 곳입니다 (**PostgreSQL** = catalog DB 장부, **MinIO** = 객체 저장소). 각 명령은 실행 시작 시 접속 대상 (PostgreSQL DSN — 비밀번호 가림 · MinIO endpoint) 과 **자격증명 출처** (`[creds: prefect-block (block=…) | default (localhost)]`) 를 stderr 로 먼저 출력해 "어디로 접속해 도는지, 자격증명을 어디서 가져왔는지" 를 알립니다. `-b <block>` 로 블록을 주면 `prefect-block (block=…)`, `-b` 없이 돌리면 `default (localhost)` 로 표시됩니다. `-b` 를 **줬는데** credentials.py import 실패나 블록 로드 실패(서버 미연결·블록 없음)면 조용히 default 로 안 가고 오류로 즉시 중단합니다. `--version`/`-V` 로 버전을 확인합니다.
+**Target** 은 명령이 접속하는 곳입니다 (**PostgreSQL** = catalog DB 장부, **MinIO** = 객체 저장소). 각 명령은 실행 시작 시 접속 대상 (PostgreSQL DSN — 비밀번호 가림 · MinIO endpoint) 과 **자격증명 출처** (`[creds: prefect-block (block=…) | default (localhost)]`) 를 stderr 로 먼저 출력해 "어디로 접속해 도는지, 자격증명을 어디서 가져왔는지" 를 알립니다 (`-b` 동작 상세는 아래 [A.3 Credentials](#a3-credentials)). `--version`/`-V` 로 버전을 확인합니다.
 
 | Command | Target | Purpose |
 |---|---|---|
 | `list` | PostgreSQL | 등록된 데이터셋 목록 (minio_key 요약) |
 | `find <minio_key> [key=value ...]` | PostgreSQL | minio_key prefix + doc 최상위 키=값 검색 |
-| `spec [out.json]` | (local) | 빈 upload spec.json 뼈대 생성 (채워서 `upload` 에 사용; 기본 `spec.json`) |
-| `upload <spec.json> --path P [--minio-key key] [--register-only]` | MinIO + PostgreSQL | `--path` 의 파일/폴더/glob 을 MinIO 적재 + catalog 등록 (메타는 spec; `--minio-key` 면 spec 이 `{key: spec, ...}` 중 하나). `--register-only` 는 업로드를 건너뛰고 MinIO 에 이미 있는 그 key 의 객체로 catalog 행만 등록 (`--path` 불필요; 업로드가 MinIO 는 됐는데 등록 전에 끊긴 경우 복구용) |
-| `download <minio_key> [dest]` | PostgreSQL + MinIO | 그 key 의 객체 다운로드 (dest 기본 `./<minio_key>`) |
+| `manifest [out.json]` | (local) | 빈 upload manifest.json 뼈대 생성 (위 [§4.2 Manifest.json, Manifests.json](#42-manifestjson-manifestsjson)) |
+| `upload <manifest.json> --path P [--minio-key key] [--register-only]` | MinIO + PostgreSQL | `--path` 의 파일/폴더/glob 을 MinIO 적재 + catalog 등록 (아래 [A.1 Upload](#a1-upload)) |
+| `download <minio_key> [dest]` | PostgreSQL + MinIO | 그 key 의 객체 다운로드 (아래 [A.2 Download](#a2-download)) |
 | `remove <minio_key> [--yes]` | MinIO + PostgreSQL | 그 key 의 MinIO 객체 + catalog 행 영구 삭제 |
 | `objects [minio_key]` | MinIO | MinIO 에 실제로 있는 객체 나열 (catalog 무관; minio_key prefix 로 한정) |
 
-MinIO·PostgreSQL 에 접속하는 명령에는 `-b <block>` (자격증명 블록 선택) 와 `--pg-host`/`--minio-host` (endpoint host 만 덮어쓰기, creds 불변) 를 붙일 수 있습니다 — 컨테이너용 블록을 host 에서 쓸 때 유용합니다 (`spec` 은 로컬 파일 생성이라 해당 없음). 자세한 것은 아래 [Credentials](#credentials-prefect-block).
+MinIO·PostgreSQL 에 접속하는 명령에는 `-b <block>` (자격증명 블록 선택) 와 `--pg-host`/`--minio-host` (endpoint host 만 덮어쓰기, creds 불변) 를 붙일 수 있습니다 — 컨테이너용 블록을 host 에서 쓸 때 유용합니다 (`manifest` 은 로컬 파일 생성이라 해당 없음). 자세한 것은 아래 [A.3 Credentials](#a3-credentials).
 
-catalog.py 는 자격증명 블록 클래스 (`credentials.py`, `../Docker/Prefect`) 를 import 하므로, host 에서 실행 전 그 폴더를 `PYTHONPATH` 에 1회 넣습니다 (경로는 repo 위치에 맞춰 `Resolve-Path` 로 풉니다).
+catalog.py 는 자격증명 블록 클래스 (`credentials.py`, `../Docker/Prefect`) 를 import 하므로, host 에서 실행 전 그 폴더를 `PYTHONPATH` 에 1회 넣습니다 (경로는 repo 위치에 맞춰 절대경로로 풀며, `source catalog_cli.sh` 로 실행해야 현재 shell 에 남습니다).
 
-```powershell
-# catalog_cli.ps1
-# Add-PyPath: prepend a .py file's folder to PYTHONPATH (dedup, keep existing) so its module can be imported.
-function Add-PyPath([string]$file) {
-    $dir = Split-Path (Resolve-Path $file) -Parent
-    $rest = $env:PYTHONPATH -split ';' | Where-Object { $_ -and $_ -ne $dir }
-    $env:PYTHONPATH = (@($dir) + $rest) -join ';'
+```bash
+# catalog_cli.sh
+# add_pypath: prepend a .py file's folder to PYTHONPATH (dedup, keep existing) so its module can be imported.
+add_pypath() {
+    local dir rest
+    dir=$(cd "$(dirname "$1")" && pwd) || { echo "add_pypath: cannot resolve $1" >&2; return 1; }
+    rest=$(printf '%s' "$PYTHONPATH" | tr ':' '\n' | grep -vxF "$dir" | grep -v '^$' | paste -sd ':' -)
+    export PYTHONPATH="$dir${rest:+:$rest}"
 }
-Add-PyPath ..\Docker\Prefect\credentials.py   # catalog.py imports credentials.py from this folder
-$env:PYTHONPATH
+add_pypath ../Docker/Prefect/credentials.py   # catalog.py imports credentials.py from this folder
+echo "$PYTHONPATH"
 
 python catalog.py list                              # registered datasets (minio_key summary)
 python catalog.py find epc fab=fab2                 # search by minio_key prefix + doc key=value
-python catalog.py spec spec.json                    # write an empty upload spec template
-python catalog.py upload spec.json --path ./out     # upload files at --path + register (JSON spec)
-python catalog.py upload specs.json --minio-key epc/v1 --path ./out  # pick one from a {key: spec} file
-python catalog.py upload spec.json --minio-key epc/v1 --register-only  # register objects already in MinIO (no upload)
-python catalog.py download epc/v1 ./out             # dest omitted -> ./<minio_key>
 python catalog.py remove epc/v1 --yes               # delete objects + catalog row for the key
 python catalog.py objects epc                       # raw MinIO objects (not the catalog)
 ```
 
-`upload` 의 `spec.json` 예시입니다. 예약 키(`minio_key`·`bucket`·`block`) 외의 필드는 형식 제약 없이 `doc`(JSONB) 로 그대로 저장됩니다 (임의 키·중첩 허용 — 아래 `description` 처럼 객체도 가능).
+> `remove` 는 MinIO 객체 (모든 버전·삭제마커) 와 catalog 행을 영구 삭제하므로 `--yes` 없이는 `DELETE` 입력을 요구합니다.
 
-```json
-{"minio_key": "epc/v1", "bucket": "datasets",
- "provider": "zoo",
- "description": {"fab": "fab2", "chamber": "CH3", "rows": 52416}}
-```
+### A.1 Upload
 
-> `minio_key` 는 불변 (immutable) 입니다 — 같은 key 가 MinIO 나 catalog 에 이미 있으면 `upload` 는 덮어쓰지 않고 중단합니다 (새 key 로 다시 시도). 업로드가 MinIO 는 됐는데 catalog 등록 전에 끊겼다면 `--register-only` 로 재업로드 없이 catalog 행만 등록해 복구합니다. `remove` 는 MinIO 객체 (모든 버전·삭제마커) 와 catalog 행을 영구 삭제하므로 `--yes` 없이는 `DELETE` 입력을 요구합니다.
+  `upload <manifest.json> --path <경로>` 는 `--path` 의 파일/폴더/glob 을 MinIO 에 적재하고 catalog 에 등록합니다 (동작·`--path` 해석 상세는 [§4.3 Upload](#43-upload), 메타는 위 [§4.2 Manifest.json, Manifests.json](#42-manifestjson-manifestsjson)). manifest.json 하나에 여러 manifest 를 `{minio_key: manifest, ...}` 로 담았다면 `--minio-key <key>` 로 그중 하나만 올립니다 (최상위 `__common__` 객체가 있으면 `{**common, **manifest}` 으로 선택 manifest 에 병합 — 위 [§4.2 Manifest.json, Manifests.json](#42-manifestjson-manifestsjson)). `--register-only` 는 업로드를 건너뛰고 MinIO 에 이미 있는 그 key 의 객체로 catalog 행만 등록합니다 (`--path` 불필요; 업로드가 MinIO 는 됐는데 catalog 등록 전에 끊긴 경우 복구용).
 
-host 에서 컨테이너용 블록 (endpoint 가 `postgres`·`minio` 서비스명) 으로 접속할 때는 `-b <block>` 로 블록을 고르고 `--pg-host`/`--minio-host` 로 host 만 `localhost` 로 바꿉니다.
+  `--path` (P) 는 업로드할 로컬 소스 경로이며, 파일 한 개·여러 개·와일드카드는 그 값 하나로 구별됩니다.
 
-```powershell
-python catalog.py upload spec.json --path ./out -b <block> --pg-host localhost --minio-host localhost
-python catalog.py remove <minio_key> -b <block> --pg-host localhost --minio-host localhost
-```
+  | --path | Files | MinIO key |
+  |---|---|---|
+  | single file `data/powerconsumption.csv` | 그 파일 1개 | `<minio_key>/powerconsumption.csv` |
+  | folder `data` | 폴더 아래 전부 (재귀) | `<minio_key>/<상대경로>` |
+  | wildcard `data/*.parquet` | 매치 파일 (비재귀) | `<minio_key>/<파일명>` |
+  | recursive wildcard `data/**/*.parquet` | 하위까지 매치 | `<minio_key>/<상대경로>` |
 
-### Credentials (Prefect block)
+  ```bash
+  python catalog.py upload manifest.json --path ./out                        # upload files at --path + register (JSON manifest)
+  python catalog.py upload manifests.json --minio-key epc/v1 --path ./out    # pick one from a {key: manifest} file
+  python catalog.py upload manifest.json --minio-key epc/v1 --register-only  # register objects already in MinIO (no upload)
+  ```
 
-  catalog.py 가 읽는 자격증명은 **`Credentials` 블록** (블록 이름 = 임의의 소문자 식별자, 소문자·숫자·대시; 팀원 이름과 무관) 에 담겨 있고, 관리자가 `credentials.py` 로 1회 등록합니다 (`python credentials.py --json-path <name>.json --block-name <name>` — [prefect.md](../Docker/Prefect/prefect.md) §7 Credentials). 한 블록 안에 세 섹션 (`minio`·`postgresql_catalog`·`postgresql_optuna`; nested dict, `SecretDict` 로 가림) 이 들어 있고, 서비스 주소(endpoint)는 블록이 아니라 prefect Variable 입니다.
+  > `minio_key` 는 불변 (immutable) 입니다 — 같은 key 가 MinIO 나 catalog 에 이미 있으면 `upload` 는 덮어쓰지 않고 중단합니다 (새 key 로 다시 시도).
+
+### A.2 Download
+
+  `download <minio_key> [dest]` 은 PostgreSQL의 catalog 에서 그 key 의 `minio_path` 를 찾아 그 아래 객체를 `dest` (기본 `./<minio_key>`) 로 내려받습니다 (동작 상세는 [§4.4 Download](#44-download)).
+
+  ```bash
+  python catalog.py download epc/v1 ./out             # dest omitted -> ./<minio_key>
+  ```
+
+### A.3 Credentials
+
+  **catalog.py 는 컨테이너 밖에서 실행** 되므로 자격증명은 Prefect 프로필 ([§5.2 Server Connection](#52-server-connection) 의 `prefect config set PREFECT_API_URL=...`) 로 연결된 **Prefect Secret 블록** 에서 가져옵니다 (멤버별 `Credentials` 블록, 없으면 default). 프로세스 환경변수나 `docker-compose.env` 파일은 쓰지 않습니다 (그 파일은 컨테이너 스택용이라 host 의 catalog.py 가 찾을 수 없음).
+
+  `Credentials` 블록 (블록 이름 = 임의의 소문자 식별자, 소문자·숫자·대시; 팀원 이름과 무관) 은 관리자가 `credentials.py` 로 1회 등록합니다 (`python credentials.py --json-path <name>.json --block-name <name>` — [prefect.md](../Docker/Prefect/prefect.md) §7 Credentials). 한 블록 안에 세 섹션 (`minio`·`postgresql_catalog`·`postgresql_optuna`; nested dict, `SecretDict` 로 가림) 이 들어 있고, 서비스 주소 (endpoint) 는 블록이 아니라 prefect Variable 입니다.
 
   | Section | Fields | Target |
   |---|---|---|
@@ -597,9 +635,16 @@ python catalog.py remove <minio_key> -b <block> --pg-host localhost --minio-host
   | `postgresql_optuna` | `endpoint` · `username` · `password` · `database` | PostgreSQL (`optuna` DB, flow·Optuna 용) |
   | `mlflow` (optional) | `endpoint` | MLflow (tracking URI; flow 로깅용) |
 
-  - **`-b <block>`** 가 어느 블록을 읽을지 정합니다. catalog.py 는 그중 `minio` + `postgresql_catalog` 두 섹션만 씁니다 (`postgresql_optuna` 는 flow 용). MLflow 주소는 블록이 아니라 Variable `mlflow_tracking_uri` 로, pipeline.py 가 payload 에 `MLFLOW_TRACKING_URI` 로 넘깁니다. `-b` 를 **안 주면** default (localhost) 로 돌고 배너에 `[creds: default (localhost)]`, 주면 `[creds: prefect-block (block=…)]` 로 출처가 표시됩니다. `-b` 를 **줬는데** credentials.py import 실패나 블록 로드 실패(서버 미연결·블록 없음)면 조용히 default 로 안 떨어지고 오류로 즉시 중단합니다 (silent-default 방지 — `credentials.py` 는 catalog.py 옆이나 `PYTHONPATH` 에 있어야 함).
+  - **`-b <block>`** 가 어느 블록을 읽을지 정합니다. catalog.py 는 그중 `minio` + `postgresql_catalog` 두 섹션만 씁니다 (`postgresql_optuna` 는 flow 용). MLflow 주소는 블록이 아니라 Variable `mlflow_tracking_uri` 로, pipeline.py 가 payload 에 `MLFLOW_TRACKING_URI` 로 넘깁니다. `-b` 를 **안 주면** default (localhost) 로 돌고 배너에 `[creds: default (localhost)]`, 주면 `[creds: prefect-block (block=…)]` 로 출처가 표시됩니다. `-b` 를 **줬는데** credentials.py import 실패나 블록 로드 실패 (server 미연결·블록 없음) 면 조용히 default 로 안 떨어지고 오류로 즉시 중단합니다 (silent-default 방지 — `credentials.py` 는 catalog.py 옆이나 `PYTHONPATH` 에 있어야 함).
   - **`--pg-host` / `--minio-host`** 는 블록 endpoint 의 host 만 덮어씁니다 (creds·port 불변). 컨테이너용 블록 (endpoint 가 `postgres`·`minio` 서비스명) 을 host 에서 쓸 때 `--pg-host localhost --minio-host localhost` 로 붙입니다.
   - `PREFECT_API_URL` (Prefect 프로필) 은 이 블록을 받기 위한 **접속점** 일 뿐 catalog 데이터가 아닙니다. 프로세스 환경변수·`docker-compose.env` 는 쓰지 않습니다.
+
+  host 에서 컨테이너용 블록 (endpoint 가 `postgres`·`minio` 서비스명) 으로 접속할 때는 `-b <block>` 로 블록을 고르고 `--pg-host`/`--minio-host` 로 host 만 `localhost` 로 바꿉니다.
+
+  ```bash
+  python catalog.py upload manifest.json --path ./out -b <block> --pg-host localhost --minio-host localhost
+  python catalog.py remove <minio_key> -b <block> --pg-host localhost --minio-host localhost
+  ```
 
   > **권한 차단은 MinIO policy 로** — 블록의 `minio` 키가 곧 그 블록의 MinIO 신원입니다. 진짜 사용자별 차단은 **그 키가 MinIO 에서 버킷 policy 로 제한** 되어 있어야 실제로 막히고, 그렇지 않으면 격리는 경로에 `{owner}` 등 고유 키를 넣어 나누는 규칙 (`s3://.../{owner}/...`) 에 의존합니다. Prefect 블록 자체엔 사용자별 접근제어가 없습니다.
 
@@ -609,7 +654,7 @@ python catalog.py remove <minio_key> -b <block> --pg-host localhost --minio-host
 
 공통 코드 (공통 단계·유틸·catalog 접근 계층 등) 를 여러 팀원 repo 에서 함께 쓰려면 공통 repo 를 각 repo 안에 **nested repository** 로 만들어 심습니다. `git subtree` 로 공통 repo 를 하위 경로 (`<path>`) 에 합쳐 한 커밋 트리로 관리하므로, runtime 의 shallow `git fetch` + `git worktree` 가 공통 코드까지 한 번에 펼칩니다 (submodule 과 달리 별도 init/fetch 가 없습니다).
 
-```powershell
+```bash
 # Creation — add the common repo under <path> as a squashed subtree (once).
 git subtree add  --prefix=<path> <url> <branch> --squash
 

@@ -6,7 +6,7 @@ PostgreSQL `catalog` DB 의 `datasets` 테이블을 다룬다.
 
 각 데이터셋은 minio_key (전체 S3 키 prefix, 예 `epc/v1`) 하나로 식별한다. 파일은
 s3://<bucket>/<minio_key>/<상대경로> 로 올라가고, catalog 는 UNIQUE(minio_key).
-메타데이터(spec)는 고정 컬럼이 아니라 **자유 형식 문서 `doc`(JSONB)** 로 통째로 보존된다
+메타데이터(manifest)는 고정 컬럼이 아니라 **자유 형식 문서 `doc`(JSONB)** 로 통째로 보존된다
 — 임의 키·중첩(project·vendor·description{…} 등)을 그대로 담고, doc 필드로 검색한다.
 
 두 가지로 쓴다.
@@ -23,11 +23,12 @@ s3://<bucket>/<minio_key>/<상대경로> 로 올라가고, catalog 는 UNIQUE(mi
        python catalog.py find epc fab=fab2         # 검색(minio_key prefix + doc 키=값)
 
 3) 업로드 + 등록 (MinIO 적재와 catalog 등록을 한 번에). 올릴 대상은 CLI `--path` 로 준다:
-       python catalog.py spec   spec.json                                 # 빈 spec 뼈대 → minio_key 채움
-       python catalog.py upload spec.json --path ./out
-       python catalog.py upload specs.json --minio-key epc/v1 --path ./out  # {K: spec, ...} 중 K 만 선택
-       python catalog.py upload spec.json --minio-key epc/v1 --register-only  # MinIO 에 이미 있는 객체로 등록만
-   spec.json 예시 (예약 키는 minio_key·bucket·block 뿐, 나머지는 자유 형식으로 doc 에 보존):
+       python catalog.py manifest manifest.json                       # 빈 manifest 뼈대 → minio_key 채움
+       python catalog.py upload manifest.json --path ./out
+       python catalog.py upload manifests.json --minio-key epc/v1 --path ./out  # {K: manifest, ...} 중 K 만 선택
+       # manifests.json 에 최상위 "__common__" 객체가 있으면 {**common, **manifest} 으로 선택 manifest 에 병합된다 (manifest 우선)
+       python catalog.py upload manifest.json --minio-key epc/v1 --register-only  # MinIO 에 이미 있는 객체로 등록만
+   manifest.json 예시 (예약 키는 minio_key·bucket 뿐, 나머지는 자유 형식으로 doc 에 보존):
        {"minio_key": "epc/v1", "bucket": "datasets",
         "provider": "zoo", "description": {"fab": "fab2", "chamber": "CH3"}}
    (--path 는 파일·폴더·와일드카드(`dir/*.csv`, 재귀 `dir/**/*.csv`). boto3 로 올리므로 mc 불필요.
@@ -53,9 +54,9 @@ positional arguments:
   <command>
     list         [PostgreSQL] list registered datasets (minio_key summary)
     find         [PostgreSQL] search by minio_key prefix + doc key=value
-    spec         write an empty upload spec.json template to fill in
+    manifest     write an empty upload manifest.json template to fill in
     upload       [MinIO + PostgreSQL] upload files + register, from a JSON
-                 spec
+                 manifest
     download     [PostgreSQL + MinIO] look up in catalog, download objects
     remove       [MinIO + PostgreSQL] PERMANENTLY delete objects + rows
     objects      [MinIO] list raw MinIO objects (not the catalog)
@@ -67,16 +68,16 @@ options:
 examples:
   python catalog.py list                              # registered datasets (minio_key summary)
   python catalog.py find epc fab=fab2                 # search by minio_key prefix + doc key=value
-  python catalog.py spec spec.json                    # write an empty upload spec template
-  python catalog.py upload spec.json --path ./out     # upload files at --path + register (JSON spec)
-  python catalog.py upload specs.json --minio-key epc/v1 --path ./out  # pick one from a {key: spec} file
-  python catalog.py upload spec.json --minio-key epc/v1 --register-only  # register objects already in MinIO
+  python catalog.py manifest manifest.json                    # write an empty upload manifest template
+  python catalog.py upload manifest.json --path ./out     # upload files at --path + register (JSON manifest)
+  python catalog.py upload manifests.json --minio-key epc/v1 --path ./out  # pick one from a {key: manifest} file
+  python catalog.py upload manifest.json --minio-key epc/v1 --register-only  # register objects already in MinIO
   python catalog.py download epc/v1 ./out             # dest omitted -> ./<minio_key>
   python catalog.py remove epc/v1 --yes               # delete objects + catalog row for the key
   python catalog.py objects epc                       # raw MinIO objects (not the catalog)
   python catalog.py list -b alice                     # read alice's block for DB/MinIO creds (-b, any command)
 
-upload spec.json (reserved keys: minio_key/bucket/block; the rest is free-form -> doc JSONB):
+upload manifest.json (reserved keys: minio_key/bucket; the rest is free-form -> doc JSONB):
   {"minio_key": "epc/v1", "bucket": "datasets",
    "provider": "zoo", "description": {"fab": "fab2", "chamber": "CH3"}}
 
@@ -108,7 +109,7 @@ from typing import Any, List, Optional, Tuple
 import psycopg2
 from psycopg2.extras import Json, RealDictCursor
 
-__version__ = "0.0.45"  # Semantic Versioning:  Version = Major.Minor.Patch
+__version__ = "0.0.49"  # Semantic Versioning:  Version = Major.Minor.Patch
 
 _BLOCK = None       # credential block name (-b); set by CLI or set_block(), used to read creds
 _PG_HOST = None      # CLI --pg-host: override the postgresql endpoint host only (creds unchanged)
@@ -231,7 +232,7 @@ def register(minio_key: str, minio_path: str, doc: Optional[dict] = None, *,
              n_files: Optional[int] = None, size_bytes: Optional[int] = None) -> None:
     """새 데이터셋을 카탈로그에 등록 (minio_key 로 식별). doc 는 자유 형식 문서 → JSONB.
 
-    doc 에는 spec 을 통째로 담는다 (project·vendor·description{…} 등 임의 중첩 키 그대로 보존).
+    doc 에는 manifest 를 통째로 담는다 (project·vendor·description{…} 등 임의 중첩 키 그대로 보존).
     n_files/size_bytes 는 업로드 시 계산된 운영 통계라 별도 컬럼으로 둔다.
     UNIQUE(minio_key) 라 같은 key 재등록은 무시(DO NOTHING)된다.
     """
@@ -244,11 +245,11 @@ def register(minio_key: str, minio_path: str, doc: Optional[dict] = None, *,
 
 
 # --------------------------------------------------------------------------- #
-# upload (put to MinIO + register in catalog) - driven by a JSON spec
+# upload (put to MinIO + register in catalog) - driven by a JSON manifest
 # --------------------------------------------------------------------------- #
 _NAME_RE = re.compile(r"^[A-Za-z0-9_.#-]+(/[A-Za-z0-9_.#-]+)*$")   # minio_key: slash-joined segments (Samsung/#0/V0)
-_REQUIRED_SPEC_KEYS = ("minio_key",)                      # upload() rejects a spec missing this (path is CLI --path)
-_SPEC_TEMPLATE = {                                        # `spec` command writes this skeleton to fill in
+_REQUIRED_MANIFEST_KEYS = ("minio_key",)                      # upload() rejects a manifest missing this (path is CLI --path)
+_MANIFEST_TEMPLATE = {                                        # `manifest` command writes this skeleton to fill in
     "minio_key": "",                                      # required; the rest is free-form and stored verbatim
     "bucket": "datasets",
     "description": "", "metadata": {},                   # example free-form fields (any keys allowed)
@@ -273,21 +274,21 @@ def _has_match(cand: str) -> bool:
     return Path(cand).exists()
 
 
-def _locate(path: str, spec_dir: Optional[Path] = None) -> str:
-    """상대 path 를 spec.json 위치와 catalog.py 위치 두 기준으로 찾는다 (절대경로는 그대로 반환).
+def _locate(path: str, manifest_dir: Optional[Path] = None) -> str:
+    """상대 path 를 manifest.json 위치와 catalog.py 위치 두 기준으로 찾는다 (절대경로는 그대로 반환).
 
     양쪽 기준 모두에서 발견되면 (중복) 모호하므로 메시지와 함께 ValueError. 어디서도 못 찾으면
     FileNotFoundError. 정확히 한 곳에서만 찾으면 그 절대 경로 (글로브면 절대 패턴) 를 돌려준다.
-    spec_dir 가 없으면 (라이브러리 호출) 현재 작업 폴더를 spec 위치 대신 쓴다.
+    manifest_dir 가 없으면 (라이브러리 호출) 현재 작업 폴더를 manifest 위치 대신 쓴다.
     """
     if Path(path).is_absolute():
         if not _has_match(path):                           # absolute but missing -> stop with a message
             raise FileNotFoundError(f"path '{path}' not found (absolute path)")
         return path
     bases, seen = [], set()
-    for b in (spec_dir or Path.cwd(), Path(__file__).resolve().parent):
+    for b in (manifest_dir or Path.cwd(), Path(__file__).resolve().parent):
         rb = Path(b).resolve()
-        if rb not in seen:                                 # dedupe (when spec.json sits next to catalog.py)
+        if rb not in seen:                                 # dedupe (when manifest.json sits next to catalog.py)
             seen.add(rb)
             bases.append(rb)
     hits = [str(rb / path) for rb in bases if _has_match(str(rb / path))]
@@ -313,7 +314,7 @@ def _glob_base(pattern: str) -> Path:
 
 
 def _resolve_sources(path: str) -> List[Tuple[Path, str]]:
-    """spec 'path' 를 (로컬 파일, MinIO 키 꼬리) 쌍 목록으로 푼다.
+    """manifest 'path' 를 (로컬 파일, MinIO 키 꼬리) 쌍 목록으로 푼다.
 
     - 파일       -> 그 파일 하나 (키 = 파일명)
     - 폴더       -> 폴더 아래 모든 파일 (재귀), 키 = 폴더 기준 상대경로
@@ -335,30 +336,31 @@ def _resolve_sources(path: str) -> List[Tuple[Path, str]]:
     return [(src, src.name)]
 
 
-def upload(spec: dict, path: Optional[str] = None, block: Optional[str] = None,
-           spec_dir: Optional[Path] = None, register_only: bool = False) -> str:
-    """spec (메타데이터) + path (올릴 파일) 로 MinIO 에 올리고 catalog 에 등록한다 (minio_key 로 식별).
+def upload(manifest: dict, path: Optional[str] = None, block: Optional[str] = None,
+           manifest_dir: Optional[Path] = None, register_only: bool = False) -> str:
+    """manifest (메타데이터) + path (올릴 파일) 로 MinIO 에 올리고 catalog 에 등록한다 (minio_key 로 식별).
 
-    path 는 CLI --path 로 받는다 (spec 에 넣지 않음): 파일·폴더·와일드카드 `dir/*.csv`.
-    spec 은 자유 형식 문서다. upload() 가 해석하는 예약 키는 minio_key (req; 예 `epc/v1`)·
-    bucket (기본 'datasets')·block 뿐이고, 나머지 키는 그대로 doc(JSONB) 로 보존된다
+    path 는 CLI --path 로 받는다 (manifest 에 넣지 않음): 파일·폴더·와일드카드 `dir/*.csv`.
+    manifest 는 자유 형식 문서다. upload() 가 해석하는 예약 키는 minio_key (req; 예 `epc/v1`)·
+    bucket (기본 'datasets') 뿐이고, 나머지 키는 그대로 doc(JSONB) 로 보존된다
     (project·vendor·description{…} 같은 임의 중첩 구조 허용). 파일은 s3://<bucket>/<minio_key>/<상대경로>.
 
     상대 path 는 실행 폴더(cwd) 와 catalog.py 위치 두 기준으로 찾는다 (절대경로는 그대로). _locate() 참고.
-    block (인자 또는 spec['block']) 가 있으면 그 사용자의 MinIO 키로 올린다.
+    block 은 인자 (CLI -b) 로만 받는다 — manifest 에 'block' 이 있으면 오류로 중단한다.
     minio_key 는 불변 (immutable): 같은 key 가 MinIO 나 catalog 에 이미 있으면 덮지 않고 중단한다.
     register_only=True 면 파일 업로드를 건너뛰고, MinIO 에 이미 있는 그 key 의 객체로 catalog 행만 등록한다
     (업로드가 MinIO 는 됐는데 catalog 등록 전에 끊긴 경우 복구용; path 불필요, 객체 수/크기는 MinIO 에서 집계).
     """
-    missing = [k for k in _REQUIRED_SPEC_KEYS if not spec.get(k)]
+    missing = [k for k in _REQUIRED_MANIFEST_KEYS if not manifest.get(k)]
     if missing:
         raise ValueError(
-            f"spec missing required key(s): {', '.join(missing)}"
-            f" (required: {', '.join(_REQUIRED_SPEC_KEYS)})."
-            " run 'python catalog.py spec <out.json>' to scaffold one.")
-    minio_key = spec["minio_key"]
-    bucket = spec.get("bucket", "datasets")
-    block = block or spec.get("block")
+            f"manifest missing required key(s): {', '.join(missing)}"
+            f" (required: {', '.join(_REQUIRED_MANIFEST_KEYS)})."
+            " run 'python catalog.py manifest <out.json>' to scaffold one.")
+    minio_key = manifest["minio_key"]
+    bucket = manifest.get("bucket", "datasets")
+    if "block" in manifest:                            # stale usage: creds selection is CLI-only (-b/--block)
+        raise ValueError("'block' in manifest is no longer supported; pass -b/--block instead")
 
     _check_name(minio_key, "minio_key")
     s3 = _s3(block)
@@ -382,7 +384,7 @@ def upload(spec: dict, path: Optional[str] = None, block: Optional[str] = None,
     else:
         if not path:
             raise ValueError("--path is required (unless --register-only)")
-        located = _locate(path, spec_dir)          # resolve relative path vs cwd + catalog dir
+        located = _locate(path, manifest_dir)          # resolve relative path vs cwd + catalog dir
         files = _resolve_sources(located)          # file | folder (recursive) | glob (dir/*.csv, **)
         if get(minio_key) or s3.list_objects_v2(
                 Bucket=bucket, Prefix=prefix, MaxKeys=1).get("KeyCount", 0):
@@ -395,19 +397,19 @@ def upload(spec: dict, path: Optional[str] = None, block: Optional[str] = None,
             size_bytes += fp.stat().st_size
         action = f"uploaded {n_files} file(s), {size_bytes} B and registered"
 
-    doc = {k: v for k, v in spec.items() if k != "block"}   # store the spec verbatim (minus the creds selector)
+    doc = dict(manifest)                               # store the manifest verbatim -> doc JSONB
     register(minio_key, minio_path, doc, n_files=n_files, size_bytes=size_bytes)
     print(f"[catalog] {action} -> {minio_path}")
     return minio_path
 
 
-def write_spec_template(out: str = "spec.json") -> str:
-    """빈 upload spec.json 뼈대를 파일로 쓴다 (이미 있으면 덮지 않음). 채워서 `upload` 에 넘긴다."""
+def write_manifest_template(out: str = "manifest.json") -> str:
+    """빈 upload manifest.json 뼈대를 파일로 쓴다 (이미 있으면 덮지 않음). 채워서 `upload` 에 넘긴다."""
     p = Path(out)
     if p.exists():
         raise FileExistsError(f"{out} already exists (not overwriting)")
-    p.write_text(json.dumps(_SPEC_TEMPLATE, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    print(f"[catalog] wrote empty spec -> {out} (fill in required: {', '.join(_REQUIRED_SPEC_KEYS)})")
+    p.write_text(json.dumps(_MANIFEST_TEMPLATE, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    print(f"[catalog] wrote empty manifest -> {out} (fill in required: {', '.join(_REQUIRED_MANIFEST_KEYS)})")
     return out
 
 
@@ -588,24 +590,31 @@ def _cmd_find(args: argparse.Namespace) -> None:
                 ["minio_key", "n_files", "created_at", "minio_path"])
 
 
-def _cmd_spec(args: argparse.Namespace) -> None:
-    write_spec_template(args.out)
+def _cmd_manifest(args: argparse.Namespace) -> None:
+    write_manifest_template(args.out)
 
 
 def _cmd_upload(args: argparse.Namespace) -> None:
-    spec_path = Path(args.spec)
-    data = json.loads(spec_path.read_text(encoding="utf-8"))
-    if args.minio_key:                             # spec.json is {minio_key: spec, ...} -> pick one
-        if not isinstance(data, dict) or args.minio_key not in data:
-            avail = ", ".join(data) if isinstance(data, dict) else "(not a dict of specs)"
-            raise ValueError(f"minio-key '{args.minio_key}' not in {spec_path.name}; available: {avail}")
-        spec = data[args.minio_key]
-        if not isinstance(spec, dict):
-            raise ValueError(f"spec['{args.minio_key}'] must be a spec object (dict), got {type(spec).__name__}")
-        spec = {**spec, "minio_key": args.minio_key}     # minio_key from the key -> satisfies the required check
+    manifest_path = Path(args.manifest)
+    data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if args.minio_key:                             # manifest.json is {minio_key: manifest, ...} -> pick one
+        if not isinstance(data, dict) or args.minio_key not in data or args.minio_key == "__common__":
+            avail = (", ".join(k for k in data if k != "__common__") if isinstance(data, dict)
+                     else "(not a dict of manifests)")
+            raise ValueError(f"minio-key '{args.minio_key}' not in {manifest_path.name}; available: {avail}")
+        manifest = data[args.minio_key]
+        if not isinstance(manifest, dict):
+            raise ValueError(f"manifest['{args.minio_key}'] must be a manifest object (dict), got {type(manifest).__name__}")
+        common = data.get("__common__", {})        # optional top-level shared fields, merged into every pick
+        if not isinstance(common, dict):
+            raise ValueError(
+                f"'__common__' in {manifest_path.name} must be a manifest object (dict), got {type(common).__name__}")
+        if "minio_key" in common:                  # contradiction: the key comes from the top-level selection
+            raise ValueError("'__common__' must not set minio_key; it comes from the selected top-level key")
+        manifest = {**common, **manifest, "minio_key": args.minio_key}   # per-key manifest overrides common; key from selection
     else:
-        spec = data
-    upload(spec, args.path, block=args.block, register_only=args.register_only)   # --path vs cwd (+ catalog dir)
+        manifest = data
+    upload(manifest, args.path, block=args.block, register_only=args.register_only)   # --path vs cwd (+ catalog dir)
 
 
 def _cmd_download(args: argparse.Namespace) -> None:
@@ -639,16 +648,17 @@ def _build_parser() -> argparse.ArgumentParser:
         examples:
           python catalog.py list                              # registered datasets (minio_key summary)
           python catalog.py find epc fab=fab2                 # search by minio_key prefix + doc key=value
-          python catalog.py spec spec.json                    # write an empty upload spec template
-          python catalog.py upload spec.json --path ./out     # upload files at --path + register (JSON spec)
-          python catalog.py upload specs.json --minio-key epc/v1 --path ./out  # pick one from a {key: spec} file
-          python catalog.py upload spec.json --minio-key epc/v1 --register-only  # register objects already in MinIO
+          python catalog.py manifest manifest.json                    # write an empty upload manifest template
+          python catalog.py upload manifest.json --path ./out     # upload files at --path + register (JSON manifest)
+          python catalog.py upload manifests.json --minio-key epc/v1 --path ./out  # pick one from a {key: manifest} file
+          # a top-level "__common__" object in manifests.json is merged into the pick as {**common, **manifest} (manifest wins)
+          python catalog.py upload manifest.json --minio-key epc/v1 --register-only  # register objects already in MinIO
           python catalog.py download epc/v1 ./out             # dest omitted -> ./<minio_key>
           python catalog.py remove epc/v1 --yes               # delete objects + catalog row for the key
           python catalog.py objects epc                       # raw MinIO objects (not the catalog)
           python catalog.py list -b alice                     # read alice's block for DB/MinIO creds (-b, any command)
 
-        upload spec.json (reserved keys: minio_key/bucket/block; the rest is free-form -> doc JSONB):
+        upload manifest.json (reserved keys: minio_key/bucket; the rest is free-form -> doc JSONB):
           {"minio_key": "epc/v1", "bucket": "datasets",
            "provider": "zoo", "description": {"fab": "fab2", "chamber": "CH3"}}
 
@@ -687,19 +697,20 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="doc top-level filters (doc->>key = value)")
     _add_block(sp)
 
-    sp = sub.add_parser("spec", help="write an empty upload spec.json template to fill in")
-    sp.set_defaults(func=_cmd_spec, uses_pg=False, uses_minio=False)
-    sp.add_argument("out", type=str, nargs="?", default="spec.json", metavar="out.json",
-                    help="output path (default: spec.json)")
+    sp = sub.add_parser("manifest", help="write an empty upload manifest.json template to fill in")
+    sp.set_defaults(func=_cmd_manifest, uses_pg=False, uses_minio=False)
+    sp.add_argument("out", type=str, nargs="?", default="manifest.json", metavar="out.json",
+                    help="output path (default: manifest.json)")
 
-    sp = sub.add_parser("upload", help="[MinIO + PostgreSQL] upload files + register, from a JSON spec")
+    sp = sub.add_parser("upload", help="[MinIO + PostgreSQL] upload files + register, from a JSON manifest")
     sp.set_defaults(func=_cmd_upload, uses_pg=True, uses_minio=True)
-    sp.add_argument("spec", type=str, metavar="spec.json")
+    sp.add_argument("manifest", type=str, metavar="manifest.json")
     sp.add_argument("--path", default=None,
                     help="file/folder/wildcard to upload (dir/*.csv, recursive dir/**/*.csv); "
                          "required unless --register-only")
     sp.add_argument("--minio-key", type=str, default=None,
-                    help="if spec.json is {minio_key: spec, ...}, upload that one (and set its minio_key)")
+                    help="if manifest.json is {minio_key: manifest, ...}, upload that one (and set its minio_key); "
+                         "a top-level '__common__' object is merged into it as {**common, **manifest}")
     sp.add_argument("--register-only", action="store_true", default=False,
                     help="skip upload; register the catalog row from objects already in MinIO under the key")
     _add_block(sp)
