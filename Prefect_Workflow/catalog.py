@@ -28,8 +28,8 @@ s3://<bucket>/<minio_key>/<상대경로> 로 올라가고, catalog 는 UNIQUE(mi
        python catalog.py upload manifests.json --minio-key epc/v1 --path ./out  # {K: manifest, ...} 중 K 만 선택
        # manifests.json 에 최상위 "__common__" 객체가 있으면 {**common, **manifest} 으로 선택 manifest 에 병합된다 (manifest 우선)
        python catalog.py upload manifest.json --minio-key epc/v1 --register-only  # MinIO 에 이미 있는 객체로 등록만
-   manifest.json 예시 (예약 키는 minio_key·bucket 뿐, 나머지는 자유 형식으로 doc 에 보존):
-       {"minio_key": "epc/v1", "bucket": "datasets",
+   manifest.json 예시 (예약 키는 minio_key 뿐, 나머지는 자유 형식으로 doc 에 보존; bucket 은 CLI --bucket, 기본 datasets):
+       {"minio_key": "epc/v1",
         "provider": "zoo", "description": {"fab": "fab2", "chamber": "CH3"}}
    (--path 는 파일·폴더·와일드카드(`dir/*.csv`, 재귀 `dir/**/*.csv`). boto3 로 올리므로 mc 불필요.
     minio_key 는 불변 — 이미 있으면 중단. 업로드가 MinIO 는 됐는데 등록 전에 끊겼으면 --register-only 로 복구.)
@@ -77,8 +77,8 @@ examples:
   python catalog.py objects epc                       # raw MinIO objects (not the catalog)
   python catalog.py list -b alice                     # read alice's block for DB/MinIO creds (-b, any command)
 
-upload manifest.json (reserved keys: minio_key/bucket; the rest is free-form -> doc JSONB):
-  {"minio_key": "epc/v1", "bucket": "datasets",
+upload manifest.json (reserved key: minio_key; the rest is free-form -> doc JSONB; bucket via CLI --bucket):
+  {"minio_key": "epc/v1",
    "provider": "zoo", "description": {"fab": "fab2", "chamber": "CH3"}}
 
 targets (each command prints where it connects + creds source at start):
@@ -109,7 +109,7 @@ from typing import Any, List, Optional, Tuple
 import psycopg2
 from psycopg2.extras import Json, RealDictCursor
 
-__version__ = "0.0.49"  # Semantic Versioning:  Version = Major.Minor.Patch
+__version__ = "0.0.50"  # Semantic Versioning:  Version = Major.Minor.Patch
 
 _BLOCK = None       # credential block name (-b); set by CLI or set_block(), used to read creds
 _PG_HOST = None      # CLI --pg-host: override the postgresql endpoint host only (creds unchanged)
@@ -251,7 +251,6 @@ _NAME_RE = re.compile(r"^[A-Za-z0-9_.#-]+(/[A-Za-z0-9_.#-]+)*$")   # minio_key: 
 _REQUIRED_MANIFEST_KEYS = ("minio_key",)                      # upload() rejects a manifest missing this (path is CLI --path)
 _MANIFEST_TEMPLATE = {                                        # `manifest` command writes this skeleton to fill in
     "minio_key": "",                                      # required; the rest is free-form and stored verbatim
-    "bucket": "datasets",
     "description": "", "metadata": {},                   # example free-form fields (any keys allowed)
 }
 
@@ -337,16 +336,18 @@ def _resolve_sources(path: str) -> List[Tuple[Path, str]]:
 
 
 def upload(manifest: dict, path: Optional[str] = None, block: Optional[str] = None,
-           manifest_dir: Optional[Path] = None, register_only: bool = False) -> str:
+           manifest_dir: Optional[Path] = None, register_only: bool = False,
+           bucket: str = "datasets") -> str:
     """manifest (메타데이터) + path (올릴 파일) 로 MinIO 에 올리고 catalog 에 등록한다 (minio_key 로 식별).
 
     path 는 CLI --path 로 받는다 (manifest 에 넣지 않음): 파일·폴더·와일드카드 `dir/*.csv`.
-    manifest 는 자유 형식 문서다. upload() 가 해석하는 예약 키는 minio_key (req; 예 `epc/v1`)·
-    bucket (기본 'datasets') 뿐이고, 나머지 키는 그대로 doc(JSONB) 로 보존된다
+    manifest 는 자유 형식 문서다. upload() 가 해석하는 예약 키는 minio_key (req; 예 `epc/v1`) 하나뿐이고,
+    나머지 키는 그대로 doc(JSONB) 로 보존된다
     (project·vendor·description{…} 같은 임의 중첩 구조 허용). 파일은 s3://<bucket>/<minio_key>/<상대경로>.
 
     상대 path 는 실행 폴더(cwd) 와 catalog.py 위치 두 기준으로 찾는다 (절대경로는 그대로). _locate() 참고.
-    block 은 인자 (CLI -b) 로만 받는다 — manifest 에 'block' 이 있으면 오류로 중단한다.
+    block 과 bucket 은 인자 (CLI -b / --bucket, bucket 기본 'datasets') 로만 받는다 —
+    manifest 에 'block' 이나 'bucket' 이 있으면 오류로 중단한다.
     minio_key 는 불변 (immutable): 같은 key 가 MinIO 나 catalog 에 이미 있으면 덮지 않고 중단한다.
     register_only=True 면 파일 업로드를 건너뛰고, MinIO 에 이미 있는 그 key 의 객체로 catalog 행만 등록한다
     (업로드가 MinIO 는 됐는데 catalog 등록 전에 끊긴 경우 복구용; path 불필요, 객체 수/크기는 MinIO 에서 집계).
@@ -358,9 +359,10 @@ def upload(manifest: dict, path: Optional[str] = None, block: Optional[str] = No
             f" (required: {', '.join(_REQUIRED_MANIFEST_KEYS)})."
             " run 'python catalog.py manifest <out.json>' to scaffold one.")
     minio_key = manifest["minio_key"]
-    bucket = manifest.get("bucket", "datasets")
-    if "block" in manifest:                            # stale usage: creds selection is CLI-only (-b/--block)
+    if "block" in manifest:                        # stale usage: creds selection is CLI-only (-b/--block)
         raise ValueError("'block' in manifest is no longer supported; pass -b/--block instead")
+    if "bucket" in manifest:                       # stale usage: the target bucket is CLI-only (--bucket)
+        raise ValueError("'bucket' in manifest is no longer supported; pass --bucket instead")
 
     _check_name(minio_key, "minio_key")
     s3 = _s3(block)
@@ -614,7 +616,8 @@ def _cmd_upload(args: argparse.Namespace) -> None:
         manifest = {**common, **manifest, "minio_key": args.minio_key}   # per-key manifest overrides common; key from selection
     else:
         manifest = data
-    upload(manifest, args.path, block=args.block, register_only=args.register_only)   # --path vs cwd (+ catalog dir)
+    upload(manifest, args.path, block=args.block, register_only=args.register_only,
+           bucket=args.bucket)                     # --path resolved vs cwd (+ catalog dir)
 
 
 def _cmd_download(args: argparse.Namespace) -> None:
@@ -650,6 +653,7 @@ def _build_parser() -> argparse.ArgumentParser:
           python catalog.py find epc fab=fab2                 # search by minio_key prefix + doc key=value
           python catalog.py manifest manifest.json                    # write an empty upload manifest template
           python catalog.py upload manifest.json --path ./out     # upload files at --path + register (JSON manifest)
+          python catalog.py upload manifest.json --path ./out --bucket models  # non-default target bucket
           python catalog.py upload manifests.json --minio-key epc/v1 --path ./out  # pick one from a {key: manifest} file
           # a top-level "__common__" object in manifests.json is merged into the pick as {**common, **manifest} (manifest wins)
           python catalog.py upload manifest.json --minio-key epc/v1 --register-only  # register objects already in MinIO
@@ -658,8 +662,8 @@ def _build_parser() -> argparse.ArgumentParser:
           python catalog.py objects epc                       # raw MinIO objects (not the catalog)
           python catalog.py list -b alice                     # read alice's block for DB/MinIO creds (-b, any command)
 
-        upload manifest.json (reserved keys: minio_key/bucket; the rest is free-form -> doc JSONB):
-          {"minio_key": "epc/v1", "bucket": "datasets",
+        upload manifest.json (reserved key: minio_key; the rest is free-form -> doc JSONB; bucket via CLI --bucket):
+          {"minio_key": "epc/v1",
            "provider": "zoo", "description": {"fab": "fab2", "chamber": "CH3"}}
 
         targets (each command prints where it connects + creds source at start):
@@ -711,6 +715,8 @@ def _build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--minio-key", type=str, default=None,
                     help="if manifest.json is {minio_key: manifest, ...}, upload that one (and set its minio_key); "
                          "a top-level '__common__' object is merged into it as {**common, **manifest}")
+    sp.add_argument("--bucket", type=str, default="datasets",
+                    help="target MinIO bucket (default: datasets)")
     sp.add_argument("--register-only", action="store_true", default=False,
                     help="skip upload; register the catalog row from objects already in MinIO under the key")
     _add_block(sp)
