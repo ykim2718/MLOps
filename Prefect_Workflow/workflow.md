@@ -2,7 +2,7 @@
 
 # Prefect AI/ML Workflow Automation
 
-<sub>rev. 113</sub>
+<sub>rev. 115</sub>
 
 Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환경입니다. 이 문서는 **전체 워크플로우의 인덱스 (개요)** 이고, 도구별 상세는 컴포넌트 문서로 잇습니다.
 
@@ -83,8 +83,8 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
   데이터가 실제로 오가는 두 지점의 endpoint · parameter 입니다 — **upload 은 host 의 `catalog.py` 가 `manifest.json` 으로**, **download 은 컨테이너 안 `pipeline.py` 가 Prefect Secret 블록으로** 합니다.
 
   ```text
-  UPLOAD — host: catalog.py upload manifest.json --path <p>  (-b <block> [--pg-host/--minio-host localhost])
-    input: manifest.json { minio_key, bucket, ...free-form } + --path <p> (file/folder/glob)
+  UPLOAD — host: catalog.py upload manifest.json --path <p>  (-b <block> [--bucket <b>] [--pg-host/--minio-host localhost])
+    input: manifest.json { minio_key, ...free-form } + --path <p> (file/folder/glob) + --bucket <b> (default: datasets)
     creds: Credentials block (-b <block>) — minio + postgresql_catalog sections
   ┌────────────┐                        ┌─────────────┐
   │ catalog.py │─ upload file ────────> │ MinIO :9000 │  → s3://<bucket>/<minio_key>/<files>
@@ -105,17 +105,15 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
 
 ### 4.2 Manifest.json, Manifests.json
 
-  manifest 는 **자유 형식 문서**입니다 — 예약 키만 해석하고 나머지는 그대로 `doc` (JSONB) 로 보존합니다 (임의 키·중첩 허용 — 아래 `description` 처럼 객체도 가능). 예약 키는 다음 **두 개뿐**이며, manifest.json 엔 `path` 를 넣지 않습니다 (자격증명 블록은 manifest 가 아니라 CLI `-b <block>` 로만 지정 — manifest 에 `block` 이 있으면 오류로 중단).
+  manifest 는 **자유 형식 문서**입니다 — 예약 키만 해석하고 나머지는 그대로 `doc` (JSONB) 로 보존합니다 (임의 키·중첩 허용 — 아래 `description` 처럼 객체도 가능). 예약 키는 **`minio_key` 하나뿐**이며, manifest.json 엔 `path` 를 넣지 않습니다. 자격증명 블록과 대상 bucket 은 manifest 가 아니라 CLI 로만 지정합니다 — `-b <block>` · `--bucket <b>` (기본 `datasets`) 이며, manifest 에 `block` 이나 `bucket` 이 있으면 오류로 중단합니다.
 
   - **`minio_key`** — 필수 키입니다. MinIO key prefix 이자 catalog key 가 됩니다.
-  - **`bucket`** — 대상 bucket 입니다 (기본 `datasets`).
 
   manifest.json 은 manifest 하나를 담은 파일입니다 (필수 키는 `minio_key`, 나머지는 자유 형식).
 
   ```json
   {
       "minio_key": "epc/v1",
-      "bucket": "datasets",
       "provider": "zoo",
       "description": {
           "fab": "fab2",
@@ -130,7 +128,6 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
   ```json
   {
       "__common__": {
-          "bucket": "datasets",
           "provider": "zoo"
       },
       "epc/v1": {
@@ -155,7 +152,7 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
   `catalog.py upload <manifest.json> --path <경로>` 는 **`--path` 가 가리키는 파일**을 MinIO 에 올리고 PostgreSQL의 `catalog` 에 레코드를 등록합니다. host 에서는 `-b <block>` 로 자격증명 블록을 고르고 컨테이너용 endpoint 를 `--pg-host/--minio-host localhost` 로 덮어씁니다.
 
   ```python
-  # catalog.py  upload(manifest, path, block) — key steps (path from CLI --path; minio_key/bucket from manifest)
+  # catalog.py  upload(manifest, path, block, bucket) — key steps (path/bucket from CLI; minio_key from manifest)
   files = _resolve_sources(path)               # file | folder (recursive) | glob (dir/*.csv, **)
   ensure_schema()                              # create the datasets table if missing
   if get(minio_key):                           # minio_key is immutable -> stop if it exists
@@ -171,6 +168,7 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
   python catalog.py manifest manifest.json                                                          # scaffold an empty manifest
   python catalog.py upload manifest.json --path ./data -b <block> --pg-host localhost --minio-host localhost
   python catalog.py upload manifests.json --minio-key epc/v1 --path ./data -b <block> --minio-host localhost  # pick one
+  python catalog.py upload manifest.json --path ./data --bucket models -b <block> --minio-host localhost  # non-default bucket
   ```
 
   > manifest 의 규칙·예시는 위 [4.2 Manifest.json, Manifests.json](#42-manifestjson-manifestsjson) 을, `--path` 해석 4 가지 경우는 [A.1 Upload](#a1-upload) 를 참고합니다. 매치가 0건이면 `FileNotFoundError` 로 중단하고, 같은 `minio_key` 가 이미 있으면 덮지 않고 중단합니다.
@@ -564,7 +562,7 @@ def inference_flow():
 | `list` | PostgreSQL | 등록된 데이터셋 목록 (minio_key 요약) |
 | `find <minio_key> [key=value ...]` | PostgreSQL | minio_key prefix + doc 최상위 키=값 검색 |
 | `manifest [out.json]` | (local) | 빈 upload manifest.json 뼈대 생성 (위 [§4.2 Manifest.json, Manifests.json](#42-manifestjson-manifestsjson)) |
-| `upload <manifest.json> --path P [--minio-key key] [--register-only]` | MinIO + PostgreSQL | `--path` 의 파일/폴더/glob 을 MinIO 적재 + catalog 등록 (아래 [A.1 Upload](#a1-upload)) |
+| `upload <manifest.json> --path P [--bucket b] [--minio-key key] [--register-only]` | MinIO + PostgreSQL | `--path` 의 파일/폴더/glob 을 MinIO 적재 + catalog 등록 (아래 [A.1 Upload](#a1-upload)) |
 | `download <minio_key> [dest]` | PostgreSQL + MinIO | 그 key 의 객체 다운로드 (아래 [A.2 Download](#a2-download)) |
 | `remove <minio_key> [--yes]` | MinIO + PostgreSQL | 그 key 의 MinIO 객체 + catalog 행 영구 삭제 |
 | `objects [minio_key]` | MinIO | MinIO 에 실제로 있는 객체 나열 (catalog 무관; minio_key prefix 로 한정) |
