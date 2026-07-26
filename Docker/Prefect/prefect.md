@@ -1,6 +1,6 @@
 # Prefect Pipeline Orchestration on Docker
 
-<sub>rev. 595</sub>
+<sub>rev. 597</sub>
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
@@ -42,8 +42,8 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
               |                                           |
               v                              +------------+------------+
       +--------------+                       v                         v
-      | worker L1|               +--------------+          +--------------+
-      |  (machine 1) |               | worker H1|          | worker H2|
+      |  worker L1   |               +--------------+          +--------------+
+      |  (machine 1) |               |  worker H1   |          |  worker H2   |
       +------+-------+               +------+-------+          +------+-------+
          |       |                      |       |                 |       |
          v       v                      v       v                 v       v
