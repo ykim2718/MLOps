@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# run_dispatcher.sh — start the Prefect dispatcher compose stack on a worker machine.
-# __version__ = "0.0.20"  # Semantic Versioning:  Version = Major.Minor.Patch
+# run_worker.sh — start the Prefect worker compose stack on a worker machine.
+# __version__ = "0.0.21"  # Semantic Versioning:  Version = Major.Minor.Patch
 #
-# Brings up prefect_dispatcher, which polls the given work pool. WORK_POOL/WORKER_LIMIT are read from
+# Brings up prefect_worker, which polls the given work pool. WORK_POOL/WORKER_LIMIT are read from
 # this shell at "docker compose up" (compose interpolation), so they are exported below.
 # (PREFECT_API_URL etc. are read directly by the container from env_file=docker-compose.env.)
 # Work pools live on the server and are registered there (register_pool.sh), not here. Before starting,
 # this script checks the work pool against the pools registered on the server; if it is missing, it lists
 # the registered pools and lets you pick one (guards against typos / not-yet-registered pools).
 #
-#   ./run_dispatcher.sh --work-pool high_performance    # a high-tier machine
-#   ./run_dispatcher.sh --work-pool low_performance     # a low-tier machine
+#   ./run_worker.sh --work-pool high_performance    # a high-tier machine
+#   ./run_worker.sh --work-pool low_performance     # a low-tier machine
 #
 set -euo pipefail
 
@@ -25,7 +25,7 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-COMPOSE="docker-compose.dispatcher.yml"
+COMPOSE="docker-compose.worker.yml"
 
 command -v jq >/dev/null 2>&1 || { echo "jq is required to parse 'prefect work-pool ls --output json'. Install jq and retry." >&2; exit 1; }
 
@@ -38,8 +38,8 @@ if ! command -v prefect >/dev/null 2>&1; then
     exit 1
 fi
 
-# On the same host, dispatcher/pipeline_flow containers reach the server by service name over the shared mlops network.
-# (For a dispatcher on another machine, remove the networks block in the dispatcher compose and set PREFECT_API_URL to http://<host IP>:4200/api.)
+# On the same host, worker/pipeline_flow containers reach the server by service name over the shared mlops network.
+# (For a worker on another machine, remove the networks block in the worker compose and set PREFECT_API_URL to http://<host IP>:4200/api.)
 docker network inspect mlops >/dev/null 2>&1 || docker network create mlops >/dev/null
 
 # --- Validate the work pool against the pools registered on the server --------------------------
@@ -51,7 +51,7 @@ if [ -z "$pools_json" ]; then
     exit 1
 fi
 
-# This dispatcher spawns docker containers, so only docker-type pools are valid
+# This worker spawns docker containers, so only docker-type pools are valid
 # (a name that exists only as a process pool — e.g. one auto-created by a typo — is rejected here).
 pools=()
 while IFS= read -r line; do
@@ -87,11 +87,11 @@ else
     echo "Using work pool '$WORK_POOL'."
 fi
 
-# For the dispatcher compose ${...} interpolation — export so this docker compose up sees them.
+# For the worker compose ${...} interpolation — export so this docker compose up sees them.
 export WORK_POOL
 export WORKER_LIMIT
 
-# Bring the dispatcher stack down (keeping volumes) and back up in the background.
-# project name comes from the compose file's top-level name: (prefect-dispatcher), so down only ever touches this stack.
+# Bring the worker stack down (keeping volumes) and back up in the background.
+# project name comes from the compose file's top-level name: (prefect-worker), so down only ever touches this stack.
 docker compose -f "$COMPOSE" down
 docker compose -f "$COMPOSE" up -d

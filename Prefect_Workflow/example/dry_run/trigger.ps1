@@ -1,4 +1,4 @@
-# __version__ = "0.0.15"
+# __version__ = "0.0.16"
 
 # example/dry_run/my_trigger.ps1 — verify the dry-run flow (my_flow.py) at three stages.
 #   -Mode local : run my_flow.py offline here (--run-on local: no Prefect server, no MLflow) - fastest sanity check.
@@ -14,7 +14,7 @@ param(
     [ValidateSet("local", "serve", "pool")]
     [string]$Mode = "local",
     [string]$PrefectApiUrl = "http://localhost:4200/api",
-    [string]$PrefectDeployment = "pipeline/pipelineflow-low",  # pool: registered deployment (work pool)
+    [string]$PrefectDeployment = "pipeline/low_deployment",  # pool: registered deployment (work pool)
     [string]$Submitter = "",        # who launched it - dashboard label (all modes)
     [string]$PrefectBlock = "",  # pool: Credentials block name for MinIO creds (e.g. yrocket)
     [string]$GitCommit = "dryrun",  # pool: git_commit_hash (local runs offline, ignores it)

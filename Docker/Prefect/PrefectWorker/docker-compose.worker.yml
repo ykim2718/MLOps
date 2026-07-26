@@ -1,19 +1,19 @@
-# Prefect Dispatcher — polls a docker-type work pool and, per job, spawns a pipeline_flow container
+# Prefect Worker — polls a docker-type work pool and, per job, spawns a pipeline_flow container
 # to run the code, then cleans it up. This container never runs code itself.
 #
 # - Mounts the host docker socket to spawn sibling containers.
 #   (Windows/Docker Desktop also exposes /var/run/docker.sock to Linux containers.)
-# - prefect + prefect-docker are baked into the image (Dockerfile.dispatcher), so there is no per-boot install.
+# - prefect + prefect-docker are baked into the image (Dockerfile.worker), so there is no per-boot install.
 # - The work pool + base job template are registered on the server (see docker-compose.server.yml),
-#   so the dispatcher only polls the pool — no pool creation here.
+#   so the worker only polls the pool — no pool creation here.
 #
-# Build (once):  docker build -f Dockerfile.dispatcher -t prefect-dispatcher:latest .
-# Start:         ./run_dispatcher.sh --work-pool high_performance
-# __version__ = "0.0.11"
-name: prefect-dispatcher   # compose project name baked in (replaces -p); run_dispatcher.sh relies on it
+# Build (once):  docker build -f Dockerfile.worker -t prefect-worker:latest .
+# Start:         ./run_worker.sh --work-pool high_performance
+# __version__ = "0.0.12"
+name: prefect-worker   # compose project name baked in (replaces -p); run_worker.sh relies on it
 services:
-  prefect_dispatcher:
-    image: prefect-dispatcher:latest   # built once from Dockerfile.dispatcher (prefect + prefect-docker)
+  prefect_worker:
+    image: prefect-worker:latest   # built once from Dockerfile.worker (prefect + prefect-docker)
     env_file:
       - ../docker-compose.env_example       # PREFECT_API_URL (shared, kept at Docker/Prefect root)
     command: prefect worker start --type docker --pool ${WORK_POOL:-high_performance} --limit ${WORKER_LIMIT:-8} --no-create-pool-if-not-found
@@ -24,8 +24,8 @@ services:
     # If the control node (API) starts late and the connection fails, restart and reconnect automatically.
     restart: unless-stopped
 
-# On the same host this shares the Control Node services' network. run_server.sh creates it beforehand (run_dispatcher.sh also creates it if missing).
-# (For a dispatcher on another machine, remove the networks block and set PREFECT_API_URL to http://<host IP>:4200/api.)
+# On the same host this shares the Control Node services' network. run_server.sh creates it beforehand (run_worker.sh also creates it if missing).
+# (For a worker on another machine, remove the networks block and set PREFECT_API_URL to http://<host IP>:4200/api.)
 networks:
   mlops:
     external: true

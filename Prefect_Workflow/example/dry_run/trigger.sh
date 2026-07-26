@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# __version__ = "0.0.2"  # Semantic Versioning:  Version = Major.Minor.Patch  (bash port of my_trigger.ps1)
+# __version__ = "0.0.3"  # Semantic Versioning:  Version = Major.Minor.Patch  (bash port of my_trigger.ps1)
 #
 # example/dry_run/my_trigger.sh — verify the dry-run flow (my_flow.py) at three stages.
 #   --mode local : run my_flow.py offline here (--run-on local: no Prefect server, no MLflow) - fastest sanity check.
@@ -14,7 +14,7 @@ set -euo pipefail
 
 MODE="local"
 PREFECT_API_URL_ARG="http://localhost:4200/api"
-PREFECT_DEPLOYMENT="pipeline/pipelineflow-low"   # pool: registered deployment (work pool)
+PREFECT_DEPLOYMENT="pipeline/low_deployment"   # pool: registered deployment (work pool)
 SUBMITTER=""                                     # who launched it - dashboard label (all modes)
 PREFECT_BLOCK=""                                 # pool: Credentials block name for MinIO creds (e.g. yrocket)
 GIT_COMMIT="dryrun"                              # pool: git_commit_hash (local runs offline, ignores it)

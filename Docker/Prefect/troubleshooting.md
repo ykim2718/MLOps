@@ -2,7 +2,7 @@
 
 # Troubleshooting
 
-<sub>rev. 17</sub>
+<sub>rev. 18</sub>
 
 운영 중 마주친 문제를 증상·원인·진단·해결 순으로 모읍니다. 새 이슈는 H2 항목으로 덧붙입니다.
 
@@ -63,7 +63,7 @@
 
 ## Stale OFFLINE workers never pruned (old server yaml without worker_pruner sidecar)
 
-- **증상** — healthcheck 의 `dispatchers (server records)` 줄에 `N offline(stale)` 이 하루가 지나도 사라지지 않고 계속 쌓입니다.
+- **증상** — healthcheck 의 `workers (server records)` 줄에 `N offline(stale)` 이 하루가 지나도 사라지지 않고 계속 쌓입니다.
 - **원인** — Prefect server 는 죽은 worker 를 OFFLINE 으로 표시만 하고 지우지 않습니다. 청소는 server stack 의 `worker_pruner` 사이드카 (`prune_loop.sh`, 1시간 주기) 가 맡습니다. 예전 `docker-compose.server.yml` 로 띄운 stack 에는 이 사이드카가 없어 stale 이 영영 남습니다. server 결함이 아니라 **사이드카 부재**입니다.
 - **진단** — 사이드카 컨테이너 유무를 봅니다.
 

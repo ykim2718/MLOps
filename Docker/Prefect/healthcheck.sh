@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # healthcheck.sh - health & wiring check for the Prefect MLOps stack (per prefect.md "1. Architecture").
-# __version__ = "0.0.29"  # Semantic Versioning:  Version = Major.Minor.Patch  (bash port of healthcheck.ps1)
+# __version__ = "0.0.30"  # Semantic Versioning:  Version = Major.Minor.Patch  (bash port of healthcheck.ps1)
 #
 # Read-only. It inspects, it never changes anything. It verifies the always-on pieces are up and
 # correctly wired, then prints an ASCII diagram of the architecture with live [ OK ] / [WARN] / [FAIL]:
-#   docker network -> Prefect Server -> pools (routing) -> dispatchers (workers, with IP) -> deployments
+#   docker network -> Prefect Server -> pools (routing) -> workers (with IP) -> deployments
 #   + each pool's options (base job template) + Credentials blocks + backing services (postgres/minio/mlflow).
 #
 # At startup it checks the required commands are installed; if any is missing it prints how to get it and aborts.
@@ -25,7 +25,7 @@ C_CYAN=$'\033[36m'
 
 nFail=0
 nWarn=0
-declare -A LOCALDISP
+declare -A LOCALWORKERS
 
 # ---------- helpers ----------------------------------------------------------
 node() {
@@ -87,8 +87,8 @@ POOL_JQ='((.[0].Config.Entrypoint // []) + (.[0].Config.Cmd // []) + (.[0].Args 
 NET_JQ='[.[] | select(.type == "docker")
         | .base_job_template.variables.properties.networks.default[]?] | .[0] // ""'
 
-get_local_dispatchers() {
-    # Fill LOCALDISP: pool name -> newline-joined "<container> ip(<network>)=<addr>" for dispatchers here.
+get_local_workers() {
+    # Fill LOCALWORKERS: pool name -> newline-joined "<container> ip(<network>)=<addr>" for workers here.
     local image="$1" network="$2" id insp pool ip name entry ids
     ids=$(docker ps --filter "ancestor=$image" --format '{{.ID}}' 2>/dev/null)
     for id in $ids; do
@@ -98,7 +98,7 @@ get_local_dispatchers() {
         name=$(printf '%s' "$insp" | jq -r '.[0].Name | ltrimstr("/")')
         [ -z "$ip" ] && ip="?"
         entry="$name   ip($network)=$ip"
-        if [ -n "${LOCALDISP[$pool]:-}" ]; then LOCALDISP[$pool]+=$'\n'"$entry"; else LOCALDISP[$pool]="$entry"; fi
+        if [ -n "${LOCALWORKERS[$pool]:-}" ]; then LOCALWORKERS[$pool]+=$'\n'"$entry"; else LOCALWORKERS[$pool]="$entry"; fi
     done
 }
 
@@ -121,7 +121,7 @@ MLFLOW_URL="http://127.0.0.1:5000"
 POSTGRES_HOST="127.0.0.1"
 POSTGRES_PORT="5432"
 NETWORK=""                                # auto-derived from a pool's base job template; fallback mlops
-DISP_IMAGE="prefect-dispatcher:latest"
+WORKER_IMAGE="prefect-worker:latest"
 POOLS=""                                  # expected pools to assert (empty = auto-discover whatever is registered)
 
 while [ $# -gt 0 ]; do
@@ -132,7 +132,7 @@ while [ $# -gt 0 ]; do
         --postgres-host) POSTGRES_HOST="$2"; shift 2 ;;
         --postgres-port) POSTGRES_PORT="$2"; shift 2 ;;
         --network)       NETWORK="$2"; shift 2 ;;
-        --disp-image)    DISP_IMAGE="$2"; shift 2 ;;
+        --disp-image)    WORKER_IMAGE="$2"; shift 2 ;;
         --pools)         POOLS="${2//,/ }"; shift 2 ;;   # comma- or space-separated
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
@@ -185,7 +185,7 @@ pgOk=false;     test_tcp "$POSTGRES_HOST" "$POSTGRES_PORT" && pgOk=true
 minioOk=false;  test_url "$MINIO_URL/minio/health/live" && minioOk=true
 mlflowOk=false
 if test_url "$MLFLOW_URL/health"; then mlflowOk=true; elif test_url "$MLFLOW_URL"; then mlflowOk=true; fi
-get_local_dispatchers "$DISP_IMAGE" "$NETWORK"
+get_local_workers "$WORKER_IMAGE" "$NETWORK"
 
 # ---------- 2. render the diagram --------------------------------------------
 echo
@@ -199,7 +199,7 @@ else node FAIL "Prefect Server  $API_URL   (health=$serverOk)"; fi
 if ! $serverOk; then
     node WARN "  server API unreachable - pool / worker / deployment / credential checks skipped"
 else
-    info "POOLS (routing) + DISPATCHERS (workers):"
+    info "POOLS (routing) + WORKERS (workers):"
     registered=""
     [ -n "$poolsJson" ] && registered=$(printf '%s' "$poolsJson" | jq -c '.[] | select(.type == "docker")' 2>/dev/null)
 
@@ -218,10 +218,10 @@ else
             wOn=$(printf '%s' "$workers" | jq '[.[] | select((.status // "" | ascii_upcase) == "ONLINE")] | length')
             [ "$wOn" -gt 0 ] && ready=true || ready=false
             wOff=$((wAll - wOn))
-            wLine="dispatchers (server records): $wOn online, $wOff offline(stale) / $wAll total"
+            wLine="workers (server records): $wOn online, $wOff offline(stale) / $wAll total"
         else
             [ "$st" = "READY" ] && ready=true || ready=false
-            wLine="dispatchers: status=$st (live count via API unavailable)"
+            wLine="workers: status=$st (live count via API unavailable)"
         fi
 
         if ! $expected; then
@@ -229,7 +229,7 @@ else
         elif $ready; then
             node OK "  pool $name"
         else
-            node WARN "  pool $name  registered but $st (no live worker: run_dispatcher.sh)"
+            node WARN "  pool $name  registered but $st (no live worker: run_worker.sh)"
         fi
 
         info "    concurrency_limit=$cc   status=$st"
@@ -242,11 +242,11 @@ else
                 info "      online worker: $wn   last_heartbeat=$hb"
             done < <(printf '%s' "$workers" | jq -c '.[] | select((.status // "" | ascii_upcase) == "ONLINE")')
         fi
-        if [ -n "${LOCALDISP[$name]:-}" ]; then
-            info "    local dispatcher container(s) on this host:"
-            while IFS= read -r d; do info "      - $d"; done <<< "${LOCALDISP[$name]}"
+        if [ -n "${LOCALWORKERS[$name]:-}" ]; then
+            info "    local worker container(s) on this host:"
+            while IFS= read -r d; do info "      - $d"; done <<< "${LOCALWORKERS[$name]}"
         else
-            info "    local dispatcher container(s) on this host: none (dispatcher may be on another machine)"
+            info "    local worker container(s) on this host: none (worker may be on another machine)"
         fi
         prop=$(printf '%s' "$p" | jq -c '.base_job_template.variables.properties // {}')
         img=$(printf '%s' "$prop" | jq -r '.image.default // "?"')

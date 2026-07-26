@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # backing_ports.sh — check reachability of, or open the inbound firewall (ufw) for, one backing service port.
-# __version__ = "0.0.2"  # Semantic Versioning:  Version = Major.Minor.Patch
-#   check : TCP-test the port. Run from a CONSUMING host (server / dispatcher) to see real reachability;
+# __version__ = "0.0.3"  # Semantic Versioning:  Version = Major.Minor.Patch
+#   check : TCP-test the port. Run from a CONSUMING host (server / worker) to see real reachability;
 #           from the serving host it is a meaningless loopback (always OPEN).
 #   open  : open the inbound firewall (ufw) for the port. Run on the host that SERVES it (needs sudo). Idempotent.
 #

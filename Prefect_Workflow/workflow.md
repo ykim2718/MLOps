@@ -1,6 +1,6 @@
 # Prefect AI/ML Workflow Automation
 
-<sub>rev. 115</sub>
+<sub>rev. 117</sub>
 
 Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환경입니다. 이 문서는 **전체 워크플로우의 인덱스 (개요)** 이고, 도구별 상세는 컴포넌트 문서로 잇습니다.
 
@@ -29,14 +29,14 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
 
 | Component | Service | Role | Dashboard | Docs |
 |-----------|---------|------|-----------|-----------|
-| **Prefect** | `prefect_server` · `prefect_dispatcher` | 오케스트레이션 (파이프라인 실행/스케줄링). server 는 job 수집·UI, dispatcher (`prefect_dispatcher`) 는 job 마다 Pipeline Flow 컨테이너를 띄우며, 코드는 그 컨테이너가 실행합니다. | http://localhost:4200 | [prefect.md](../Docker/Prefect/prefect.md) |
+| **Prefect** | `prefect_server` · `prefect_worker` | 오케스트레이션 (파이프라인 실행/스케줄링). server 는 job 수집·UI, worker (`prefect_worker`) 는 job 마다 Pipeline Flow 컨테이너를 띄우며, 코드는 그 컨테이너가 실행합니다. | http://localhost:4200 | [prefect.md](../Docker/Prefect/prefect.md) |
 | **MinIO** | `minio` | 대용량 데이터/모델/아티팩트 저장 (S3 호환). 버킷은 `datasets`·`models`·`mlflow` 입니다. | http://localhost:9001 | [minio.md](../Docker/MinIO/minio.md) |
 | **Git** | git | 코드 배송·버전 고정. Pipeline Flow 컨테이너가 `git_repo`·`git_commit_hash` 을 shallow `git fetch --depth 1` + `git worktree` 로 펼쳐 실행하고, 공통 코드는 `git subtree` (nested repo) 로 심습니다. | GitHub | - |
 | **MLflow** | `mlflow` | 실험 (params·metrics) 추적, 모델 레지스트리. backend=`postgres`, artifact=`minio`. | http://localhost:5000 | [mlflow.md](../Docker/MLflow/mlflow.md) |
 | **PostgreSQL** | `postgres` · <br>`pgadmin` | 모든 도구의 메타데이터 DB. `prefect`·`mlflow`·`optuna`·`catalog` 4개 논리 DB 를 운영합니다. | http://localhost:5050 (pgAdmin)<br>localhost:5432 (DB) | [postgresql.md](../Docker/PostgreSQL/postgresql.md) |
 | **Optuna** | python script | 하이퍼파라미터 튜닝 (trial 탐색). study storage 로 `postgres` 의 `optuna` DB 를 씁니다. | http://localhost:8080 (필요 시 기동) | [Appendix C](#appendix-c-optuna) |
 
-> 이 스택은 한 호스트에 `postgres`·`minio`·`mlflow`·`prefect_server`·`prefect_dispatcher` (dispatcher) 를 모아 띄우고, dispatcher 가 job 마다 **Pipeline Flow 컨테이너** 를 일시적으로 띄우는 **Docker work pool** 구조입니다. 각 컨테이너는 받은 `git_repo`·`git_commit_hash` 을 shallow `git fetch` (`--depth 1`) + `git worktree` 로 펼쳐 실행하고 끝나면 스스로 파괴됩니다 (상세는 [prefect.md](../Docker/Prefect/prefect.md)).
+> 이 스택은 한 호스트에 `postgres`·`minio`·`mlflow`·`prefect_server`·`prefect_worker` (worker) 를 모아 띄우고, worker 가 job 마다 **Pipeline Flow 컨테이너** 를 일시적으로 띄우는 **Docker work pool** 구조입니다. 각 컨테이너는 받은 `git_repo`·`git_commit_hash` 을 shallow `git fetch` (`--depth 1`) + `git worktree` 로 펼쳐 실행하고 끝나면 스스로 파괴됩니다 (상세는 [prefect.md](../Docker/Prefect/prefect.md)).
 
 ---
 
@@ -211,7 +211,7 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
 
 ### 5.2 Server Connection
 
-  trigger 에 앞서 client (dispatcher 또는 job 을 trigger 하는 노드) 가 **어느 Prefect server 에 연결할지** (`PREFECT_API_URL`) 를 정합니다. **최초 1회** 설정하면 이후 모든 client 명령이 이 server 를 향합니다. 설정 방법은 두 가지이며, **환경변수가 프로필보다 우선**합니다 (환경변수 > 프로필 > 기본값). 같은 컴퓨터면 `<Host IP>` 는 `localhost`.
+  trigger 에 앞서 client (worker 또는 job 을 trigger 하는 노드) 가 **어느 Prefect server 에 연결할지** (`PREFECT_API_URL`) 를 정합니다. **최초 1회** 설정하면 이후 모든 client 명령이 이 server 를 향합니다. 설정 방법은 두 가지이며, **환경변수가 프로필보다 우선**합니다 (환경변수 > 프로필 > 기본값). 같은 컴퓨터면 `<Host IP>` 는 `localhost`.
 
   **1) 환경변수** — OS 환경변수로 지정. 영구 등록은 `~/.bashrc` 에 `export` 줄을 추가하고, 현재 shell 에만 임시로 줄 땐 `export` 를 바로 실행합니다.
 
@@ -234,8 +234,8 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
 
   ```bash
   # Trigger — pick the tier by deployment; heavy -> high, light -> low (params otherwise identical).
-  prefect deployment run "pipeline/pipelineflow-high" -p submitter=alice -p prefect_block=yrocket -p git_repo=https://github.com/<user>/<repo>.git -p git_commit_hash=a1b2c3d -p minio_key=SYDNEY/001.parquet
-  prefect deployment run "pipeline/pipelineflow-low"  -p submitter=alice -p prefect_block=yrocket -p git_repo=https://github.com/<user>/<repo>.git -p git_commit_hash=a1b2c3d -p minio_key=SYDNEY/001.parquet
+  prefect deployment run "pipeline/high_deployment" -p submitter=alice -p prefect_block=yrocket -p git_repo=https://github.com/<user>/<repo>.git -p git_commit_hash=a1b2c3d -p minio_key=SYDNEY/001.parquet
+  prefect deployment run "pipeline/low_deployment"  -p submitter=alice -p prefect_block=yrocket -p git_repo=https://github.com/<user>/<repo>.git -p git_commit_hash=a1b2c3d -p minio_key=SYDNEY/001.parquet
   ```
   ```python
   from prefect.deployments import run_deployment
@@ -247,10 +247,10 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
       "git_commit_hash": "a1b2c3d",
       "minio_key": "SYDNEY/001.parquet",
   }
-  run_deployment("pipeline/pipelineflow-high", parameters=params)   # or "pipeline/pipelineflow-low" for the low tier
+  run_deployment("pipeline/high_deployment", parameters=params)   # or "pipeline/low_deployment" for the low tier
   ```
 
-  > 팀원마다 자기 repo·커밋을 넘기면 같은 이미지로 각자 다른 코드를 동시에 돌릴 수 있습니다 (컨테이너가 각자 사설 worktree 에 펼침). 무거운 job 은 `pipeline/pipelineflow-high`, 가벼운 job 은 `pipeline/pipelineflow-low` 로 보내 성능 등급을 고릅니다.
+  > 팀원마다 자기 repo·커밋을 넘기면 같은 이미지로 각자 다른 코드를 동시에 돌릴 수 있습니다 (컨테이너가 각자 사설 worktree 에 펼침). 무거운 job 은 `pipeline/high_deployment`, 가벼운 job 은 `pipeline/low_deployment` 로 보내 성능 등급을 고릅니다.
 
 ---
 
@@ -512,7 +512,7 @@ data (minio_key) ──used by──> code (Prefect run @ git SHA) ──produce
 
 ```bash
 # same SHA/key as before; if the runtime tag changed, target the deployment registered under that tag.
-prefect deployment run "pipeline/pipelineflow-high" -p git_repo=<repo> -p git_commit_hash=<recorded SHA> -p minio_key=<recorded key>
+prefect deployment run "pipeline/high_deployment" -p git_repo=<repo> -p git_commit_hash=<recorded SHA> -p minio_key=<recorded key>
 ```
 
 - 세 축이 같으면 **같은 입력 → 같은 결과** 가 보장됩니다. 브랜치명·`latest` 태그·가변 key 를 쓰면 재현이 깨지니, 재현엔 항상 고정 좌표 (SHA · 명시 태그 · 불변 key) 를 씁니다.

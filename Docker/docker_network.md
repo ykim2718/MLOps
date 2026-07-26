@@ -2,7 +2,7 @@
 
 # Docker Network
 
-<sub>rev. 1</sub>
+<sub>rev. 2</sub>
 
 이 스택의 컨테이너 간 통신에 쓰는 docker network 를 정리합니다. 기본은 **Local Network** (호스트별 bridge + 크로스머신은 LAN IP) 이고, 전 노드가 LAN-native Linux 인 경우에 한해 **Swarm Overlay Network** 로 docker 서비스 이름을 머신 너머까지 통일할 수 있습니다.
 
@@ -32,7 +32,7 @@
 
 > ⚠️ **제약** — overlay 데이터플레인 (VXLAN) 은 각 노드가 **LAN 에 직접 붙은 native Linux Docker** 일 때만 흐릅니다. **Windows/macOS 의 Docker Desktop 노드는 VM (WSL2 등) NAT 뒤라 크로스호스트 overlay 가 동작하지 않습니다** — 그 경우 §1 의 LAN IP 모델을 씁니다. overlay 로 가려면 모든 노드가 LAN-native Linux (베어메탈 또는 bridged Linux VM) 여야 합니다.
 
-세 단계로 구성합니다 — **Firewall** (노드 간 포트) · **Swarm Configuration** (매니저·워커) · **Overlay Network** (attachable overlay 생성). 성공하면 각 compose 는 `mlops` 를 external network 로 참조하고, 주소를 LAN IP 대신 **서비스 이름** 으로 통일할 수 있습니다.
+세 단계로 구성합니다 — **Firewall** (노드 간 포트) · **Swarm Configuration** (매니저·worker) · **Overlay Network** (attachable overlay 생성). 성공하면 각 compose 는 `mlops` 를 external network 로 참조하고, 주소를 LAN IP 대신 **서비스 이름** 으로 통일할 수 있습니다.
 
 ### Firewall
 
@@ -44,7 +44,7 @@
   | 7946 | tcp + udp | node-to-node communication (gossip / discovery) |
   | 4789 | udp | overlay data plane (VXLAN) |
 
-  보통 Swarm join 뒤 `docker node ls` (Swarm Configuration) 에 노드가 모두 보이면 방화벽은 문제없는 것입니다. 워커가 안 보이거나 join 이 막히면, 각 노드의 **ufw** 로 위 포트를 엽니다.
+  보통 Swarm join 뒤 `docker node ls` (Swarm Configuration) 에 노드가 모두 보이면 방화벽은 문제없는 것입니다. worker 가 안 보이거나 join 이 막히면, 각 노드의 **ufw** 로 위 포트를 엽니다.
 
   ```bash
   # check whether ufw is active (inactive -> not blocking, no action needed)
@@ -65,7 +65,7 @@
 
 ### Swarm Configuration
 
-  한 머신 (예: prefect_server machine) 을 **매니저**로 초기화하고, 나머지 머신 (prefect_dispatcher machine · backing service machine 들) 을 **워커**로 조인합니다.
+  한 머신 (예: prefect_server machine) 을 **매니저**로 초기화하고, 나머지 머신 (prefect_worker machine · backing service machine 들) 을 **worker**로 조인합니다.
 
   ```bash
   # on the manager (e.g. the prefect_server machine)
@@ -82,25 +82,25 @@
   docker node ls          # manager (Leader) + every joined worker, STATUS = Ready
   ```
 
-  > ⚠️ 워커가 **Docker Desktop (Windows/macOS)** 이면 `Ready` 로 보여도 overlay 데이터플레인이 안 흘러, 아래 Overlay Network 의 관통 테스트에서 실패합니다 (`context deadline exceeded`). all-Linux 노드여야 합니다.
+  > ⚠️ worker 가 **Docker Desktop (Windows/macOS)** 이면 `Ready` 로 보여도 overlay 데이터플레인이 안 흘러, 아래 Overlay Network 의 관통 테스트에서 실패합니다 (`context deadline exceeded`). all-Linux 노드여야 합니다.
 
 ### Overlay Network
 
-  전 노드가 공유할 **attachable overlay** network 를 매니저에서 한 번 만듭니다. `--attachable` 이라야 compose / `docker run` 으로 뜨는 **일반 컨테이너** (이 스택은 swarm service 가 아님) 와 dispatcher 가 소켓으로 띄우는 `pipeline_flow` 컨테이너도 붙을 수 있습니다.
+  전 노드가 공유할 **attachable overlay** network 를 매니저에서 한 번 만듭니다. `--attachable` 이라야 compose / `docker run` 으로 뜨는 **일반 컨테이너** (이 스택은 swarm service 가 아님) 와 worker 가 소켓으로 띄우는 `pipeline_flow` 컨테이너도 붙을 수 있습니다.
 
   ```bash
   # on the manager
   docker network create --driver overlay --attachable mlops
   ```
 
-  overlay network 는 매니저에서 생성되고, 워커에는 **컨테이너가 처음 attach 될 때** 나타납니다 (그 전에는 워커의 `docker network ls` 에 안 보여도 정상). 생성 직후 확인은 매니저에서 driver·scope 만 봅니다.
+  overlay network 는 매니저에서 생성되고, worker 에는 **컨테이너가 처음 attach 될 때** 나타납니다 (그 전에는 worker 의 `docker network ls` 에 안 보여도 정상). 생성 직후 확인은 매니저에서 driver·scope 만 봅니다.
 
   ```bash
   # on the manager: confirm it is an overlay on the swarm scope
   docker network ls | grep mlops        # DRIVER = overlay, SCOPE = swarm
   ```
 
-  **관통 테스트** — 워커에 테스트 컨테이너를 붙여 매니저에서 이름으로 ping 되면 크로스호스트 데이터플레인이 정상입니다 (이게 통과해야 overlay 를 실제로 쓸 수 있습니다).
+  **관통 테스트** — worker 에 테스트 컨테이너를 붙여 매니저에서 이름으로 ping 되면 크로스호스트 데이터플레인이 정상입니다 (이게 통과해야 overlay 를 실제로 쓸 수 있습니다).
 
   ```bash
   # on a worker: attach a test container to the overlay
