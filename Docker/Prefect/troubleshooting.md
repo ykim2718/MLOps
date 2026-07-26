@@ -2,7 +2,7 @@
 
 # Troubleshooting
 
-<sub>rev. 20</sub>
+<sub>rev. 21</sub>
 
 운영 중 마주친 문제를 증상·원인·진단·해결 순으로 모읍니다. 새 이슈는 H2 항목으로 덧붙입니다.
 
@@ -168,3 +168,33 @@
   ./run_server.sh                # up -d --build: pruner image 빌드 + 새 정의로 재생성
   ```
 - **확인** — mount 없이 machine rebooting 을 해도 `docker ps` 에서 server stack 이 `Up N minutes` 로 유지됩니다.
+
+## Published port dead after OS reboot while container is healthy — stale Docker Desktop port-forward
+
+- **발생일자** — 2026-07-26
+- **증상** — OS rebooting 후 healthcheck 가 backing service 하나 (예: minio :9000) 만 `[FAIL]` 을 냅니다. 정작 그 container 는 `docker ps` 에서 `Up (healthy)` 이고, host 에서 published port 를 두드리면 refused 가 아니라 `curl: (56) Recv failure: Connection reset by peer` 로 끊깁니다. 같은 방식으로 게시된 다른 service (예: mlflow :5000) 는 멀쩡해 일부 port 만 비대칭으로 죽습니다.
+- **원인** — Docker Desktop 은 published port 를 kernel iptables DNAT 이 아니라 Windows 의 userspace forwarder (`com.docker.backend`) 가 host port → VM → container 로 proxy 합니다. OS rebooting 시 forwarder 초기화와 container auto-restart (`restart: unless-stopped`) 사이의 race 로, Windows 쪽 listener 는 다시 bind 되지만 그 뒤의 container endpoint 매핑 재등록이 실패해 stale 하게 남습니다. 매핑이 없는 forwarder 는 TCP accept 직후 보낼 곳이 없어 RST 를 돌려주므로 reset by peer 가 됩니다. container 자체와 VM 내부 bridge 는 무관하게 정상이라 container 간 통신은 살아 있고, race 결과가 container 마다 달라 일부 port 만 걸립니다.
+- **진단** — container 안 → container 간 → host 순으로 두드려 forward 만 가립니다.
+
+  ```bash
+  # (1) inside the container - the service itself is fine? (200 expected)
+  docker exec minio-minio-1 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:9000/minio/health/live
+
+  # (2) container-to-container - in-VM bridge is fine? ("open" expected)
+  docker exec prefect-worker-prefect_worker-1 python -c \
+    'import socket; socket.create_connection(("minio",9000),3); print("open")'
+
+  # (3) host - published port only fails? (reset by peer => stale forward)
+  curl -sS -m 5 http://127.0.0.1:9000/minio/health/live -o /dev/null
+  ```
+
+  (1)(2) 정상 + (3) reset → **stale port-forward 확정**입니다. reset 대신 다른 프로세스가 응답하면 port 점유 문제이니, Windows 에서 `Get-NetTCPConnection -LocalPort 9000 -State Listen` 의 소유 프로세스가 `com.docker.backend` 인지 확인합니다.
+- **해결** — container 를 재시작해 forwarder 가 그 port 매핑을 teardown → 재등록하게 합니다.
+
+  ```bash
+  docker restart minio-minio-1
+  # still dead? recreate the container:
+  docker compose up -d --force-recreate minio
+  # still dead? restart Docker Desktop (resets the backend forwarder), then re-check
+  ```
+- **확인** — host 에서 `curl http://127.0.0.1:9000/minio/health/live` 가 `200` 을 내고, healthcheck 의 해당 backing service 줄이 `[ OK ]` 로 바뀝니다.
