@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # register_variables.sh — register the shared backing-service ADDRESS variables on the Prefect server.
-# __version__ = "0.0.7"  # Semantic Versioning:  Version = Major.Minor.Patch
+# __version__ = "0.0.9"  # Semantic Versioning:  Version = Major.Minor.Patch
 # Single, non-secret source of backing addresses (LAN IP). Flow code and host tools (catalog.py) read
 # them via prefect Variables from the server, so no docker-compose.env is needed outside containers.
 # Run after the server is up (run_server.sh). Idempotent (--overwrite).

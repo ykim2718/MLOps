@@ -1,6 +1,6 @@
 # docker-compose.server.yml
-# __version__ = "0.0.13"
-name: prefect-server   # compose project name baked in (replaces -p); run_server.sh / register_pool.sh rely on it
+# __version__ = "0.0.15"
+name: prefect-server   # compose project name baked in (replaces -p); run_server.sh relies on it
 services:
   prefect_server:
     image: prefecthq/prefect:3-latest
@@ -10,23 +10,20 @@ services:
       - ../docker-compose.env_example       # shared, kept at Docker/Prefect root
     ports:
       - "4200:4200"                 # dashboard/API. Clients connect on this port.
-    volumes:
-      - ./docker-pool-template-high.json:/templates/docker-pool-template-high.json:ro   # base job template for the high_performance pool
-      - ./docker-pool-template-low.json:/templates/docker-pool-template-low.json:ro     # base job template for the low_performance pool
     networks:
       - mlops
     restart: unless-stopped
 
   worker_pruner:
-    image: alpine:3                     # tiny; installs curl + jq at start (no python image)
+    build:
+      context: .
+      dockerfile: Dockerfile.pruner     # bakes prune_loop.sh + curl + jq into the image (no bind mount)
+    image: prefect-pruner:latest
     depends_on:
       - prefect_server
     environment:
       - PREFECT_API_URL=http://prefect_server:4200/api   # internal server API the sidecar prunes via
       - PRUNE_INTERVAL_SECONDS=3600                       # prune cadence (hourly)
-    volumes:
-      - ./prune_loop.sh:/prune_loop.sh:ro
-    command: ["sh", "-c", "tr -d '\\r' < /prune_loop.sh | sh"]   # strip CR (Windows EOL) then run
     networks:
       - mlops
     restart: unless-stopped

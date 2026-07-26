@@ -13,7 +13,7 @@ from prefect.blocks.core import Block
 from prefect.blocks.fields import SecretDict
 from prefect.variables import Variable
 
-__version__ = "0.0.33"  # Semantic Versioning:  Version = Major.Minor.Patch
+__version__ = "0.0.35"  # Semantic Versioning:  Version = Major.Minor.Patch
 
 
 class Credentials(Block):              # ONE block holds a credential set as nested dicts (values hidden);

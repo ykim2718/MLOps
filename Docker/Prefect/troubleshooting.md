@@ -2,7 +2,7 @@
 
 # Troubleshooting
 
-<sub>rev. 18</sub>
+<sub>rev. 20</sub>
 
 운영 중 마주친 문제를 증상·원인·진단·해결 순으로 모읍니다. 새 이슈는 H2 항목으로 덧붙입니다.
 
@@ -71,19 +71,19 @@
   docker ps -a --filter name=worker_pruner
   # 아무것도 안 나오면 예전 yaml 확정 (사이드카 미기동)
   ```
-- **해결** — `prefect_server` 는 그대로 두고 사이드카만 더해 올립니다 (server 무중단). server 의 `~/prefect/PrefectServer/` 에 ① `prune_loop.sh` (repo 의 PrefectServer 파일) 를 `docker-compose.server.yml` 과 같은 폴더에 두고, ② compose 의 `services:` 아래에 사이드카 블록을 더합니다.
+- **해결** — `prefect_server` 는 그대로 두고 사이드카만 더해 올립니다 (server 무중단). server 의 `~/prefect/PrefectServer/` 에 ① `prune_loop.sh` 와 `Dockerfile.pruner` (repo 의 PrefectServer 파일) 를 `docker-compose.server.yml` 과 같은 폴더에 두고, ② compose 의 `services:` 아래에 사이드카 블록을 더합니다.
 
   ```yaml
   worker_pruner:
-    image: alpine:3                     # tiny; installs curl + jq at start (no python image)
+    build:
+      context: .
+      dockerfile: Dockerfile.pruner     # bakes prune_loop.sh + curl + jq into the image (no bind mount)
+    image: prefect-pruner:latest
     depends_on:
       - prefect_server
     environment:
       - PREFECT_API_URL=http://prefect_server:4200/api   # internal server API the sidecar prunes via
       - PRUNE_INTERVAL_SECONDS=3600                       # prune cadence (hourly)
-    volumes:
-      - ./prune_loop.sh:/prune_loop.sh:ro
-    command: ["sh", "-c", "tr -d '\\r' < /prune_loop.sh | sh"]   # strip CR (Windows EOL) then run
     networks:
       - mlops
     restart: unless-stopped
@@ -93,7 +93,7 @@
 
   ```bash
   cd ~/prefect/PrefectServer
-  docker compose -f docker-compose.server.yml up -d worker_pruner
+  docker compose -f docker-compose.server.yml up -d --build worker_pruner
   ```
 - **확인** — 사이드카가 뜨고 곧 stale 을 비웁니다.
 
@@ -149,3 +149,22 @@
   ```
 
   STATUS 가 유지되고 `TimeoutError` 가 사라지면 `register_pool.sh` 도 바로 `Created work pool ...` 를 냅니다. 같은 원리로 다른 backing service (MinIO 9000 · MLflow 5000 · MongoDB 27017) 도 원격 호스트의 인바운드 방화벽이 열려야 LAN 에서 붙습니다 — 설치 시 [prefect.md §3](prefect.md) 의 포트 도달성 선검증으로 미리 걸러야 합니다.
+
+## prefect_server fails to start after machine reboot — bind-mount source fabricated as empty folders
+
+- **발생일자** — 2026-07-26
+- **증상** — machine rebooting 후 `docker restart prefect-server-prefect_server-1` 이 `error mounting ... not a directory: Are you trying to mount a directory onto a file` 로 실패하고, 같은 server 를 바라보는 worker 는 `Restarting` 루프에 빠집니다. bind-mount source 경로를 열어 보면 진짜 파일 대신 **root 소유의 빈 folder** 들이 있고, folder 목록이 compose 의 bind-mount 대상과 정확히 일치합니다.
+- **원인** — bind-mount source 가 세션성 mount (NoMachine disk forwarding 등 로그인 중에만 붙는 원격 folder) 위에 있었습니다. rebooting 직후 mount 가 붙기 전에 docker 가 `restart: unless-stopped` 로 자동 시작하면서, 없는 source 경로를 **빈 directory 로 만들어 버립니다** (docker 는 missing bind source 를 directory 로 생성). 이후 컨테이너 정의의 file mount 와 날조된 directory 의 타입이 불일치해 시작이 계속 실패합니다.
+- **진단** — source 가 진짜인지 확인합니다.
+
+  ```bash
+  ls -l <source folder>          # bind-mount 이름의 빈 folder 들이 drwx root root 로 보이면 날조 확정
+  findmnt -T <source folder>     # SOURCE 가 루트 디스크면 원래의 mount 가 안 붙은 상태
+  ```
+- **해결** — 필요한 파일을 image 안에 bake 해서 bind mount 자체를 없앱니다. `docker-compose.server.yml` 0.0.15 부터 `/templates` mount 는 삭제됐고 `worker_pruner` 는 `Dockerfile.pruner` 로 script 를 image 에 굽습니다. 날조된 folder 를 지우고 새 정의로 재생성합니다.
+
+  ```bash
+  sudo rm -rf <fabricated source folder>
+  ./run_server.sh                # up -d --build: pruner image 빌드 + 새 정의로 재생성
+  ```
+- **확인** — mount 없이 machine rebooting 을 해도 `docker ps` 에서 server stack 이 `Up N minutes` 로 유지됩니다.

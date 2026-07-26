@@ -1,11 +1,10 @@
 #!/bin/sh
 # prune_loop.sh - periodically delete OFFLINE (stale) worker records from the server.
-# __version__ = "0.0.22"  # Semantic Versioning:  Version = Major.Minor.Patch
+# __version__ = "0.0.23"  # Semantic Versioning:  Version = Major.Minor.Patch
 # Runs as the 'worker_pruner' sidecar in the server stack (alpine + curl + jq, no python).
+# Baked into the sidecar image by Dockerfile.pruner, which also installs curl + jq.
 # Prefect marks dead workers OFFLINE but never deletes them; this prunes them so only live
 # workers remain. Live (ONLINE) workers are never touched.
-
-apk add --no-cache curl jq >/dev/null 2>&1
 
 : "${PREFECT_API_URL:=http://prefect_server:4200/api}"
 : "${PRUNE_INTERVAL_SECONDS:=3600}"

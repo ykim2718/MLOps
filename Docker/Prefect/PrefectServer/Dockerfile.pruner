@@ -1,0 +1,9 @@
+# __version__ = "0.0.1"  # Semantic Versioning:  Version = Major.Minor.Patch
+# Pruner image — alpine + curl + jq with prune_loop.sh baked in at build time.
+# No bind mount at runtime, so the container (re)starts without any host files present.
+FROM alpine:3
+RUN apk add --no-cache curl jq
+COPY prune_loop.sh /prune_loop.sh
+# Strip CR (Windows EOL) once at build time instead of on every container start.
+RUN sed -i 's/\r$//' /prune_loop.sh
+CMD ["sh", "/prune_loop.sh"]

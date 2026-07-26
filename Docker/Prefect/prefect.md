@@ -1,6 +1,6 @@
 # Prefect Pipeline Orchestration on Docker
 
-<sub>rev. 597</sub>
+<sub>rev. 604</sub>
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
@@ -84,7 +84,8 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
   ══ DOCKER 1 ── PREFECT SERVER ════════════════════════════════════════════
      dir    : PrefectServer/
      files  : docker-compose.server.yml · run_server.sh · register_pool.sh
-              docker-pool-template-high.json · docker-pool-template-low.json · prune_loop.sh
+              docker-pool-template-high.json · docker-pool-template-low.json
+              Dockerfile.pruner · prune_loop.sh
      run    : run_server.sh                       # in PrefectServer/: create network + compose up -d
      config → ../docker-compose.env
               PREFECT_SERVER_DATABASE_CONNECTION_URL = 192.168.0.13:5432/prefect
@@ -135,10 +136,11 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
 
      ```
      PrefectServer/
-     ├─ docker-compose.server.yml      server container definition (port 4200 · mounts the base job templates)
+     ├─ docker-compose.server.yml      server container definition (port 4200)
      ├─ run_server.sh                  start: create network + compose up
      ├─ register_variables.sh          register backing-address variables (once, after the server is up)
      ├─ register_pool.sh               register work pools (once, after the server is up)
+     ├─ Dockerfile.pruner              worker_pruner sidecar image (bakes prune_loop.sh + curl + jq)
      ├─ prune_loop.sh                  worker_pruner sidecar loop (prunes OFFLINE worker records)
      ├─ docker-pool-template-high.json   high-tier base job template (mem_limit 16g · = flow container settings)
      └─ docker-pool-template-low.json    low-tier base job template (mem_limit 4g)
@@ -289,7 +291,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
 
   ```yaml
   # docker-compose.server.yml
-  # __version__ = "0.0.13"
+  # __version__ = "0.0.14"
   name: prefect-server   # compose project name baked in (replaces -p); run_server.sh relies on it
   services:
     prefect_server:
@@ -300,23 +302,20 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
         - ../docker-compose.env_example       # shared, kept at Docker/Prefect root
       ports:
         - "4200:4200"                 # dashboard/API. Clients connect on this port.
-      volumes:
-        - ./docker-pool-template-high.json:/templates/docker-pool-template-high.json:ro   # base job template for the high_performance pool
-        - ./docker-pool-template-low.json:/templates/docker-pool-template-low.json:ro     # base job template for the low_performance pool
       networks:
         - mlops
       restart: unless-stopped
 
     worker_pruner:
-      image: alpine:3                     # tiny; installs curl + jq at start (no python image)
+      build:
+        context: .
+        dockerfile: Dockerfile.pruner     # bakes prune_loop.sh + curl + jq into the image (no bind mount)
+      image: prefect-pruner:latest
       depends_on:
         - prefect_server
       environment:
         - PREFECT_API_URL=http://prefect_server:4200/api   # internal server API the sidecar prunes via
         - PRUNE_INTERVAL_SECONDS=3600                       # prune cadence (hourly)
-      volumes:
-        - ./prune_loop.sh:/prune_loop.sh:ro
-      command: ["sh", "-c", "tr -d '\\r' < /prune_loop.sh | sh"]   # strip CR (Windows EOL) then run
       networks:
         - mlops
       restart: unless-stopped
@@ -329,7 +328,24 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
   - `command: prefect server start --host 0.0.0.0` 은 컨테이너 밖에서도 접속하도록 모든 인터페이스에 바인딩합니다.
   - `networks: mlops` 로 `postgres` 와 서비스명으로 통신합니다. `postgres` 는 별도 compose 라 `depends_on` 대신 `restart: unless-stopped` 로 준비될 때까지 재시도합니다.
   - **UI API 주소** — UI 가 **브라우저에게** 넘길 API 주소는 `PREFECT_UI_API_URL` 인데, 따로 지정하지 않으면 `PREFECT_API_URL` 을 그대로 상속합니다. 그래서 env_file 의 `PREFECT_API_URL` 을 브라우저가 닿는 **호스트 LAN IP** (`http://<server IP>:4200/api`) 로 두면 remote 머신에서 대시보드를 열어도 정상 동작하므로, `PREFECT_UI_API_URL` 을 따로 두지 않습니다. (도커 내부 이름 `prefect_server` 나 `localhost` 로 두면 각각 브라우저가 못 풀거나 자기 자신을 가리켜 remote 에서 빈 화면이 됩니다.)
-  - `worker_pruner` 는 server 와 함께 뜨는 작은 사이드카 (alpine + curl + jq) 로, `PRUNE_INTERVAL_SECONDS` (기본 1시간) 마다 server 의 **OFFLINE (stale) worker 레코드** 를 API 로 지웁니다 (`prune_loop.sh`). Prefect 는 죽은 worker 를 OFFLINE 로 표시만 하고 지우지 않으므로, ONLINE worker 는 두고 나머지만 삭제해 목록을 깨끗이 유지합니다. `command` 의 `tr -d '\r'` 는 Windows 줄끝 (CR) 을 걸러 셸이 깨지지 않게 합니다.
+  - `worker_pruner` 는 server 와 함께 뜨는 작은 사이드카 (alpine + curl + jq) 로, `PRUNE_INTERVAL_SECONDS` (기본 1시간) 마다 server 의 **OFFLINE (stale) worker 레코드** 를 API 로 지웁니다 (`prune_loop.sh`). Prefect 는 죽은 worker 를 OFFLINE 로 표시만 하고 지우지 않으므로, ONLINE worker 는 두고 나머지만 삭제해 목록을 깨끗이 유지합니다. `Dockerfile.pruner` 가 script 와 curl + jq 를 image 에 구워 두므로 (build 시 CR 제거 포함), container 는 (재)기동 때 host 파일 없이 뜹니다.
+  - **Rebooting과 source** — server stack 은 필요한 파일을 모두 image 안에 담고 있으므로 (`prefect_server` 는 공식 image, `worker_pruner` 는 `Dockerfile.pruner` 로 bake), container/machine rebooting 시 host 의 source 파일이나 mount 가 필요 없습니다. source 는 image 를 build 할 때만 필요합니다.
+
+  #### Dockerfile.pruner
+
+  `worker_pruner` 사이드카의 image 정의입니다. alpine 에 curl + jq 를 설치하고 `prune_loop.sh` 를 COPY 하며, Windows 줄끝 (CR) 제거까지 build 시점에 끝냅니다. compose 의 `build:` 가 이 파일을 사용하므로 별도 build 명령은 필요 없습니다.
+
+  ```dockerfile
+  # __version__ = "0.0.1"  # Semantic Versioning:  Version = Major.Minor.Patch
+  # Pruner image — alpine + curl + jq with prune_loop.sh baked in at build time.
+  # No bind mount at runtime, so the container (re)starts without any host files present.
+  FROM alpine:3
+  RUN apk add --no-cache curl jq
+  COPY prune_loop.sh /prune_loop.sh
+  # Strip CR (Windows EOL) once at build time instead of on every container start.
+  RUN sed -i 's/\r$//' /prune_loop.sh
+  CMD ["sh", "/prune_loop.sh"]
+  ```
 
   #### Execution Command
 
@@ -1160,7 +1176,7 @@ fi
 ```bash
 #!/usr/bin/env bash
 # run_server.sh — bring up the Prefect server compose stack on the Control Node.
-# __version__ = "0.0.20"  # Semantic Versioning:  Version = Major.Minor.Patch
+# __version__ = "0.0.21"  # Semantic Versioning:  Version = Major.Minor.Patch
 set -euo pipefail
 
 YAML="docker-compose.server.yml"   # the server compose file (its top-level name: sets the project)
@@ -1177,7 +1193,8 @@ done
 # Create the shared network only if it does not exist yet.
 docker network inspect "$NETWORK" >/dev/null 2>&1 || docker network create "$NETWORK" >/dev/null
 
-docker compose -f "$YAML" up -d   # project name comes from the compose file's top-level name: (prefect-server)
+# --build keeps the worker_pruner sidecar image (Dockerfile.pruner) in sync with prune_loop.sh.
+docker compose -f "$YAML" up -d --build   # project name comes from the compose file's top-level name: (prefect-server)
 ```
 
 ## Appendix F. register_pool.sh
@@ -1267,7 +1284,7 @@ server 에 backing service **주소 Variable** (MinIO·PostgreSQL·MLflow endpoi
 ```bash
 #!/usr/bin/env bash
 # register_variables.sh — register the shared backing-service ADDRESS variables on the Prefect server.
-# __version__ = "0.0.7"  # Semantic Versioning:  Version = Major.Minor.Patch
+# __version__ = "0.0.9"  # Semantic Versioning:  Version = Major.Minor.Patch
 # Single, non-secret source of backing addresses (LAN IP). Flow code and host tools (catalog.py) read
 # them via prefect Variables from the server, so no docker-compose.env is needed outside containers.
 # Run after the server is up (run_server.sh). Idempotent (--overwrite).

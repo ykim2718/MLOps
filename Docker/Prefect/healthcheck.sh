@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # healthcheck.sh - health & wiring check for the Prefect MLOps stack (per prefect.md "1. Architecture").
-# __version__ = "0.0.30"  # Semantic Versioning:  Version = Major.Minor.Patch  (bash port of healthcheck.ps1)
+# __version__ = "0.0.35"  # Semantic Versioning:  Version = Major.Minor.Patch  (bash port of healthcheck.ps1)
 #
 # Read-only. It inspects, it never changes anything. It verifies the always-on pieces are up and
 # correctly wired, then prints an ASCII diagram of the architecture with live [ OK ] / [WARN] / [FAIL]:
@@ -73,10 +73,9 @@ get_workers() {
         "$1/work_pools/$2/workers/filter" 2>/dev/null
 }
 
-url_port() {
-    local p
-    p=$(printf '%s' "$1" | sed -nE 's#^[a-zA-Z]+://[^/:]+:([0-9]+).*#\1#p')
-    [ -n "$p" ] && printf '%s' "$p" || printf '%s' "?"
+get_variable() {
+    # Print the value of a server Variable by name (empty if unset or unreachable).
+    curl -s -m 5 "$API_URL/variables/name/$1" 2>/dev/null | jq -r '.value // empty'
 }
 
 # jq program: join Entrypoint+Cmd+Args of a `docker inspect` doc, then read the value after --pool.
@@ -115,11 +114,10 @@ default_api() {
 }
 
 # ---------- config (override via flags) --------------------------------------
+# Backing addresses (MinIO / PostgreSQL / MLflow) are NOT flags: they are read below from the
+# server's Variables (minio_endpoint / postgresql_host_port / mlflow_tracking_uri, see
+# register_variables.sh), so this check always tests the same addresses the flows use.
 API_URL=""
-MINIO_URL="http://127.0.0.1:9000"
-MLFLOW_URL="http://127.0.0.1:5000"
-POSTGRES_HOST="127.0.0.1"
-POSTGRES_PORT="5432"
 NETWORK=""                                # auto-derived from a pool's base job template; fallback mlops
 WORKER_IMAGE="prefect-worker:latest"
 POOLS=""                                  # expected pools to assert (empty = auto-discover whatever is registered)
@@ -127,10 +125,6 @@ POOLS=""                                  # expected pools to assert (empty = au
 while [ $# -gt 0 ]; do
     case "$1" in
         --api-url)       API_URL="$2"; shift 2 ;;
-        --minio-url)     MINIO_URL="$2"; shift 2 ;;
-        --mlflow-url)    MLFLOW_URL="$2"; shift 2 ;;
-        --postgres-host) POSTGRES_HOST="$2"; shift 2 ;;
-        --postgres-port) POSTGRES_PORT="$2"; shift 2 ;;
         --network)       NETWORK="$2"; shift 2 ;;
         --disp-image)    WORKER_IMAGE="$2"; shift 2 ;;
         --pools)         POOLS="${2//,/ }"; shift 2 ;;   # comma- or space-separated
@@ -181,10 +175,25 @@ fi
 
 netOk=false
 docker network inspect "$NETWORK" >/dev/null 2>&1 && netOk=true
-pgOk=false;     test_tcp "$POSTGRES_HOST" "$POSTGRES_PORT" && pgOk=true
-minioOk=false;  test_url "$MINIO_URL/minio/health/live" && minioOk=true
+
+# Backing addresses come from the server's Variables — the same source the flows read.
+MINIO_URL=""; MLFLOW_TRACKING_URI=""; POSTGRESQL_HOST_PORT=""
+if $serverOk; then
+    MINIO_URL=$(get_variable minio_endpoint)
+    MLFLOW_TRACKING_URI=$(get_variable mlflow_tracking_uri)
+    POSTGRESQL_HOST_PORT=$(get_variable postgresql_host_port)
+fi
+
+pgOk=false; pgPort="?"
+case "$POSTGRESQL_HOST_PORT" in
+    *:*) pgHost="${POSTGRESQL_HOST_PORT%%:*}"; pgPort="${POSTGRESQL_HOST_PORT##*:}"
+         test_tcp "$pgHost" "$pgPort" && pgOk=true ;;
+esac
+minioOk=false;  [ -n "$MINIO_URL" ] && test_url "$MINIO_URL/minio/health/live" && minioOk=true
 mlflowOk=false
-if test_url "$MLFLOW_URL/health"; then mlflowOk=true; elif test_url "$MLFLOW_URL"; then mlflowOk=true; fi
+if [ -n "$MLFLOW_TRACKING_URI" ]; then
+    if test_url "$MLFLOW_TRACKING_URI/health"; then mlflowOk=true; elif test_url "$MLFLOW_TRACKING_URI"; then mlflowOk=true; fi
+fi
 get_local_workers "$WORKER_IMAGE" "$NETWORK"
 
 # ---------- 2. render the diagram --------------------------------------------
@@ -289,17 +298,27 @@ else
     fi
 fi
 
-# backing services (own compose stacks; checked by endpoint, not by container name)
+# backing services (own compose stacks; addresses from server Variables, checked by endpoint)
 echo
-info "BACKING SERVICES:"
-if $pgOk; then node OK "  postgres  :$POSTGRES_PORT   (metadata DB)"
-else node FAIL "  postgres  :$POSTGRES_PORT   (metadata DB)"; fi
-minioPort=$(url_port "$MINIO_URL")
-mlflowPort=$(url_port "$MLFLOW_URL")
-if $minioOk; then node OK "  minio     :$minioPort  (object storage)"
-else node FAIL "  minio     :$minioPort  (object storage)"; fi
-if $mlflowOk; then node OK "  mlflow    :$mlflowPort  (tracking)"
-else node FAIL "  mlflow    :$mlflowPort  (tracking)"; fi
+info "BACKING SERVICES (addresses from server Variables):"
+if ! $serverOk; then
+    node WARN "  skipped - Variables unreachable (minio_endpoint / postgresql_host_port / mlflow_tracking_uri)"
+else
+    case "$POSTGRESQL_HOST_PORT" in
+        "")  node FAIL "  postgres  (variable postgresql_host_port not set - register_variables.sh)" ;;
+        *:*) if $pgOk; then node OK "  postgres  $POSTGRESQL_HOST_PORT   (metadata DB)"
+             else node FAIL "  postgres  $POSTGRESQL_HOST_PORT   (metadata DB)"; fi ;;
+        *)   node FAIL "  postgres  (postgresql_host_port='$POSTGRESQL_HOST_PORT' is not <host>:<port>)" ;;
+    esac
+    if [ -z "$MINIO_URL" ]; then
+        node FAIL "  minio     (variable minio_endpoint not set - register_variables.sh)"
+    elif $minioOk; then node OK "  minio     $MINIO_URL  (object storage)"
+    else node FAIL "  minio     $MINIO_URL  (object storage)"; fi
+    if [ -z "$MLFLOW_TRACKING_URI" ]; then
+        node FAIL "  mlflow    (variable mlflow_tracking_uri not set - register_variables.sh)"
+    elif $mlflowOk; then node OK "  mlflow    $MLFLOW_TRACKING_URI  (tracking)"
+    else node FAIL "  mlflow    $MLFLOW_TRACKING_URI  (tracking)"; fi
+fi
 
 # ---------- 3. summary + exit code -------------------------------------------
 echo

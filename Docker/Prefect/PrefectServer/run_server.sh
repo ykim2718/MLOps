@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # run_server.sh — bring up the Prefect server compose stack on the Control Node.
-# __version__ = "0.0.20"  # Semantic Versioning:  Version = Major.Minor.Patch
+# __version__ = "0.0.21"  # Semantic Versioning:  Version = Major.Minor.Patch
 set -euo pipefail
 
 YAML="docker-compose.server.yml"   # the server compose file (its top-level name: sets the project)
@@ -17,4 +17,5 @@ done
 # Create the shared network only if it does not exist yet.
 docker network inspect "$NETWORK" >/dev/null 2>&1 || docker network create "$NETWORK" >/dev/null
 
-docker compose -f "$YAML" up -d   # project name comes from the compose file's top-level name: (prefect-server)
+# --build keeps the worker_pruner sidecar image (Dockerfile.pruner) in sync with prune_loop.sh.
+docker compose -f "$YAML" up -d --build   # project name comes from the compose file's top-level name: (prefect-server)
