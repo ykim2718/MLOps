@@ -1,6 +1,6 @@
 # Auto-Sync Files from a Private Repo to a Public Repo with GitHub Actions
 
-rev. 16
+rev. 17
 
 ---
 
@@ -24,9 +24,8 @@ folder 가 바뀔 때마다 workflow 가 실행되어 public repository 로 push
 file 에 국한되지 않으며, 지정한 경로이면 어떤 종류의 file 이나 folder 든 대상이 된다.
 
 동기화는 원본에서 복사본으로 향하는 한 방향이다. 복사본은 push 할 때마다 원본 내용으로
-덮어써지므로 직접 수정하지 않는다. 복사본임을 알리기 위해 이번 실행이 실제로 바꾼 markdown
-문서에만 안내 banner 를 끼워 넣으며, 대상 repository 에 원래 있던 다른 문서에는 banner 를 붙이지
-않는다.
+덮어써지므로 직접 수정하지 않는다. 대상 repository 에 원래 있던 다른 file 은 복사 대상에
+포함되지 않으므로 그대로 유지된다.
 
 ---
 
@@ -78,13 +77,11 @@ Deploy key 는 계정 설정이 아니라 대상 repository 의 Settings 탭에�
 
 Trigger 인 `paths:` 와 실제 복사를 수행하는 `Copy files` 단계는 별개다. `paths:` 는 workflow 를
 언제 실행할지만 정하고, 무엇을 복사할지는 복사 단계가 정한다. 대상을 추가하려면 이 두 곳을 함께
-고치며, banner 단계는 대상을 자동으로 판별하므로 손댈 필요가 없다.
+고친다.
 
-복사가 끝나면 별도 단계에서 banner 를 붙이되 이번 실행이 실제로 바꾼 markdown file 에만
-적용한다. 이번 실행이 무엇을 바꿨는지는 `git diff` 로 알아내므로 하드코딩한 경로 목록이 필요
-없고, 대상 repository 에 원래 있던 다른 문서는 건드리지 않는다. Banner 는 원본에 들어가지 않고
-동기화된 복사본에만 붙으며, 복사 단계가 매번 원본의 깨끗한 내용으로 덮으므로 중복해서 쌓이지
-않는다.
+복사된 file 은 원본과 완전히 동일하며 workflow 가 내용을 덧붙이거나 고치지 않는다. 따라서 대상
+repository 의 file 은 원본과 byte 단위로 일치하고, 복사 단계가 매번 원본 내용으로 덮으므로 대상
+쪽에서 직접 수정한 내용은 다음 실행에서 사라진다.
 
 ```yaml
 # .github/workflows/sync-target.yml
@@ -122,21 +119,6 @@ jobs:
           mkdir -p target/shared
           rsync -av --delete shared/ target/shared/
 
-      - name: Add copy-notice banner to files changed by this sync
-        run: |
-          cd target
-          banner='> This is an auto-synced copy. Do not edit here.'
-          # files this run added or modified, markdown only; guard grep for pipefail
-          git add -A
-          changed=$(git diff --cached --name-only --diff-filter=d | grep -E '\.md$' || true)
-          echo "$changed" | while read -r f; do
-            [ -n "$f" ] || continue
-            [ -f "$f" ] || continue
-            tmp=$(mktemp)
-            { printf '%s\n\n' "$banner"; cat "$f"; } > "$tmp"
-            mv "$tmp" "$f"
-          done
-
       - name: Commit and push if changed
         run: |
           cd target
@@ -151,11 +133,9 @@ jobs:
           fi
 ```
 
-`git diff --cached --name-only --diff-filter=d` 는 이번 실행이 추가하거나 수정한 file 목록이며
-삭제는 제외한다. 그중 markdown file 만 골라 banner 를 붙이므로, 개별 file 이든 folder 로 미러링된
-file 이든 이번에 바뀐 것만 표시된다. `grep` 뒤의 `|| true` 는 매치가 없을 때 shell 이 해당 step 을
-실패로 처리하지 않도록 막는 방어다. Banner 는 인용구 문법이라 GitHub 의 렌더링 화면 맨 위에 인용
-box 로 표시된다. Markdown 이 아닌 file 에는 banner 가 붙지 않는다.
+마지막 step 의 `git diff --staged --quiet` 는 stage 에 올라온 변경이 없으면 성공을 반환하므로,
+복사 결과가 기존 내용과 같을 때는 commit 과 push 를 건너뛴다. 이 조건이 없으면 실행할 때마다 빈
+commit 이 쌓인다.
 
 ### 3.1. Execution Flow
 
@@ -164,8 +144,7 @@ box 로 표시된다. Markdown 이 아닌 file 에는 banner 가 붙지 않는�
 2. 원본 checkout 단계에서는 private repository 를 작업 folder 로 받는다.
 3. 대상 checkout 단계에서는 deploy key secret 으로 대상 repository 를 `target/` 으로 받는다.
 4. 복사 단계에서는 지정한 file 과 folder 를 대상 위치로 복사한다.
-5. Banner 단계에서는 이번 실행이 바꾼 markdown file 에만 복사본 안내 banner 를 붙인다.
-6. Commit 단계에서는 내용이 달라졌을 때만 commit 하고 push 하며, 동일하면 건너뛴다.
+5. Commit 단계에서는 내용이 달라졌을 때만 commit 하고 push 하며, 동일하면 건너뛴다.
 
 ---
 
@@ -231,7 +210,7 @@ rsync -av --delete shared/ target/shared/
 + **CI/CD (Continuous Integration / Continuous Delivery)** — Code 변경을 자동으로 build 하고 test 하며 배포하는 개발 자동화 방식이다.
 + **Deploy key** — 특정 repository 한 개에만 연결되는 SSH 공개 key 다. 쓰기 권한을 부여하면 그 repository 에 push 할 수 있고 만료가 없다. 계정 설정이 아니라 해당 repository 의 Settings 에서 등록하며, 같은 key 를 두 repository 에 deploy key 로 등록할 수 없다.
 + **Ed25519** — SSH key 생성에 쓰는 최신 타원곡선 암호 algorithm 이다. 짧고 안전해 RSA 보다 권장된다.
-+ **git diff --cached** — Stage 에 올라온 변경 목록을 보여 주는 명령이다. `--diff-filter=d` 로 삭제를 제외하면 이번 실행이 추가하거나 수정한 file 만 남는다.
++ **git diff --staged** — Stage 에 올라온 변경을 보여 주는 명령이다. `--quiet` 를 붙이면 출력 없이 변경 유무만 종료 code 로 알려 주므로 조건 분기에 쓴다.
 + **GitHub Actions** — GitHub 에 내장된 CI/CD 자동화 도구이며 push 같은 event 에 반응해 workflow 를 실행한다.
 + **GITHUB_TOKEN** — Workflow 실행 시 GitHub 이 자동 발급하는 임시 token 이다. 해당 repository 내부 작업에만 권한이 있어 다른 repository 에는 쓸 수 없다.
 + **PAT (Personal Access Token)** — GitHub 계정 비밀번호 대신 사용하는 인증용 token 문자열이다. 권한 범위와 만료일을 지정할 수 있으며, fine-grained PAT 은 특정 repository 와 특정 권한으로 범위를 좁힌 최신 방식이다.
