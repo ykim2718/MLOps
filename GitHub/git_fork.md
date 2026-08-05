@@ -1,33 +1,44 @@
 # Git Fork — Collaboration Across Repository Boundaries
 
-rev. 2
+rev. 3
 
 ---
 
 ## 1. Purpose
 
-Fork 는 다른 사람의 repository 를 내 계정 아래 복사본으로 만드는 기능이다. 이 문서는 fork 를
+Fork 는 다른 사람의 repository 를 자기 계정 아래 복사본으로 만드는 기능이다. 이 문서는 fork 를
 collaboration 관점에서 정리한다. 명령을 어떻게 입력하는가보다, 누가 어디에 쓸 권한을 가지며
 변경이 어떤 경로로 원본에 합쳐지는가를 중심에 둔다.
 
-Fork 는 git 자체의 기능이 아니라 GitHub 이 제공하는 기능이며, 원본에 쓰기 권한이 없는 사람이
-기여할 수 있게 해 주는 장치다. 문서에서 사용한 용어의 정의는
-[Appendix A. Terminology](#appendix-a-terminology) 에 정리한다.
+등장하는 사람은 둘이다. Contributor 는 변경을 만들어 합쳐 달라고 요청하는 의뢰자이고, maintainer
+는 그 요청을 검토해 원본에 합치는 승인자다. Fork 는 git 자체의 기능이 아니라 GitHub 이 제공하는
+기능이며, 원본에 쓰기 권한이 없는 contributor 가 기여할 수 있게 해 주는 장치다. 문서에서 사용한
+용어의 정의는 [Appendix A. Terminology](#appendix-a-terminology) 에 정리한다.
 
 ```text
-  [upstream] someone/project      <- the original repo; I have no push access
-        |  fork (server-side copy, performed by GitHub)
-        v
-  [origin]   me/project           <- the copy under my account; I have push access
-        |  clone
-        v
-  [local]    working directory    <- my machine
+  Contributor (requester)                        Maintainer (approver)
+  ==============================                 ==============================
+  owns the fork and the local clone              owns the original repository
+
+  [local] contributor's machine
+       |   push: allowed
+       v
+  [origin] contributor/project  ---------------> [upstream] owner/project
+       ^        pull request: ask to merge            |   review and merge:
+       |                                              |   maintainer only
+       +--------- fork: server-side copy -------------+
+                  performed once by GitHub
+
+  push directly into [upstream] : contributor no  / maintainer yes
+  merge a pull request          : contributor no  / maintainer yes
+  push into [origin]            : contributor yes / maintainer no
 ```
 
-Fig 1. Fork topology and the three repositories involved.
+Fig 1. Roles, repositories, and who is allowed to write where.
 
-변경은 local 에서 origin 으로 push 되고, origin 에서 upstream 으로는 pull request 를 통해서만
-들어간다. 이 비대칭이 fork collaboration 의 핵심이다.
+Contributor 의 변경은 local 에서 origin 으로 push 되고, origin 에서 upstream 으로는 pull request 를
+통해서만 들어가며, 그 pull request 를 실제로 합치는 사람은 maintainer 다. 이 비대칭이 fork
+collaboration 의 핵심이다.
 
 ---
 
@@ -39,8 +50,8 @@ Table 1. Comparison of fork, clone, and branch.
 
 | Aspect | Fork | Clone | Branch |
 |---|---|---|---|
-| Performed by | GitHub server | git on my machine | git in the same repo |
-| Copy location | 내 GitHub 계정 | 내 작업 machine | 같은 repository 안 |
+| Performed by | GitHub server | git on the local machine | git in the same repo |
+| Copy location | Contributor 의 GitHub 계정 | Contributor 의 local machine | 같은 repository 안 |
 | Creates a new repo | 생성한다 | 생성하지 않는다 | 생성하지 않는다 |
 | Access to the original | 읽기 권한만 필요하다 | 읽기 권한만 필요하다 | 쓰기 권한이 필요하다 |
 | Path back to the original | pull request | push (권한이 있을 때) | merge 또는 pull request |
@@ -51,7 +62,7 @@ Clone 은 어떤 repository 든 로컬로 내려받는 동작이고, 권한과 �
 아니다. Fork 는 쓰기 권한이 없는 사람이 자기 소유의 push 대상을 확보하는 방법이다.
 
 Clone 만으로는 push 할 곳이 없다. 권한이 없는 repository 를 clone 한 뒤 push 하면 거절된다.
-Fork 는 push 할 수 있는 내 repository 를 먼저 만들어 두는 단계다.
+Fork 는 contributor 가 push 할 수 있는 repository 를 먼저 만들어 두는 단계다.
 
 ---
 
@@ -78,18 +89,19 @@ Fig 2. Shared repository model.
 
 ### 3.2. Fork and Pull Model
 
-기여자는 fork 를 만들어 자기 fork 에 push 한 뒤, upstream 으로 pull request 를 올린다.
+Contributor 는 fork 를 만들어 자기 fork 에 push 한 뒤, upstream 으로 pull request 를 올린다.
 
 ```text
-   someone/project (upstream)  <--pull request--  me/project (origin, my fork)
+   [upstream] owner/project     <--pull request--  [origin] contributor/project
+   maintainer merges here                          contributor pushes here
           |                                             ^
-          |  read only                                  |  push
-          +---------------------------------------------+--- local
+          |  contributor has read access only           |  push
+          +---------------------------------------------+--- [local] contributor
 ```
 
-Fig 3. Fork and pull model.
+Fig 3. Fork and pull model with the two roles.
 
-이 방식은 기여자에게 권한을 주지 않고도 기여를 받아야 하는 상황을 전제한다. 권한 없이 누구나
+이 방식은 contributor 에게 권한을 주지 않고도 기여를 받아야 하는 상황을 전제한다. 권한 없이 누구나
 기여할 수 있고, 원본은 maintainer 가 merge 하기 전에는 바뀌지 않는다. 대신 remote 가 origin 과
 upstream 둘이 되고, fork 를 최신 상태로 유지하는 부담이 생긴다. Open source, 외부 협력사나 단기
 참여자의 기여, 사고 위험이 큰 중요 repository 가 여기에 해당한다.
@@ -101,7 +113,7 @@ Table 2. Model selection by situation.
 | Situation | Recommended model |
 |---|---|
 | 같은 팀이고 서로 신뢰하며 쓰기 권한을 줄 수 있다 | Branch 와 pull request 를 쓰고 fork 는 쓰지 않는다 |
-| 외부 기여자이거나 권한을 줄 수 없다 | Fork 와 pull request 를 쓴다 |
+| 외부 contributor 이거나 권한을 줄 수 없다 | Fork 와 pull request 를 쓴다 |
 | 원본을 다른 방향으로 발전시키려 한다 | Fork 를 쓰거나 독립 repository 를 만든다 |
 | 남의 repository 를 참고하거나 실험만 한다 | Clone 으로 충분하다 |
 
@@ -112,7 +124,7 @@ Collaboration 을 하려면 fork 를 해야 한다는 것은 오해다. 권한�
 
 ## 4. Contributor Workflow
 
-기여자 입장에서의 전체 흐름이다. 4.1 과 4.2 는 최초 한 번만 수행하고, 4.3 부터 4.7 까지는 기여할
+Contributor 입장에서의 전체 흐름이다. 4.1 과 4.2 는 최초 한 번만 수행하고, 4.3 부터 4.7 까지는 기여할
 때마다 반복한다.
 
 ### 4.1. Fork Creation
@@ -120,8 +132,8 @@ Collaboration 을 하려면 fork 를 해야 한다는 것은 오해다. 권한�
 GitHub 웹 화면에서 원본 repository 우상단의 Fork 를 누른다. GitHub CLI 로도 같은 일을 한다.
 
 ```bash
-gh repo fork someone/project --clone       # fork and clone in one step
-gh repo fork someone/project --remote      # also set the upstream remote automatically
+gh repo fork <OWNER>/project --clone       # fork and clone in one step
+gh repo fork <OWNER>/project --remote      # also set the upstream remote automatically
 ```
 
 ### 4.2. Remote Configuration
@@ -133,17 +145,17 @@ Table 3. Remote roles in a fork workflow.
 
 | Remote | Points to | Access | Used for |
 |---|---|---|---|
-| `origin` | 내 fork | 읽기와 쓰기 | 내 branch 를 push 한다 |
-| `upstream` | 원본 repository | 읽기만 | 최신 변경을 fetch 한다 |
+| `origin` | Contributor 의 fork | 읽기와 쓰기가 가능하다 | Contributor 가 자기 branch 를 push 한다 |
+| `upstream` | Maintainer 가 소유한 원본 repository | 읽기만 가능하다 | 최신 변경을 fetch 한다 |
 
 ```bash
-git clone https://github.com/<MY_ACCOUNT>/project.git    # clone my fork; it becomes 'origin'
+git clone https://github.com/<CONTRIBUTOR>/project.git   # clone the fork; it becomes 'origin'
 cd project
 git remote add upstream https://github.com/<OWNER>/project.git   # link the original repo
-git remote -v                              # verify: origin is my fork, upstream is the original
+git remote -v                              # verify: origin is the fork, upstream is the original
 ```
 
-`upstream` 은 git 이 강제하는 이름이 아니라 관례다. 그러나 다른 기여자의 설명과 대부분의 안내가
+`upstream` 은 git 이 강제하는 이름이 아니라 관례다. 그러나 다른 contributor 의 설명과 대부분의 안내가
 이 이름을 전제하므로 그대로 따르는 것이 좋다.
 
 ### 4.3. Pre-work Synchronization
@@ -154,8 +166,8 @@ git remote -v                              # verify: origin is my fork, upstream
 ```bash
 git fetch upstream                         # get upstream history; nothing is merged yet
 git switch main
-git merge upstream/main                    # fast-forward my main to upstream/main
-git push origin main                       # keep my fork's main in sync as well
+git merge upstream/main                    # fast-forward the fork's main to upstream/main
+git push origin main                       # keep the fork's main in sync as well
 ```
 
 ### 4.4. Topic Branch
@@ -170,7 +182,7 @@ git commit -m "docs: fix typo in README"
 
 Collaboration 관점에서 이유는 세 가지다. 첫째, pull request 하나가 branch 하나에 대응하므로
 `main` 에서 작업하면 pull request 를 여러 개 병행할 수 없다. 둘째, maintainer 가 수정을 요청하면
-해당 branch 에 commit 을 더하는 것만으로 반영된다. 셋째, 내 `main` 이 upstream 을 그대로 따라가는
+해당 branch 에 commit 을 더하는 것만으로 반영된다. 셋째, contributor 의 `main` 이 upstream 을 그대로 따라가는
 깨끗한 기준선으로 남는다.
 
 ### 4.5. Push to the Fork
@@ -186,19 +198,19 @@ GitHub 이 fork 관계를 알고 있으므로, push 직후 원본 repository 화
 나타난다.
 
 ```text
-  base:  someone/project : main            <- where the change will be merged (upstream)
-  head:  me/project      : fix/typo…       <- my change (fork)
+  base:  <OWNER>/project       : main       <- upstream; the maintainer merges here
+  head:  <CONTRIBUTOR>/project : fix/typo   <- the fork; the contributor pushed here
 ```
 
-Fig 4. Pull request direction from a fork to the upstream.
+Fig 4. Pull request direction from the contributor's fork to the maintainer's upstream.
 
 ```bash
-gh pr create --repo <OWNER>/project --base main --head <MY_ACCOUNT>:fix/typo-in-readme \
+gh pr create --repo <OWNER>/project --base main --head <CONTRIBUTOR>:fix/typo-in-readme \
   --title "docs: fix typo in README" --body "..."
 ```
 
-Base 를 반드시 확인한다. Base 를 잘못 지정하면 내 fork 안에서 끝나는 pull request 가 된다. 또한
-Allow edits by maintainers 를 켜 두면 maintainer 가 내 branch 에 직접 commit 을 더해 사소한
+Base 를 반드시 확인한다. Base 를 잘못 지정하면 contributor 의 fork 안에서 끝나는 pull request 가 된다. 또한
+Allow edits by maintainers 를 켜 두면 maintainer 가 contributor 의 branch 에 직접 commit 을 더해 사소한
 수정이나 rebase 를 대신할 수 있어 왕복이 줄어든다.
 
 ### 4.7. Review Response
@@ -227,7 +239,7 @@ git fetch upstream                         # always start here
 git switch main                            # merge keeps history as it is
 git merge upstream/main
 
-git switch fix/typo-in-readme              # rebase replays my commits on top of upstream
+git switch fix/typo-in-readme              # rebase replays the contributor's commits onto upstream
 git rebase upstream/main
 git push --force-with-lease                # required after a rebase; never use plain --force
 ```
@@ -238,8 +250,8 @@ Table 4. Merge versus rebase when updating a fork.
 |---|---|---|
 | History | Merge commit 이 남는다 | 선형으로 정리된다 |
 | Safety | History 를 보존하므로 안전하다 | History 를 재작성하므로 force push 가 필요하다 |
-| Pull request readability | 관련 없는 merge commit 이 섞인다 | 내 변경만 깔끔하게 보인다 |
-| Recommended for | 이미 공유된 branch 이거나 판단이 서지 않을 때 | 혼자 쓰는 내 fork 의 topic branch |
+| Pull request readability | 관련 없는 merge commit 이 섞인다 | Contributor 의 변경만 깔끔하게 보인다 |
+| Recommended for | 이미 공유된 branch 이거나 판단이 서지 않을 때 | Contributor 혼자 쓰는 fork 의 topic branch |
 
 `--force-with-lease` 를 쓴다. `--force` 는 그 사이에 올라온 다른 사람의 commit 을 말없이 지우며,
 maintainer 가 Allow edits by maintainers 로 넣은 수정도 함께 사라진다.
@@ -250,7 +262,7 @@ Fork 의 `main` 만 맞추면 되는 경우에는 GitHub 이 대신 처리한다
 상단의 Sync fork 를 누르고, CLI 에서는 다음을 실행한다.
 
 ```bash
-gh repo sync <MY_ACCOUNT>/project --branch main   # update my fork's main from upstream
+gh repo sync <CONTRIBUTOR>/project --branch main   # update the fork's main from upstream
 ```
 
 ### 5.3. Synchronization Cadence
@@ -261,14 +273,14 @@ Table 5. When to synchronize a fork.
 |---|---|
 | 새 작업을 시작할 때 | Upstream 을 fetch 한 뒤 최신 상태에서 branch 를 만든다 |
 | Pull request 가 오래 열려 있을 때 | 주기적으로 upstream 을 반영해 충돌을 미리 해소한다 |
-| Pull request 가 merge 된 뒤 | 내 `main` 을 동기화하고 끝난 branch 를 정리한다 |
+| Pull request 가 merge 된 뒤 | Fork 의 `main` 을 동기화하고 끝난 branch 를 정리한다 |
 
 ### 5.4. Cleanup after Merge
 
 ```bash
 git switch main
 git branch -d fix/typo-in-readme           # delete the merged local branch
-git push origin --delete fix/typo-in-readme   # delete it on my fork as well
+git push origin --delete fix/typo-in-readme   # delete it on the fork as well
 git fetch --prune                          # clean up stale tracking refs
 ```
 
@@ -281,7 +293,7 @@ git fetch --prune                          # clean up stale tracking refs
 
 ### 6.1. Pull Request Review
 
-Pull request 의 code 를 로컬에서 실행해 보려면, 기여자의 fork 를 remote 로 추가할 필요 없이
+Pull request 의 code 를 로컬에서 실행해 보려면, contributor 의 fork 를 remote 로 추가할 필요 없이
 pull request ref 를 바로 가져온다.
 
 ```bash
@@ -292,7 +304,7 @@ gh pr checkout 42                          # the same thing with GitHub CLI
 
 ### 6.2. Push to a Contributor Branch
 
-기여자가 Allow edits by maintainers 를 켜 두었다면, maintainer 는 그 fork 의 pull request branch 에
+Contributor 가 Allow edits by maintainers 를 켜 두었다면, maintainer 는 그 fork 의 pull request branch 에
 직접 push 할 수 있다. 사소한 수정이나 rebase 를 대신해 왕복을 줄이는 용도로 쓴다.
 
 ```bash
@@ -306,7 +318,7 @@ Table 6. Merge strategies for a pull request from a fork.
 
 | Strategy | Result | Use when |
 |---|---|---|
-| Merge commit | 기여자의 commit 이 모두 남고 merge commit 이 추가된다 | History 를 그대로 보존하려 할 때 쓴다 |
+| Merge commit | Contributor 의 commit 이 모두 남고 merge commit 이 추가된다 | History 를 그대로 보존하려 할 때 쓴다 |
 | Squash and merge | 여러 commit 이 하나로 압축된다 | Fork pull request 의 기본 선택이며 작업 중 commit 이 정리된다 |
 | Rebase and merge | 선형으로 이어 붙는다 | History 를 선형으로 유지하는 repository 에서 쓴다 |
 
@@ -324,7 +336,7 @@ Table 7. Workflow trigger behavior on a pull request from a fork.
 `pull_request` 로 도는 CI 는 fork pull request 에서 secret 을 받지 못하므로, secret 이 필요한 job 은
 fork pull request 에서 실패하거나 건너뛰도록 설계한다. `pull_request_target` 은 pull request 의
 code 를 checkout 해서 실행하면 안 된다. 외부인이 보낸 script 가 secret 을 쥔 채 실행되어 유출될 수
-있으며, label 부착처럼 code 실행이 없는 작업에만 쓴다. 저장소 설정에서 첫 기여자의 workflow 실행에
+있으며, label 부착처럼 code 실행이 없는 작업에만 쓴다. 저장소 설정에서 첫 contributor 의 workflow 실행에
 maintainer 승인을 요구하도록 지정할 수도 있다.
 
 같은 조직의 repository 라면 fork 대신 branch 를 쓰는 편이 CI 설계가 훨씬 단순해진다.
@@ -361,12 +373,12 @@ Table 9. Choice by intent.
 |---|---|
 | 원본에 기여할 계획이 있다 | Fork 를 유지하며 pull request 경로와 upstream 추적을 살린다 |
 | 원본과 무관하게 발전시킨다 | Fork 대신 독립 repository 를 만든다 |
-| 원본 code 를 내 repository 의 일부로 품는다 | Fork 가 아니라 subtree 나 vendoring 을 쓴다 |
+| 원본 code 를 자기 repository 의 일부로 품는다 | Fork 가 아니라 subtree 나 vendoring 을 쓴다 |
 
 ```bash
 git clone --bare https://github.com/<OWNER>/project.git   # start an independent repo
 cd project.git
-git push --mirror https://github.com/<MY_ACCOUNT>/my-own-project.git
+git push --mirror https://github.com/<CONTRIBUTOR>/my-own-project.git
 ```
 
 독립 repository 는 fork badge 와 pull request 경로가 없어 깔끔하지만, upstream 의 수정을
@@ -380,11 +392,11 @@ Table 10. Common pitfalls and remedies.
 
 | Symptom | Cause | Remedy |
 |---|---|---|
-| Push 가 permission denied 로 거절된다 | 원본을 clone 하고 push 를 시도했다 | Fork 를 만들고 `git remote set-url origin <MY_FORK_URL>` 로 origin 을 내 fork 로 바꾼다 |
+| Push 가 permission denied 로 거절된다 | 원본을 clone 하고 push 를 시도했다 | Fork 를 만들고 `git remote set-url origin <FORK_URL>` 로 origin 을 자기 fork 로 바꾼다 |
 | Pull request 에 다른 사람의 commit 이 대량으로 섞인다 | 오래된 fork 에서 branch 를 만들었다 | `git rebase upstream/main` 을 실행한 뒤 `--force-with-lease` 로 push 한다 |
-| Pull request 의 base 가 내 fork 로 잡힌다 | Pull request 를 만들 때 base repository 를 확인하지 않았다 | Pull request 를 닫고 base 를 upstream 으로 지정해 다시 연다 |
+| Pull request 의 base 가 contributor 의 fork 로 잡힌다 | Pull request 를 만들 때 base repository 를 확인하지 않았다 | Pull request 를 닫고 base 를 upstream 으로 지정해 다시 연다 |
 | Review 반영이 pull request 에 보이지 않는다 | 다른 branch 에 commit 했다 | Pull request 의 head branch 에 commit 하고 push 한다 |
-| 내 `main` 이 upstream 과 충돌한다 | 내 `main` 에서 직접 작업했다 | 작업을 별도 branch 로 옮긴 뒤 `git reset --hard upstream/main` 으로 기준선을 복구한다 |
+| Fork 의 `main` 이 upstream 과 충돌한다 | Fork 의 `main` 에서 직접 작업했다 | 작업을 별도 branch 로 옮긴 뒤 `git reset --hard upstream/main` 으로 기준선을 복구한다 |
 | Fork 의 CI 가 secret 이 없다며 실패한다 | `pull_request` 는 fork 에 secret 을 주지 않는다 | Secret 이 필요한 job 을 fork pull request 에서 건너뛰도록 조건을 추가한다 |
 | Force push 로 다른 사람의 수정이 사라진다 | `--force` 를 사용했다 | 항상 `--force-with-lease` 를 사용한다 |
 
@@ -404,7 +416,7 @@ git switch -c topic/xyz upstream/main
 
 # publish and propose
 git push -u origin topic/xyz
-gh pr create --repo <OWNER>/project --base main --head <MY_ACCOUNT>:topic/xyz
+gh pr create --repo <OWNER>/project --base main --head <CONTRIBUTOR>:topic/xyz
 
 # keep the fork in sync
 git fetch upstream
@@ -431,10 +443,11 @@ git fetch --prune
 ## Appendix A. Terminology
 
 + **Collaborator** — Repository 에 직접 접근 권한을 부여받은 참여자다.
++ **Contributor** — 변경을 만들어 pull request 로 합쳐 달라고 요청하는 의뢰자다. 원본 repository 에 쓰기 권한이 없고 자기 fork 에만 push 한다.
 + **Fork network** — 같은 원본에서 갈라져 나온 fork 들의 묶음이며 commit object 를 공유한다.
 + **Maintainer** — 원본 repository 에 대한 쓰기 권한을 가지고 pull request 를 검토하고 merge 하는 사람이다.
-+ **Origin** — Clone 한 repository 를 가리키는 기본 remote 이름이며, fork collaboration 에서는 내 fork 를 가리킨다.
-+ **Pull request** — 내 branch 를 다른 branch 나 repository 에 합쳐 달라고 요청하는 단위이며 review 의 단위이기도 하다.
++ **Origin** — Clone 한 repository 를 가리키는 기본 remote 이름이며, fork collaboration 에서는 contributor 의 fork 를 가리킨다.
++ **Pull request** — 자기 branch 를 다른 branch 나 repository 에 합쳐 달라고 요청하는 단위이며 review 의 단위이기도 하다.
 + **Squash merge** — Pull request 의 여러 commit 을 하나로 압축해 합치는 방식이다.
 + **Stale fork** — Upstream 과 오래 벌어진 fork 이며 충돌과 잘못된 pull request 의 주된 원인이다.
 + **Topic branch** — 하나의 변경 주제를 담는 branch 이며 pull request 하나에 대응한다.
