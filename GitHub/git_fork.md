@@ -1,6 +1,6 @@
 # Git Fork — Collaboration Across Repository Boundaries
 
-rev. 4
+rev. 5
 
 ---
 
@@ -372,6 +372,9 @@ Table 8. Fork mechanics and constraints.
 | One fork per account | 한 계정에 같은 repository 의 fork 는 하나이며, 작업 분리는 fork 가 아니라 branch 로 한다 |
 | Deleted object | Fork network 에 한 번 push 된 commit 은 fork 를 지워도 남을 수 있으므로, secret 을 commit 했다면 삭제로 끝내지 말고 즉시 폐기하고 교체한다 |
 
+누가 fork 를 만들 수 있는지는 원본의 공개 범위와 설정에 따라 달라진다. 조건은
+[Appendix B. Fork Permission Conditions](#appendix-b-fork-permission-conditions) 에 정리한다.
+
 ---
 
 ## 8. Fork as a Divergence Point
@@ -463,3 +466,41 @@ git fetch --prune
 + **Stale fork** — Upstream 과 오래 벌어진 fork 이며 충돌과 잘못된 pull request 의 주된 원인이다.
 + **Topic branch** — 하나의 변경 주제를 담는 branch 이며 pull request 하나에 대응한다.
 + **Upstream** — Fork 의 출처가 되는 원본 repository 이며 pull request 의 목적지다. Remote 이름으로도 같은 낱말을 쓴다.
+
+---
+
+## Appendix B. Fork Permission Conditions
+
+Fork 는 요청과 승인을 주고받는 절차가 아니다. Maintainer 가 개별 fork 를 승인하는 화면은 없으며,
+Maintainer 가 정하는 것은 fork 를 허용할지 말지라는 스위치 하나다. 따라서 fork 가 만들어졌다는
+사실 자체는 어떤 권한도 뜻하지 않으며, Maintainer 의 실질적인 통제는 pull request 를 merge 하는
+단계에서 이루어진다.
+
+Table 11. Who can create a fork, by repository visibility.
+
+| Original repository | Who can fork | Maintainer's control |
+|---|---|---|
+| Public repository | 로그인한 사용자면 누구나 할 수 있다 | Fork 자체는 막을 수 없고 merge 단계에서 통제한다 |
+| Organization 소유 private repository | 읽기 권한을 가진 Contributor 만 할 수 있으며 forking 허용 설정이 켜져 있어야 한다 | 초대 여부와 forking 설정 두 가지로 통제한다 |
+| 개인 계정 소유 private repository | 읽기 권한을 부여받은 Contributor 만 할 수 있다 | 초대 여부로 통제한다 |
+
+Public repository 에서 forking 을 끌 수 없는 이유는 공개 자체가 열람과 fork 를 허용한다는 전제
+위에 서 있기 때문이다. 그래서 public repository 의 Maintainer 는 fork 단계에서 아무것도 막지
+못하고, 원본이 바뀌는 지점인 merge 에서만 통제한다.
+
+Private repository 에서는 조건이 두 겹이다. 첫째, Contributor 를 초대해 읽기 권한을 주어야 한다.
+초대되지 않으면 repository 의 존재조차 보이지 않으므로 fork 대상이 되지 않으며, 이 초대가 사실상
+승인 행위다. 둘째, organization 소유라면 조직 정책과 repository 설정에서 private repository 의
+forking 을 허용해야 한다. 이 설정은 기본이 꺼짐이므로, 읽기 권한이 있어도 설정이 꺼져 있으면
+fork 가 만들어지지 않는다.
+
+Private repository 의 fork 에는 추가 제약이 따른다. Fork 는 private 로 만들어지고 같은 fork
+network 안에 머무르며 public 으로 바꿀 수 없다. 원본에 대한 접근 권한이 회수되면 그 사람의 fork
+도 함께 제거되어, private code 가 fork 형태로 남지 않는다.
+
+읽기 권한을 이미 준 상대라면 fork 보다 branch 가 낫다. 쓰기 권한을 주고 3.1 의 shared repository
+model 로 가면 remote 가 하나로 끝나고 CI 설계도 단순해진다. Fork 는 권한을 줄 수 없는 상대를 위한
+도구이므로, 권한을 줄 수 있는 상황에서 fork 를 고르면 관리 비용만 늘어난다.
+
+Self-hosted git service 는 정책이 다를 수 있다. 관리자가 forking 을 인스턴스 단위로 막을 수 있어
+public repository 라도 fork 버튼이 보이지 않을 수 있으므로, 해당 인스턴스의 설정을 확인한다.
