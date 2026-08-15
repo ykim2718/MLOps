@@ -13,7 +13,7 @@ from prefect.blocks.core import Block
 from prefect.blocks.fields import SecretDict
 from prefect.variables import Variable
 
-__version__ = "0.0.35"  # Semantic Versioning:  Version = Major.Minor.Patch
+__version__ = "0.0.36"  # Semantic Versioning:  Version = Major.Minor.Patch
 
 
 class Credentials(Block):              # ONE block holds a credential set as nested dicts (values hidden);
@@ -33,7 +33,7 @@ def run_payload(*, payload: str, submitter: str, data: Path, script: Path, env: 
     tail = collections.deque(maxlen=50)              # last N output lines -> attached to the error
     # -u: unbuffered so lines arrive live; stderr -> stdout so the traceback streams inline, in order.
     proc = subprocess.Popen(
-        ["python", "-u", payload, "--submitter", submitter, "--data_folder", str(data)],
+        ["python", "-u", payload, "--submitter", submitter, "--data-folder", str(data)],
         cwd=script, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     for line in proc.stdout:                          # stream each line to this run's UI logs as it arrives
         line = line.rstrip()

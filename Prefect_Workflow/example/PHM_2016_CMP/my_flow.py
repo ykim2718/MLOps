@@ -4,7 +4,7 @@ Predicts wafer AVG_REMOVAL_RATE (a scalar / regression target) from CMP tool
 sensor trajectories with LightGBM - the same Virtual Metrology shape as film
 thickness / etch-rate prediction. Run as the team payload that pipeline.py drives:
 
-    python my_flow.py --submitter <m> --data_folder ./data   (pipeline.py passes --submitter/--data_folder)
+    python my_flow.py --submitter <m> --data-folder ./data   (pipeline.py passes --submitter/--data-folder)
 
 Pipeline (a small DAG): load_config -> train_prepare -> train_featurize -> train ->
 (validate || test); parity_plot AND publish_artifacts both fire right after each of
@@ -33,7 +33,7 @@ from prefect.artifacts import create_markdown_artifact, create_table_artifact
 from prefect.runtime import flow_run
 from prefect.task_runners import ThreadPoolTaskRunner
 
-__version__ = "0.0.26"
+__version__ = "0.0.27"
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OPTUNA_CFG = os.path.join(HERE, "optuna.json")
@@ -565,7 +565,7 @@ def publish_artifacts(stage: str, metrics: dict, run_label: str, top_features: l
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()                           # pipeline.py passes these as CLI args
-    p.add_argument("--data_folder", default=os.path.join(HERE, "data"))
+    p.add_argument("--data-folder", default=os.path.join(HERE, "data"))
     p.add_argument("--submitter", default="local")
     a = p.parse_args()
     my_flow(a.data_folder, submitter=a.submitter)

@@ -22,7 +22,7 @@ import boto3
 from prefect.blocks.core import Block
 from prefect.blocks.fields import SecretDict
 
-__version__ = "0.0.3"  # Semantic Versioning:  Version = Major.Minor.Patch
+__version__ = "0.0.4"  # Semantic Versioning:  Version = Major.Minor.Patch
 
 
 class Credentials(Block):              # same shape as pipeline.py's block (one block, nested dicts)
@@ -75,7 +75,7 @@ def dry_run(block: str, git_repo: str, git_commit_hash: str, minio_key: Optional
 
     # 3) payload — NOT executed in a dry run. pipeline.py would run the team's my_flow.py here:
     # subprocess.run(["python", "my_flow.py", "--submitter", submitter,
-    #                 "--data_folder", data], cwd=script, check=True)
+    #                 "--data-folder", data], cwd=script, check=True)
 
     print(f"[dry-run] done. folders kept (repo/ script/ data/) under {base}. payload NOT run.")
     return base

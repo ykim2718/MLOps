@@ -1,8 +1,6 @@
-> ⚠️ **This is an auto-synced copy.** Do not edit here.
-
 # Kaggle Electric Power Consumption - Power Forecasting (LightGBM)
 
-<sub>rev. 18</sub>
+Rev. 21 | Created: 2026-06-30 | Updated: 2026-08-14 21:32 CDT
 
 Predicts a Tetouan-city power-consumption zone (**PowerConsumption_Zone1** by default - a
 continuous regression target) from weather and calendar features, using LightGBM.
@@ -94,14 +92,14 @@ set, the slice just before it is held-out validation, the rest is train. `train_
 the cut, `train_featurize` applies it - so train < validation < test in time and no future row
 ever leaks into training.
 
-| Split | How | Full run (default, `sample_rows: null`) | Fast smoke test (`--sample_rows 8000`) |
+| Split | How | Full run (default, `sample_rows: null`) | Fast smoke test (`--sample-rows 8000`) |
 |---|---|---|---|
 | train | earliest 64% (`1 - val_fraction` of `1 - test_fraction`) | 33,545 rows | 5,120 rows |
 | validation | next 16% (held-out tail, just before test) | 8,387 rows | 1,280 rows |
 | test | most recent 20% (`test_fraction`) | 10,484 rows | 1,600 rows |
 
 The three split knobs (`sample_rows`, `test_fraction`, `val_fraction`) live in `prepare.json`.
-`sample_rows` is `null` by default, so a run uses the full 52,416 rows; the `--sample_rows N` CLI
+`sample_rows` is `null` by default, so a run uses the full 52,416 rows; the `--sample-rows N` CLI
 flag takes only the most-recent N rows - a fast smoke test that checks the DAG end to end. The
 full year is a genuine seasonal-extrapolation problem; a small recent window (e.g. 8,000, approx
 55 days) keeps train / validation / test inside one season, which inflates the score (see section 5).
@@ -139,7 +137,7 @@ Per-feature range over all 52,416 rows (raw units, before 0-1 scaling):
 | DiffuseFlows | 0.011 | 936.00 | 75.03 | 124.21 |
 
 **shapes** (default full run): X_train `(33545, 14)`, val `(8387, 14)`, test `(10484, 14)`.
-Fast smoke test (`--sample_rows 8000`): train `(5120, 14)`, val `(1280, 14)`, test `(1600, 14)`.
+Fast smoke test (`--sample-rows 8000`): train `(5120, 14)`, val `(1280, 14)`, test `(1600, 14)`.
 
 ### Target (y)
 
@@ -171,15 +169,15 @@ PowerConsumption_Zone1 - daily shape (mean by hour, all of 2017)
 `--run-on` is **required** (no default - the caller must choose where the run is recorded):
 
 ```bash
-python my_flow.py --data_folder ./data --run-on local       # ephemeral, no server (full year)
-python my_flow.py --data_folder ./data --run-on local --sample_rows 8000  # fast smoke test
-python my_flow.py --data_folder ./data --run-on server      # record the run on the Prefect server
+python my_flow.py --data-folder ./data --run-on local       # ephemeral, no server (full year)
+python my_flow.py --data-folder ./data --run-on local --sample-rows 8000  # fast smoke test
+python my_flow.py --data-folder ./data --run-on server      # record the run on the Prefect server
 # pipeline.py-style invocation (records on the team server):
-python my_flow.py --submitter <m> --data_folder ./data --run-on server
+python my_flow.py --submitter <m> --data-folder ./data --run-on server
 ```
 
 `prepare.json -> sample_rows` is `null` by default, so a run uses all 52,416 rows. The
-`--sample_rows N` CLI flag overrides it (no config edit) to take only the most-recent N rows -
+`--sample-rows N` CLI flag overrides it (no config edit) to take only the most-recent N rows -
 a fast smoke test that checks the DAG end to end. The other split knobs (`test_fraction`,
 `val_fraction`) also live in `prepare.json`; `optuna.json -> environment -> target_zone`
 (`Zone1` / `Zone2` / `Zone3`) picks the target.
@@ -200,7 +198,7 @@ The default full-year run (all 52,416 rows) is a genuine **seasonal-extrapolatio
 the most-recent 20% (late Oct–Dec) is a colder regime under-represented before the cut - so it
 reaches **val R2 approx 0.85** and **test R2 approx 0.56**. That gap is the honest cost of
 forecasting a season the training span barely covers, not a bug; it is the headline lesson of a
-chronological split. A fast smoke test on the most-recent 8,000 rows (`--sample_rows 8000`, approx
+chronological split. A fast smoke test on the most-recent 8,000 rows (`--sample-rows 8000`, approx
 55 days) keeps train / validation / test inside one season, so it runs in seconds and reaches
 about **val R2 = 0.96** / **test R2 = 0.96** - useful for checking the DAG, not for judging the model.
 

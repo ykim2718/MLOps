@@ -2,7 +2,7 @@
 
 # Docker Network
 
-<sub>rev. 2</sub>
+Rev. 3 | Created: 2026-07-12 | Updated: 2026-08-14 21:32 CDT
 
 이 스택의 컨테이너 간 통신에 쓰는 docker network 를 정리합니다. 기본은 **Local Network** (호스트별 bridge + 크로스머신은 LAN IP) 이고, 전 노드가 LAN-native Linux 인 경우에 한해 **Swarm Overlay Network** 로 docker 서비스 이름을 머신 너머까지 통일할 수 있습니다.
 

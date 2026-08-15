@@ -2,7 +2,7 @@
 
 # Ubuntu CLI
 
-<sub>rev. 11</sub>
+Rev. 12 | Created: 2026-07-06 | Updated: 2026-08-14 21:32 CDT
 
 > Commands in this document are written for **Ubuntu**.
 

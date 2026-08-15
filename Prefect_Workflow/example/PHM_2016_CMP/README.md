@@ -1,8 +1,6 @@
-> ⚠️ **This is an auto-synced copy.** Do not edit here.
-
 # PHM 2016 CMP - Virtual Metrology (LightGBM)
 
-<sub>rev. 32</sub>
+Rev. 35 | Created: 2026-06-29 | Updated: 2026-08-14 21:32 CDT
 
 Predicts wafer **AVG_REMOVAL_RATE** (a continuous target - the same Virtual Metrology
 shape as film-thickness / etch-rate prediction) from CMP tool sensor trajectories,
@@ -202,9 +200,9 @@ AVG_REMOVAL_RATE - training distribution (1,981 samples; each █ ~ 25 wafers)
 ## 5. Run the flow
 
 ```bash
-python my_flow.py --data_folder ./data
+python my_flow.py --data-folder ./data
 # pipeline.py-style invocation:
-python my_flow.py --submitter <m> --data_folder ./data
+python my_flow.py --submitter <m> --data-folder ./data
 ```
 
 `optuna.json` -> `sample_wafers` keeps the dry run fast (default 300 wafers); set it

@@ -2,7 +2,7 @@
 
 # Git CLI (Command Line Interface)
 
-<sub>rev. 105</sub>
+Rev. 106 | Created: 2026-06-17 | Updated: 2026-08-14 21:32 CDT
 
 자주 쓰는 git 명령을 **작업 영역**과 **역할**로 분류했습니다. `<branch>` · `<remote>` · `<commit>` · `<file>` 은 실제 이름으로 바꿔 씁니다. 문법은 PowerShell · bash 공통입니다.
 

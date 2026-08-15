@@ -2,7 +2,7 @@
 
 # Docker Hub (Image Registry)
 
-<sub>rev. 5</sub>
+Rev. 6 | Created: 2026-07-03 | Updated: 2026-08-14 21:32 CDT
 
 이미지를 Docker Hub 에 올리고 받는 명령을 모았습니다. `<user>` 는 Docker Hub 계정, `<image>` 는 이미지 이름, `<tag>` 는 `0.0`·`latest` 같은 버전명입니다.
 

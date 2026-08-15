@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# __version__ = "0.0.3"  # Semantic Versioning:  Version = Major.Minor.Patch  (bash port of my_trigger.ps1)
+# __version__ = "0.0.4"  # Semantic Versioning:  Version = Major.Minor.Patch  (bash port of my_trigger.ps1)
 #
 # example/dry_run/my_trigger.sh — verify the dry-run flow (my_flow.py) at three stages.
 #   --mode local : run my_flow.py offline here (--run-on local: no Prefect server, no MLflow) - fastest sanity check.
@@ -21,7 +21,7 @@ GIT_COMMIT="dryrun"                              # pool: git_commit_hash (local 
 DATA_FOLDER=""                                   # local/serve; default <script>/data
 GIT_REPO=""                                      # pool: repo pipeline.py fetches
 MINIO_KEY="electric_power_consumption/v0/powerconsumption.csv"   # pool: full OBJECT key (not a prefix)
-PAYLOAD="my_flow.py"                             # pool: payload script pipeline.py runs; must exist in the git repo + take --submitter/--data_folder
+PAYLOAD="my_flow.py"                             # pool: payload script pipeline.py runs; must exist in the git repo + take --submitter/--data-folder
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -55,7 +55,7 @@ export PYTHONPATH="$here"     # so `from my_flow import my_flow` resolves (serve
 case "$MODE" in
     local)
         # offline in-process: my_flow.py --run-on local runs ephemerally with no Prefect server and no MLflow.
-        python "$here/my_flow.py" --submitter "$SUBMITTER" --data_folder "$DATA_FOLDER" --run-on local
+        python "$here/my_flow.py" --submitter "$SUBMITTER" --data-folder "$DATA_FOLDER" --run-on local
         ;;
     serve)
         # serve mode: this process serves the deployment and runs my_flow.py (Ctrl+C to stop).

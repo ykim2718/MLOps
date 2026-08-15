@@ -1,6 +1,6 @@
 # Prefect Pipeline Orchestration on Docker
 
-<sub>rev. 604</sub>
+Rev. 607 | Created: 2026-06-13 | Updated: 2026-08-14 21:32 CDT
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
@@ -752,7 +752,7 @@ Pipeline Flow 는 worker 가 job 마다 띄우는 per-flow 컨테이너입니다
   from prefect.blocks.fields import SecretDict
   from prefect.variables import Variable
 
-  __version__ = "0.0.33"  # Semantic Versioning:  Version = Major.Minor.Patch
+  __version__ = "0.0.36"  # Semantic Versioning:  Version = Major.Minor.Patch
 
 
   class Credentials(Block):              # ONE block holds a credential set as nested dicts (values hidden);
@@ -772,7 +772,7 @@ Pipeline Flow 는 worker 가 job 마다 띄우는 per-flow 컨테이너입니다
       tail = collections.deque(maxlen=50)              # last N output lines -> attached to the error
       # -u: unbuffered so lines arrive live; stderr -> stdout so the traceback streams inline, in order.
       proc = subprocess.Popen(
-          ["python", "-u", payload, "--submitter", submitter, "--data_folder", str(data)],
+          ["python", "-u", payload, "--submitter", submitter, "--data-folder", str(data)],
           cwd=script, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
       for line in proc.stdout:                          # stream each line to this run's UI logs as it arrives
           line = line.rstrip()
@@ -788,7 +788,7 @@ Pipeline Flow 는 worker 가 job 마다 띄우는 per-flow 컨테이너입니다
                 "payload flow error, only this pipeline flow error.")
 
 
-  # flow_run_name shows who submitted the run (e.g. alice#a1b2c3d).
+  # flow_run_name shows who submitted the run (e.g. alice@a1b2c3d).
   @flow(name="pipeline", flow_run_name="{submitter}#{git_commit_hash}")
   def pipeline(*, submitter: str = "", payload: str = "my_flow.py", prefect_block: str = "",
                git_repo: str, git_commit_hash: str, minio_key: str, minio_bucket: str = "datasets") -> None:
@@ -803,11 +803,13 @@ Pipeline Flow 는 worker 가 job 마다 띄우는 per-flow 컨테이너입니다
           subprocess.run(["git", "init", repo], check=True)
           subprocess.run(["git", "-C", repo, "remote", "add", "origin", git_repo], check=True)
           subprocess.run(["git", "-C", repo, "fetch", "--depth", "1", "origin", git_commit_hash], check=True)
+
           # script/: expand the fetched commit into a clean detached worktree
           subprocess.run(["git", "-C", repo, "worktree", "add", "--detach", script, git_commit_hash], check=True)
 
-          data.mkdir(parents=True, exist_ok=True)  # data/: MinIO download target (git didn't create it)
-          # this run's prefect_block -> its SECRETS (§7); service addresses are prefect Variables (§4).
+          # data/: MinIO download target (git didn't create it)
+          data.mkdir(parents=True, exist_ok=True)
+          # this run's prefect_block -> its SECRETS (§7); service addresses are prefect Variables (§3).
           creds = Credentials.load(prefect_block)
           minio = creds.minio.get_secret_value()
           s3 = boto3.client("s3", endpoint_url=Variable.get("minio_endpoint"),
@@ -836,8 +838,8 @@ Pipeline Flow 는 worker 가 job 마다 띄우는 per-flow 컨테이너입니다
           if mlflow_uri:
               env["MLFLOW_TRACKING_URI"] = mlflow_uri
           opt = creds.postgresql_optuna.get_secret_value()
-          opt_host, _, opt_port = (Variable.get("postgresql_host_port") or "").partition(":")
-          opt_port = opt_port or "5432"                                # tolerate a bare host with no ':port'
+          opt_host, _, opt_port = (Variable.get("postgresql_host_port") or "").partition(":")   # single Variable -> host, port
+          opt_port = opt_port or "5432"                                               # tolerate a bare host with no ':port'
           env["POSTGRESQL_OPTUNA_DSN"] = (f"postgresql://{opt['username']}:{opt['password']}"
                                           f"@{opt_host}:{opt_port}/{opt['database']}")
           # run the team's payload in script/; run identity passed as CLI args. run_payload streams the
@@ -847,7 +849,7 @@ Pipeline Flow 는 worker 가 job 마다 띄우는 per-flow 컨테이너입니다
           shutil.rmtree(base, ignore_errors=True)    # one cleanup removes repo/ + script/ + data/
   ```
 
-  - **자유로운 코드** — `payload` 로 팀원이 자기 스크립트를 지정하므로 코드를 정해진 틀에 맞출 필요가 없습니다. 입력은 CLI 인자 (`--submitter`·`--data_folder`) 로 받으므로, 팀원 스크립트는 `argparse` 로 그 값만 읽으면 됩니다. (payload 는 이미 체크아웃된 `script/` 안에서 돌므로 git 정보는 넘기지 않고, MLflow 서버 주소만 Variable `mlflow_tracking_uri` 를 `MLFLOW_TRACKING_URI` 환경변수로 넘깁니다.)
+  - **자유로운 코드** — `payload` 로 팀원이 자기 스크립트를 지정하므로 코드를 정해진 틀에 맞출 필요가 없습니다. 입력은 CLI 인자 (`--submitter`·`--data-folder`) 로 받으므로, 팀원 스크립트는 `argparse` 로 그 값만 읽으면 됩니다. (payload 는 이미 체크아웃된 `script/` 안에서 돌므로 git 정보는 넘기지 않고, MLflow 서버 주소만 Variable `mlflow_tracking_uri` 를 `MLFLOW_TRACKING_URI` 환경변수로 넘깁니다.)
   - **데이터 이력** — `minio_bucket`·`minio_key` 가 **flow 파라미터** 라서 Prefect 가 run 마다 입력값을 `prefect` DB 에 자동 저장합니다 (어느 버킷·객체를 썼는지 lineage 로 남습니다).
   - **crash 확인** — payload 가 0 이 아닌 코드로 끝나면 `run_payload` 이 `RuntimeError` 를 raise 해 **pipeline run 이 `Failed` 로 표시됩니다**. payload 가 도는 동안 그 출력은 한 줄씩 pipeline run 의 **Logs** 로 스트리밍되고, 실패하면 마지막 출력 (stdout·stderr, traceback 포함) 이 예외 메시지에도 함께 담깁니다. payload 가 `@flow` 로 감싸여 자기 `my_flow` run 을 만든 경우엔 그 run 도 **Failed** 로 남아 [§9](#9-prefect-ui) 에서 **어느 단계** 가 깨졌는지 함께 보입니다. 반면 payload 가 **`@flow` 에 진입하기 전에** 죽으면 (import error·`__main__` 예외·잘못된 CLI 인자) payload flow run 자체가 만들어지지 않으므로, dashboard 의 **Runs** 에는 payload flow error 가 **안 보이고 pipeline flow error 만** 보입니다 — 이때 crash 원인은 pipeline run 의 Logs·예외 메시지에서 확인합니다. git·MinIO 등 orchestrator **자신의** 오류도 그대로 raise 되어 pipeline run 이 **Failed** 로 표시됩니다.
   - **이력 자동 저장** — `@flow` 진입 시 Prefect 가 run 의 상태·로그·파라미터를 자동 기록합니다. 지표·모델은 팀원 코드가 MLflow 로 로깅하면 함께 남습니다 — pipeline.py 가 Variable `mlflow_tracking_uri` 를 `MLFLOW_TRACKING_URI` env 로 넘기므로 payload 는 그 tracking 서버로 로깅합니다 (없으면 로컬 `./mlruns` 로 빠지니 `mlflow_tracking_uri` Variable 을 등록해야 대시보드에 뜹니다). 마찬가지로 블록의 `postgresql_optuna` 비밀 + Variable `postgresql_host_port` 로 DSN 을 조립해 `POSTGRESQL_OPTUNA_DSN` env 로 넘기므로, Optuna 를 쓰는 payload 는 공유 postgres study 에 연결합니다 ([Appendix M](#appendix-m-prefect-task)).
@@ -862,14 +864,14 @@ Pipeline Flow 는 worker 가 job 마다 띄우는 per-flow 컨테이너입니다
   /tmp/run-<rand>/                 # per-run temp dir (base; removed after the run)
   ├─ repo/                         # git init + fetch --depth 1 origin <git_commit_hash> (shallow git db)
   ├─ script/                       # git worktree add --detach script <git_commit_hash> (clean worktree at the commit)
-  │  ├─ my_flow.py                 # payload — my entry (run: python my_flow.py --data_folder ../data ...)
+  │  ├─ my_flow.py                 # payload — my entry (run: python my_flow.py --data-folder ../data ...)
   │  └─ ...                        # the rest of my repo at <git_commit_hash>
   └─ data/                         # MinIO download target (bucket/key → here)
      └─ <object>                   # files or folders/files
   ```
 
   - **팀원별 repo** — `git_repo` 가 **flow 파라미터** 라 deployment 마다 다른 repo 를 기본값으로 등록할 수 있습니다. 팀원은 각자 repo·커밋을 쓰고, run 마다 사설 `script/` 에 펼쳐져 서로 간섭하지 않습니다. Prefect 가 `git_repo`·`git_commit_hash` 을 run 파라미터로 자동 기록해 재현·lineage 가 남습니다.
-  - **데이터 준비** — `pipeline.py` 가 MinIO 에서 `minio_bucket`/`minio_key` 객체를 `data/` 로 미리 내려받고 `--data_folder` 로 경로를 넘깁니다. 접속 자격증명 (그 블록의 `minio` 섹션) 은 [§7](#7-credentials) 의 Credential Blocks 로 받습니다. 팀원 코드는 자격증명·다운로드를 각자 짤 필요 없이 `--data_folder` 폴더의 파일을 읽기만 하면 됩니다 (`pipeline.py` 가 `boto3` 로 받으므로 flow 이미지에 `boto3` 가 있어야 합니다 — [§6.1](#61-image)).
+  - **데이터 준비** — `pipeline.py` 가 MinIO 에서 `minio_bucket`/`minio_key` 객체를 `data/` 로 미리 내려받고 `--data-folder` 로 경로를 넘깁니다. 접속 자격증명 (그 블록의 `minio` 섹션) 은 [§7](#7-credentials) 의 Credential Blocks 로 받습니다. 팀원 코드는 자격증명·다운로드를 각자 짤 필요 없이 `--data-folder` 폴더의 파일을 읽기만 하면 됩니다 (`pipeline.py` 가 `boto3` 로 받으므로 flow 이미지에 `boto3` 가 있어야 합니다 — [§6.1](#61-image)).
 
 ## 7. Credentials
 
@@ -1614,7 +1616,7 @@ pyarrow==15.0.2                # parquet I/O; mlflow 2.14.1 requires pyarrow<16
 
 ## Appendix K. Mounting a remote data folder
 
-같은 LAN 의 remote Ubuntu 머신에 있는 data 폴더를 worker 호스트의 docker 에 **NFS 로 mount** 해, `pipeline_flow` 컨테이너가 MinIO 다운로드 없이 그 폴더를 직접 읽게 하는 방법입니다. payload 는 `--data_folder` 로 경로만 받으므로 (`pipeline.py` [§6.3](#63-pipelinepy)) 다운로드든 mount 든 **무변경** 입니다.
+같은 LAN 의 remote Ubuntu 머신에 있는 data 폴더를 worker 호스트의 docker 에 **NFS 로 mount** 해, `pipeline_flow` 컨테이너가 MinIO 다운로드 없이 그 폴더를 직접 읽게 하는 방법입니다. payload 는 `--data-folder` 로 경로만 받으므로 (`pipeline.py` [§6.3](#63-pipelinepy)) 다운로드든 mount 든 **무변경** 입니다.
 
 **1) 데이터 호스트 (remote Ubuntu) — NFS export.** 폴더를 LAN 서브넷에 읽기전용으로 내보냅니다.
 

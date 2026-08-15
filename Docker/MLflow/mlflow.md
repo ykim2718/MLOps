@@ -2,7 +2,7 @@
 
 # MLflow — Experiment Tracking & Model Registry
 
-<sub>rev. 55</sub>
+Rev. 56 | Created: 2026-06-15 | Updated: 2026-08-14 21:32 CDT
 
 MLflow 는 실험의 **파라미터·지표를 추적** 하고, 학습된 **모델을 레지스트리로 관리·배포·서빙** 하는 도구입니다. 이 스택에서는 저장소를 두 곳으로 나눠, 가벼운 메타데이터는 메타데이터 DB 에, 실제 산출물은 오브젝트 스토리지에 둡니다.
 

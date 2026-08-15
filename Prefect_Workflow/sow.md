@@ -2,7 +2,7 @@
 
 # Statement of Work (작업 명세서)
 
-<sub>rev. 11</sub>
+Rev. 12 | Created: 2026-06-21 | Updated: 2026-08-14 21:32 CDT
 
 | Field | Content |
 |---|---|

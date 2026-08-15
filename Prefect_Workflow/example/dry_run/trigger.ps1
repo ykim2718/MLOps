@@ -1,4 +1,4 @@
-# __version__ = "0.0.16"
+# __version__ = "0.0.17"
 
 # example/dry_run/my_trigger.ps1 — verify the dry-run flow (my_flow.py) at three stages.
 #   -Mode local : run my_flow.py offline here (--run-on local: no Prefect server, no MLflow) - fastest sanity check.
@@ -21,7 +21,7 @@ param(
     [string]$DataFolder = "",  # local/serve; default <script>\data
     [string]$GitRepo = "",  # pool: repo pipeline.py fetches
     [string]$MinioKey = "electric_power_consumption/v0/powerconsumption.csv",  # pool: full OBJECT key (not a prefix)
-    [string]$Payload = "my_flow.py"  # pool: payload script pipeline.py runs; must exist in the git repo + take --submitter/--data_folder
+    [string]$Payload = "my_flow.py"  # pool: payload script pipeline.py runs; must exist in the git repo + take --submitter/--data-folder
 )
 
 if (-not $Submitter) {
@@ -49,7 +49,7 @@ $env:PYTHONPATH = $here     # so `from my_flow import my_flow` resolves (serve m
 switch ($Mode) {
     "local" {
         # offline in-process: my_flow.py --run-on local runs ephemerally with no Prefect server and no MLflow.
-        python "$here\my_flow.py" --submitter $Submitter --data_folder $DataFolder --run-on local
+        python "$here\my_flow.py" --submitter $Submitter --data-folder $DataFolder --run-on local
     }
     "serve" {
         # serve mode: this process serves the deployment and runs my_flow.py (Ctrl+C to stop).

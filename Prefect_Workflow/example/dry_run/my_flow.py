@@ -4,17 +4,17 @@ Validates workflow wiring only: each @task and config variable stands in for the
 real example/ file (train_prepare.py, train_featurize.py, train.py, validate.py,
 test_prepare.py, test_featurize.py, test.py, parity_plot.py, prepare.json,
 optuna.json). No real ML — every stage just records that it ran, while
-train_prepare also counts the files under --data_folder and logs that to the
-Prefect run log + MLflow, so `python my_flow.py --data_folder <dir>` walks the
+train_prepare also counts the files under --data-folder and logs that to the
+Prefect run log + MLflow, so `python my_flow.py --data-folder <dir>` walks the
 whole prepare -> featurize -> train -> validate / test path end to end.
 
 Run by pipeline.py (orchestrator, prefect.md §4.3):
-    python my_flow.py --submitter <m> --data_folder <dir>
+    python my_flow.py --submitter <m> --data-folder <dir>
 
 Local debugging — run ephemerally with no Prefect server (MLflow tracking also skipped):
-    python my_flow.py --run-on local --data_folder <dir>
+    python my_flow.py --run-on local --data-folder <dir>
 """
-__version__ = "0.0.20"
+__version__ = "0.0.21"
 
 import argparse
 import os
@@ -178,7 +178,7 @@ def my_flow(*, submitter: str = "local", data_folder: str = "./data") -> State:
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
     p.add_argument("--submitter", default="local")
-    p.add_argument("--data_folder", default="./data")
+    p.add_argument("--data-folder", default="./data")
     # optional (default server) so pipeline.py's pool call (no --run-on) is unaffected;
     # pass --run-on local for standalone debugging with no Prefect server.
     p.add_argument("--run-on", choices=["local", "server"], default="server",

@@ -1,6 +1,6 @@
 # Git Subtree Monorepo Convention — distributing code locked to an exact commit hash
 
-rev. 4
+Rev. 5 | Created: 2026-07-18 | Updated: 2026-08-14 21:32 CDT
 
 ---
 

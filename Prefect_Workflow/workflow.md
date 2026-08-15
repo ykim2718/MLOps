@@ -1,6 +1,6 @@
 # Prefect AI/ML Workflow Automation
 
-<sub>rev. 119</sub>
+Rev. 121 | Created: 2026-06-11 | Updated: 2026-08-14 21:32 CDT
 
 Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환경입니다. 이 문서는 **전체 워크플로우의 인덱스 (개요)** 이고, 도구별 상세는 컴포넌트 문서로 잇습니다.
 
@@ -199,7 +199,7 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
 /tmp/run-<rand>/                 # per-run temp dir (base; removed after the run)
 ├─ repo/                         # git init + fetch --depth 1 origin <git_commit_hash> (shallow git db)
 ├─ script/                       # git worktree add --detach script <git_commit_hash> (clean worktree at the commit)
-│  ├─ my_flow.py                 # payload (run: python my_flow.py --data_folder ../data ...)
+│  ├─ my_flow.py                 # payload (run: python my_flow.py --data-folder ../data ...)
 │  ├─ train_prepare.py, train_featurize.py, train.py, validate.py
 │  ├─ test_prepare.py, test_featurize.py, test.py
 │  ├─ parity_plot.py
@@ -256,22 +256,22 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
 
 ## 6. my_flow.py
 
-  Prefect orchestrator (`pipeline.py`) 가 `script/` 와 `data/` 를 미리 받아 두고 실행 정보 (`--submitter`) 와 데이터 경로 (`--data_folder`) 를 CLI 인자로 넘기므로, payload 는 `argparse` 로 받아 씁니다. server·MLflow 없이 로컬에서 배선만 빠르게 확인할 땐 `--run-on local` 로 ephemeral 실행합니다. 아래는 각 단계 함수·설정 변수가 실제 파일 (`train_prepare.py` … `optuna.json`) 을 대신하는 **dry run** 으로, 실 ML 없이 workflow 배선만 검증합니다 (실제 파일은 [example/dry_run/my_flow.py](example/dry_run/my_flow.py)).
+  Prefect orchestrator (`pipeline.py`) 가 `script/` 와 `data/` 를 미리 받아 두고 실행 정보 (`--submitter`) 와 데이터 경로 (`--data-folder`) 를 CLI 인자로 넘기므로, payload 는 `argparse` 로 받아 씁니다. server·MLflow 없이 로컬에서 배선만 빠르게 확인할 땐 `--run-on local` 로 ephemeral 실행합니다. 아래는 각 단계 함수·설정 변수가 실제 파일 (`train_prepare.py` … `optuna.json`) 을 대신하는 **dry run** 으로, 실 ML 없이 workflow 배선만 검증합니다 (실제 파일은 [example/dry_run/my_flow.py](example/dry_run/my_flow.py)).
 
   ```python
   """example/dry_run/my_flow.py — git-delivered ML payload, Prefect dry run.
 
   Validates workflow wiring only: each @task and config variable stands in for the
   real example/ file (train_prepare.py … optuna.json). No real ML — every stage just
-  records that it ran, while train_prepare also counts the files under --data_folder.
+  records that it ran, while train_prepare also counts the files under --data-folder.
 
   Run by pipeline.py (orchestrator, prefect.md §4.3):
-      python my_flow.py --submitter <m> --data_folder <dir>
+      python my_flow.py --submitter <m> --data-folder <dir>
 
   Local debugging — run ephemerally with no Prefect server (MLflow tracking also skipped):
-      python my_flow.py --run-on local --data_folder <dir>
+      python my_flow.py --run-on local --data-folder <dir>
   """
-  __version__ = "0.0.20"
+  __version__ = "0.0.21"
 
   import argparse
   import os
@@ -434,7 +434,7 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
   def parse_args() -> argparse.Namespace:
       p = argparse.ArgumentParser()
       p.add_argument("--submitter", default="local")
-      p.add_argument("--data_folder", default="./data")
+      p.add_argument("--data-folder", default="./data")
       # optional (default server) so pipeline.py's pool call (no --run-on) is unaffected;
       # pass --run-on local for standalone debugging with no Prefect server.
       p.add_argument("--run-on", choices=["local", "server"], default="server",

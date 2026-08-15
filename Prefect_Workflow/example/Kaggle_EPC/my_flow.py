@@ -3,7 +3,7 @@
 Predicts a Tetouan-city power-consumption zone (a continuous / regression target) from
 weather + calendar features with LightGBM. Run as the team payload that pipeline.py drives:
 
-    python my_flow.py --submitter <m> --data_folder ./data   (pipeline.py passes --submitter/--data_folder)
+    python my_flow.py --submitter <m> --data-folder ./data   (pipeline.py passes --submitter/--data-folder)
 
 Pipeline (a small DAG): load_config -> train_prepare -> train_featurize -> train ->
 (validate || test); parity_plot AND publish_artifacts both fire right after each of
@@ -35,7 +35,7 @@ from prefect.artifacts import create_markdown_artifact, create_table_artifact
 from prefect.runtime import flow_run
 from prefect.task_runners import ThreadPoolTaskRunner
 
-__version__ = "0.0.16"
+__version__ = "0.0.17"
 
 HERE: Path = Path(__file__).resolve().parent
 OPTUNA_JSON: Path = HERE / "optuna.json"
@@ -627,9 +627,9 @@ def my_flow(data_dir: Union[str, Path], submitter: str = "local",
 def parse_args(argv: list = None) -> argparse.Namespace:
     """Parse the CLI args pipeline.py passes to this payload."""
     p = argparse.ArgumentParser()
-    p.add_argument("--data_folder", type=Path, default=HERE / "data")
+    p.add_argument("--data-folder", type=Path, default=HERE / "data")
     p.add_argument("--submitter", type=str, default="local")
-    p.add_argument("--sample_rows", type=int, default=None,
+    p.add_argument("--sample-rows", type=int, default=None,
                    help="fast smoke test: use only the most-recent N rows (overrides optuna.json)")
     # optional (default server) so pipeline.py's pool call (no --run-on) is unaffected;
     # pass --run-on local for standalone debugging with no Prefect server.

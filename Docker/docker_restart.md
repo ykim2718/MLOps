@@ -1,6 +1,6 @@
 # Docker Automatic Restart
 
-<sub>rev. 9</sub>
+Rev. 10 | Created: 2026-07-20 | Updated: 2026-08-14 21:32 CDT
 
 docker compose 만으로 스스로 복구되는 container 를 구성하는 방법을 다룹니다. container 가 죽거나 고장났을 때 자동으로 다시 띄우는 두 경로를 정리합니다. **restart policy** 는 container 가 **exit** 될 때, **healthcheck + autoheal** 은 container 는 살아있는데 안의 process 만 죽거나 hang 될 때를 담당합니다. 둘은 보완 관계이며, 두 경로 모두 최종적으로 `docker restart` 에 도달합니다. 예시로 Temporal server 1.25 의 dev/quickstart image (`temporalio/auto-setup:1.25`) 를 사용합니다.
 
