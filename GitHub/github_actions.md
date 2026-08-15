@@ -1,236 +1,225 @@
-# Auto-Sync Files from Private to Public Repo with GitHub Actions
+# Auto-Sync Files from a Private Repo to a Public Repo with GitHub Actions
 
-Rev. 16 | Created: 2026-07-18 | Updated: 2026-08-14 21:32 CDT
+rev. 17
 
 ---
 
 ## 1. Purpose
 
-Private repo `ykim2718/claude` 의 지정한 파일·폴더를
-Public repo `ykim2718/MLOps` 로 자동 동기화한다.
+Private repository 의 지정한 file 과 folder 를 public repository 로 자동 동기화한다. 이 문서에서
+`<SOURCE_REPO>` 는 원본이 되는 private repository 를 가리키고, `<TARGET_REPO>` 는 복사본을 받는
+public repository 를 가리킨다. 문서에서 사용한 용어의 정의는
+[Appendix A. Terminology](#appendix-a-terminology) 에 정리한다.
 
+```text
+[private] <SOURCE_REPO>                   [public] <TARGET_REPO>
+  |- docs/setup-guide.md         ---->      |- docs/setup-guide.md
+  +- shared/**                   ---->      +- shared/**
 ```
-[private] ykim2718/claude                         [public] ykim2718/MLOps
-  ├ Ubuntu/ubuntu-nomachine-remote-setup.md  ──▶     ├ Ubuntu/ubuntu-nomachine-remote-setup.md
-  └ VS-Code/**                               ──▶     └ VS-Code/**
-```
 
-Private repo에 GitHub Actions 워크플로를 두고, 워크플로의 `paths:`에 지정한
-파일이나 폴더가 바뀔 때마다 워크플로가 실행되어 Public repo(`MLOps`)로 push 한다.
-트리거는 마크다운 파일에 국한되지 않으며, 지정한 경로면 어떤 종류의 파일·폴더든 대상이 된다.
+Fig 1. One-way synchronization from the source repository to the target repository.
 
-동기화는 A(원본) → B(복사본) 한 방향이다. B는 push할 때마다 A 내용으로 덮어써지므로
-직접 수정하지 않는다. B가 복사본임을 알리기 위해, 이번 실행이 실제로 바꾼 마크다운 문서에만
-안내 배너를 끼워넣는다(3절 참고). MLOps에 원래 있던 다른 문서에는 배너를 붙이지 않는다.
+Private repository 에 GitHub Actions workflow 를 두고, workflow 의 `paths:` 에 지정한 file 이나
+folder 가 바뀔 때마다 workflow 가 실행되어 public repository 로 push 한다. Trigger 는 markdown
+file 에 국한되지 않으며, 지정한 경로이면 어떤 종류의 file 이나 folder 든 대상이 된다.
+
+동기화는 원본에서 복사본으로 향하는 한 방향이다. 복사본은 push 할 때마다 원본 내용으로
+덮어써지므로 직접 수정하지 않는다. 대상 repository 에 원래 있던 다른 file 은 복사 대상에
+포함되지 않으므로 그대로 유지된다.
 
 ---
 
-## 2. Authentication: Deploy Key
+## 2. Deploy Key Authentication
 
-Actions 기본 `GITHUB_TOKEN`은 자기 repo 안에서만 권한이 있으므로,
-다른 repo(`MLOps`)에 push 하려면 별도 인증이 필요하다. Deploy Key를 사용한다.
+Actions 가 기본 제공하는 `GITHUB_TOKEN` 은 자기 repository 안에서만 권한이 있으므로, 다른
+repository 로 push 하려면 별도 인증이 필요하다. 여기서는 deploy key 를 사용한다.
 
-| | Deploy Key | Fine-grained PAT |
+Table 1. Deploy key versus fine-grained PAT.
+
+| Aspect | Deploy key | Fine-grained PAT |
 |---|---|---|
-| 만료 | 없음 (갱신 불필요) | 있음 (주기적 갱신) |
-| 범위 | repo 1개로 고정 | 여러 repo 지정 가능 |
-| 방식 | SSH 키페어 | 토큰 문자열 |
+| Expiry | 없으므로 갱신이 필요하지 않다 | 있으므로 주기적으로 갱신한다 |
+| Scope | Repository 한 개로 고정된다 | 여러 repository 를 지정할 수 있다 |
+| Mechanism | SSH key pair 를 쓴다 | Token 문자열을 쓴다 |
 
-하나의 SSH 키는 Deploy key로 repo 1개에만 등록할 수 있으므로,
-Secret 이름은 대상 repo를 드러내는 `MLOPS_DEPLOY_KEY` 형태로 짓는다.
-대상 repo가 늘어나면 대상 repo 1개당 키페어 1세트를 새로 만든다.
+하나의 SSH key 는 deploy key 로 repository 한 개에만 등록할 수 있으므로, secret 이름은 대상
+repository 를 드러내는 `TARGET_DEPLOY_KEY` 형태로 짓는다. 대상 repository 가 늘어나면 대상 한
+개당 key pair 한 세트를 새로 만든다.
 
-### Setup Steps
+### 2.1. Setup Steps
 
-Deploy Key는 계정(Account) 설정이 아니라 대상 repo(`ykim2718/MLOps`)의 설정에서 등록한다.
-(repo 상단 Settings 탭 → 왼쪽 Security 영역의 Deploy keys)
+Deploy key 는 계정 설정이 아니라 대상 repository 의 Settings 탭에서 Security 영역의 Deploy keys
+로 들어가 등록한다.
 
-1. 키페어 생성 (로컬 터미널)
+1. 로컬 terminal 에서 key pair 를 생성한다.
 
    ```bash
-   ssh-keygen -t ed25519 -C "sync-claude-to-mlops" -f sync_key -N ""
+   ssh-keygen -t ed25519 -C "sync-to-target-repo" -f sync_key -N ""
    ```
 
-   `sync_key`(비공개 키), `sync_key.pub`(공개 키) 두 파일이 생성된다.
+   비공개 key 인 `sync_key` 와 공개 key 인 `sync_key.pub` 두 file 이 생성된다.
 
-2. 공개 키를 대상 repo(MLOps)에 등록
+2. 공개 key 를 대상 repository 에 등록한다. `<TARGET_REPO>` 의 Settings 에서 Deploy keys 로 들어가
+   Add deploy key 를 누르고, Key 항목에 `sync_key.pub` 의 내용을 붙여 넣은 뒤 Allow write access 를
+   체크한다. 이 항목을 체크해야 push 가 가능하다.
 
-   - `ykim2718/MLOps` repo → Settings → Deploy keys → Add deploy key
-   - Key: `sync_key.pub` 내용 붙여넣기
-   - "Allow write access" 체크 (push 하려면 필수)
+3. 비공개 key 를 원본 repository 에 secret 으로 등록한다. `<SOURCE_REPO>` 의 Settings 에서 Secrets
+   and variables 의 Actions 로 들어가 New repository secret 을 누르고, 이름은 `TARGET_DEPLOY_KEY`
+   로 하며 값은 `sync_key` file 의 전체 내용을 넣는다.
 
-3. 비공개 키를 원본 repo(claude)에 secret으로 등록
-
-   - `ykim2718/claude` repo → Settings → Secrets and variables → Actions → New repository secret
-   - 이름: `MLOPS_DEPLOY_KEY`
-   - 값: `sync_key`(비공개 키) 파일 전체 내용 (`-----BEGIN...` ~ `...END-----`)
-
-비공개 키 파일(`sync_key`)은 secret 등록 후 로컬에서 삭제한다.
+비공개 key file 인 `sync_key` 는 secret 으로 등록한 뒤 로컬에서 삭제한다.
 
 ---
 
 ## 3. Workflow File
 
-원본 repo(`ykim2718/claude`)의 `.github/workflows/sync-MLOps.yml` 로 저장한다.
+원본 repository 의 `.github/workflows/sync-target.yml` 로 저장한다.
 
-트리거(`paths:`)와 실제 복사(`Copy files`의 `cp`/`rsync`)는 별개다.
-`paths:`는 워크플로를 언제 실행할지만 정하고, 무엇을 복사할지는 복사 단계가 정한다.
-대상을 추가하려면 이 두 곳을 함께 고친다. 배너 단계는 대상을 자동으로 판별하므로 손댈 필요가 없다.
+Trigger 인 `paths:` 와 실제 복사를 수행하는 `Copy files` 단계는 별개다. `paths:` 는 workflow 를
+언제 실행할지만 정하고, 무엇을 복사할지는 복사 단계가 정한다. 대상을 추가하려면 이 두 곳을 함께
+고친다.
 
-복사가 끝나면 별도 단계에서 배너를 붙인다. 단, **이번 실행이 실제로 바꾼 `.md`에만** 적용한다.
-이번 실행이 무엇을 바꿨는지는 `git diff`로 알아내므로(복사 단계가 방금 건드린 파일 = 동기화 대상),
-하드코딩한 경로 목록이 필요 없고, MLOps에 원래 있던 다른 문서는 건드리지 않는다.
-원본(A)에는 배너가 들어가지 않고 동기화된 대상(B)에만 붙으며,
-복사 단계가 매번 원본의 깨끗한 내용으로 덮으므로 배너가 중복 누적되지 않는다.
+복사된 file 은 원본과 완전히 동일하며 workflow 가 내용을 덧붙이거나 고치지 않는다. 따라서 대상
+repository 의 file 은 원본과 byte 단위로 일치하고, 복사 단계가 매번 원본 내용으로 덮으므로 대상
+쪽에서 직접 수정한 내용은 다음 실행에서 사라진다.
 
 ```yaml
-name: Sync files to public MLOps repo
+# .github/workflows/sync-target.yml
+name: Sync files to the public target repo
 
 on:
   push:
-    branches: [main]                       # source branch (change if master, etc.)
+    branches: [main]                       # source branch
     paths:
-      - 'Ubuntu/ubuntu-nomachine-remote-setup.md'
-      - 'VS-Code/**'                       # add more files or folders here
+      - 'docs/setup-guide.md'
+      - 'shared/**'                        # add more files or folders here
   workflow_dispatch:                       # manual run from the Actions tab
 
 jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout private repo
+      - name: Checkout the source repo
         uses: actions/checkout@v5
 
-      - name: Checkout public MLOps repo (via deploy key)
+      - name: Checkout the target repo via deploy key
         uses: actions/checkout@v5
         with:
-          repository: ykim2718/MLOps
-          ssh-key: ${{ secrets.MLOPS_DEPLOY_KEY }}
-          path: mlops
+          repository: <TARGET_REPO>
+          ssh-key: ${{ secrets.TARGET_DEPLOY_KEY }}
+          path: target
 
       - name: Copy files
         run: |
           # single file
-          mkdir -p mlops/Ubuntu
-          cp Ubuntu/ubuntu-nomachine-remote-setup.md mlops/Ubuntu/
+          mkdir -p target/docs
+          cp docs/setup-guide.md target/docs/
 
-          # whole folder (mirror)
-          mkdir -p mlops/VS-Code
-          rsync -av --delete VS-Code/ mlops/VS-Code/
+          # whole folder mirrored
+          mkdir -p target/shared
+          rsync -av --delete shared/ target/shared/
 
-      - name: Add copy-notice banner to files changed by this sync
+      - name: Commit and push if changed
         run: |
-          cd mlops
-          banner='> ⚠️ **This is an auto-synced copy.** Do not edit here.'
-          # files this run added/modified (markdown only); guard grep for pipefail
-          git add -A
-          changed=$(git diff --cached --name-only --diff-filter=d | grep -E '\.md$' || true)
-          echo "$changed" | while read -r f; do
-            [ -n "$f" ] || continue
-            [ -f "$f" ] || continue
-            tmp=$(mktemp)
-            { printf '%s\n\n' "$banner"; cat "$f"; } > "$tmp"
-            mv "$tmp" "$f"
-          done
-
-      - name: Commit & push if changed
-        run: |
-          cd mlops
+          cd target
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A
           if git diff --staged --quiet; then
             echo "No change - skip"
           else
-            git commit -m "Sync files from claude repo"
+            git commit -m "Sync files from the source repo"
             git push
           fi
 ```
 
-`git diff --cached --name-only --diff-filter=d`는 이번 실행이 추가·수정한 파일 목록(삭제 제외)이다.
-그중 `.md`만 골라 배너를 붙이므로, 개별 파일이든 폴더로 미러링된 파일이든 이번에 바뀐 것만 표시된다.
-`grep ... || true`는 매치가 없을 때 셸(`-eo pipefail`)이 스텝을 실패로 처리하지 않도록 하는 방어다.
-배너는 인용구(`>`) 문법이라 GitHub의 렌더링 화면 맨 위에 노란 인용 박스로 표시된다.
-마크다운이 아닌 파일(예: 코드·이미지)에는 배너가 붙지 않는다.
+마지막 step 의 `git diff --staged --quiet` 는 stage 에 올라온 변경이 없으면 성공을 반환하므로,
+복사 결과가 기존 내용과 같을 때는 commit 과 push 를 건너뛴다. 이 조건이 없으면 실행할 때마다 빈
+commit 이 쌓인다.
 
-### How It Works
+### 3.1. Execution Flow
 
-1. 트리거 — `main`에서 `paths:`에 지정한 파일·폴더가 바뀌어 push되면 실행 (수동 실행도 가능)
-2. 원본 체크아웃 — private repo를 작업 폴더에 받음
-3. 대상 체크아웃 — `MLOPS_DEPLOY_KEY`로 `MLOps` repo를 `mlops/`에 받음
-4. 복사 — 지정한 파일·폴더를 대상 위치로 복사
-5. 배너 — 이번 실행이 바꾼 `.md`에만 복사본 안내 배너를 붙임 (git diff로 자동 판별)
-6. 커밋 & push — 내용이 달라졌을 때만 커밋 (동일하면 skip)
+1. Trigger 단계에서는 `main` 의 `paths:` 에 지정한 file 이나 folder 가 바뀌어 push 되면 실행되며,
+   수동 실행도 가능하다.
+2. 원본 checkout 단계에서는 private repository 를 작업 folder 로 받는다.
+3. 대상 checkout 단계에서는 deploy key secret 으로 대상 repository 를 `target/` 으로 받는다.
+4. 복사 단계에서는 지정한 file 과 folder 를 대상 위치로 복사한다.
+5. Commit 단계에서는 내용이 달라졌을 때만 commit 하고 push 하며, 동일하면 건너뛴다.
 
 ---
 
-## 4. Handling Multiple Files
+## 4. Multiple Target Handling
 
-워크플로 파일은 1개로 여러 대상을 처리한다. `paths:`(트리거)와 복사 명령을 함께 늘리면 된다.
+Workflow file 한 개로 여러 대상을 처리한다. Trigger 인 `paths:` 와 복사 명령을 함께 늘리면 되며,
 세 가지 방식이 있다.
 
-### 1) 파일 나열 — 파일마다 목적지가 다를 때
+### 4.1. File List
+
+File 마다 목적지가 다를 때 쓴다.
 
 ```yaml
     paths:
-      - 'Ubuntu/ubuntu-nomachine-remote-setup.md'
-      - 'Ubuntu/another-guide.md'
+      - 'docs/setup-guide.md'
+      - 'docs/another-guide.md'
 ```
 
-복사 단계에서 각 파일을 원하는 위치로 `cp` 한다.
+복사 단계에서 각 file 을 원하는 위치로 `cp` 한다.
 
-### 2) 폴더 통째 동기화 — 특정 폴더 전체를 내보낼 때
+### 4.2. Whole Folder Mirroring
+
+특정 folder 전체를 내보낼 때 쓴다.
 
 ```yaml
     paths:
-      - 'VS-Code/**'
+      - 'shared/**'
 ```
 
 ```bash
-mkdir -p mlops/VS-Code
-rsync -av --delete VS-Code/ mlops/VS-Code/
+mkdir -p target/shared
+rsync -av --delete shared/ target/shared/
 ```
 
-`rsync -av --delete`는 폴더 안의 모든 파일·하위 폴더를 대상에 복사·갱신하고,
-원본에서 삭제된 파일은 대상에서도 삭제해 양쪽을 완전히 동일하게 맞춘다.
-(`--delete`를 빼면 추가·수정만 반영되고 삭제는 반영되지 않는다.)
+`rsync -av --delete` 는 folder 안의 모든 file 과 하위 folder 를 대상에 복사하고 갱신하며, 원본에서
+삭제된 file 은 대상에서도 삭제해 양쪽을 완전히 동일하게 맞춘다. `--delete` 를 빼면 추가와 수정만
+반영되고 삭제는 반영되지 않는다.
 
-### 3) 패턴 매칭 — 특정 폴더의 특정 확장자만 (예: Ubuntu 폴더의 모든 `.md`)
+### 4.3. Pattern Matching
+
+특정 folder 의 특정 확장자만 대상으로 삼을 때 쓴다.
 
 ```yaml
     paths:
-      - 'Ubuntu/*.md'
+      - 'docs/*.md'
 ```
 
 ---
 
 ## 5. Difference from PAT
 
-대상 repo checkout 한 줄만 다르다.
+대상 repository 를 checkout 하는 한 줄만 다르다. Deploy key 는
+`ssh-key: ${{ secrets.TARGET_DEPLOY_KEY }}` 를 쓰고, PAT 은 `token: ${{ secrets.TARGET_PAT }}` 를
+쓴다.
 
-- Deploy key: `ssh-key: ${{ secrets.MLOPS_DEPLOY_KEY }}`
-- PAT: `token: ${{ secrets.MLOPS_PAT }}`
-
-`ssh-key`를 쓰면 checkout이 SSH remote로 자동 설정되어 이후 `git push`가 그 키로 인증된다.
-별도 ssh-agent 설정이 필요 없다.
+`ssh-key` 를 쓰면 checkout 이 SSH remote 로 자동 설정되어 이후의 `git push` 가 그 key 로
+인증되므로, 별도의 ssh-agent 설정이 필요 없다.
 
 ---
 
 ## Appendix A. Terminology
 
-- PAT (Personal Access Token) — GitHub 계정 비밀번호 대신 사용하는 인증용 토큰 문자열. 권한 범위와 만료일을 지정할 수 있다. Fine-grained PAT은 특정 repo·특정 권한으로 범위를 좁힌 최신 방식.
-- SSH (Secure Shell) — 네트워크로 원격 서버에 안전하게 접속·통신하는 암호화 프로토콜. GitHub는 SSH 키페어로 push/pull 인증을 지원한다.
-- SSH Key Pair (SSH 키페어) — 짝을 이루는 두 개의 키. Public key(공개 키)는 서버(GitHub)에 등록하고, Private key(비공개 키)는 본인만 보관한다. 공개 키로 잠근 것은 짝이 되는 비공개 키로만 열 수 있어 신원이 증명된다.
-- Deploy Key — 특정 repo 한 개에만 연결되는 SSH 공개 키. 쓰기 권한을 부여하면 그 repo에 push할 수 있다. 만료가 없다. 계정 설정이 아니라 해당 repo의 Settings에서 등록한다. 같은 키를 두 repo에 Deploy key로 등록할 수 없다.
-- Ed25519 — SSH 키 생성에 쓰는 최신 타원곡선 암호 알고리즘. 짧고 안전해 RSA보다 권장된다. (`ssh-keygen -t ed25519`)
-- Secret — repo/조직에 저장하는 암호화된 값(토큰·키 등). 워크플로 안에서 `${{ secrets.NAME }}` 으로 참조하며 로그에 노출되지 않는다. 이름은 대소문자를 구분한다.
-- GITHUB_TOKEN — 워크플로 실행 시 GitHub가 자동 발급하는 임시 토큰. 해당 repo 내부 작업에만 권한이 있어 다른 repo에는 쓸 수 없다.
-- GitHub Actions — GitHub에 내장된 CI/CD 자동화 도구. 이벤트(예: push)에 반응해 워크플로를 실행한다.
-- CI/CD (Continuous Integration / Continuous Delivery) — 코드 변경을 자동으로 빌드·테스트·배포하는 개발 자동화 방식.
-- Workflow (워크플로) — `.github/workflows/` 안의 YAML 파일로 정의하는 자동화 작업 묶음. 하나 이상의 job과 step으로 구성된다.
-- paths — `on: push:` 아래의 트리거 필터. 여기에 지정한 파일·폴더가 바뀔 때만 워크플로가 실행된다. 확장자에 국한되지 않는다.
-- rsync — 폴더 단위로 파일을 동기화하는 명령. `-a`는 하위 구조 보존, `-v`는 로그 출력, `--delete`는 원본에서 지운 파일을 대상에서도 지운다.
-- git diff --cached — staging area(인덱스)에 올라온 변경 목록을 보여주는 명령. `--diff-filter=d`로 삭제를 제외하면 이번 실행이 추가·수정한 파일만 남는다.
-- YAML (YAML Ain't Markup Language) — 들여쓰기로 구조를 표현하는 사람이 읽기 쉬운 설정 파일 형식. 워크플로 정의에 사용된다.
-- workflow_dispatch — 워크플로를 Actions 탭에서 수동으로 실행할 수 있게 해주는 트리거.
-- Repository (Repo) — 코드·파일·이력을 담는 저장소. private(비공개)과 public(공개)으로 구분된다.
++ **CI/CD (Continuous Integration / Continuous Delivery)** — Code 변경을 자동으로 build 하고 test 하며 배포하는 개발 자동화 방식이다.
++ **Deploy key** — 특정 repository 한 개에만 연결되는 SSH 공개 key 다. 쓰기 권한을 부여하면 그 repository 에 push 할 수 있고 만료가 없다. 계정 설정이 아니라 해당 repository 의 Settings 에서 등록하며, 같은 key 를 두 repository 에 deploy key 로 등록할 수 없다.
++ **Ed25519** — SSH key 생성에 쓰는 최신 타원곡선 암호 algorithm 이다. 짧고 안전해 RSA 보다 권장된다.
++ **git diff --staged** — Stage 에 올라온 변경을 보여 주는 명령이다. `--quiet` 를 붙이면 출력 없이 변경 유무만 종료 code 로 알려 주므로 조건 분기에 쓴다.
++ **GitHub Actions** — GitHub 에 내장된 CI/CD 자동화 도구이며 push 같은 event 에 반응해 workflow 를 실행한다.
++ **GITHUB_TOKEN** — Workflow 실행 시 GitHub 이 자동 발급하는 임시 token 이다. 해당 repository 내부 작업에만 권한이 있어 다른 repository 에는 쓸 수 없다.
++ **PAT (Personal Access Token)** — GitHub 계정 비밀번호 대신 사용하는 인증용 token 문자열이다. 권한 범위와 만료일을 지정할 수 있으며, fine-grained PAT 은 특정 repository 와 특정 권한으로 범위를 좁힌 최신 방식이다.
++ **paths** — `on: push:` 아래의 trigger filter 다. 여기에 지정한 file 이나 folder 가 바뀔 때만 workflow 가 실행되며 확장자에 국한되지 않는다.
++ **Repository** — Code 와 file 과 history 를 담는 저장 단위이며 private 과 public 으로 구분된다.
++ **rsync** — Folder 단위로 file 을 동기화하는 명령이다. `-a` 는 하위 구조를 보존하고, `-v` 는 log 를 출력하며, `--delete` 는 원본에서 지운 file 을 대상에서도 지운다.
++ **Secret** — Repository 나 organization 에 저장하는 암호화된 값이다. Workflow 안에서 `${{ secrets.NAME }}` 으로 참조하며 log 에 노출되지 않고 이름은 대소문자를 구분한다.
++ **SSH (Secure Shell)** — Network 로 원격 server 에 안전하게 접속하고 통신하는 암호화 protocol 이다. GitHub 은 SSH key pair 로 push 와 pull 인증을 지원한다.
++ **SSH key pair** — 짝을 이루는 두 개의 key 다. 공개 key 는 server 에 등록하고 비공개 key 는 본인만 보관하며, 공개 key 로 잠근 것은 짝이 되는 비공개 key 로만 열 수 있어 신원이 증명된다.
++ **Workflow** — `.github/workflows/` 안의 YAML file 로 정의하는 자동화 작업 묶음이며 하나 이상의 job 과 step 으로 구성된다.
++ **workflow_dispatch** — Workflow 를 Actions 탭에서 수동으로 실행할 수 있게 해 주는 trigger 다.
++ **YAML (YAML Ain't Markup Language)** — 들여쓰기로 구조를 표현하는 사람이 읽기 쉬운 설정 file 형식이며 workflow 정의에 사용된다.
