@@ -1,4 +1,4 @@
-# rev. 12
+# rev. 13
 # Python dependencies for the shared team Pipeline Flow image (base: python:3.11.15, see Dockerfile).
 # The team source is NOT baked; it is fetched into a git worktree at runtime, so only libraries are pinned here.
 
@@ -17,6 +17,7 @@ torch==2.9.1                   # Deep learning framework (PyTorch)
 scikit-learn==1.4.2            # Classical machine learning algorithms
 lightgbm==4.6.0                # Gradient boosting (LightGBM)
 catboost==1.2.10               # Gradient boosting (CatBoost)
+xgboost==3.2.0                 # Gradient boosting (XgBoost)
 imbalanced-learn==0.14.1       # Imbalanced-data resampling
 statsmodels==0.14.6            # Statistical models / tests
 prophet==1.1.5                 # Time-series forecasting
