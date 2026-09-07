@@ -1,6 +1,6 @@
 # Git CLI (Command Line Interface)
 
-rev. 106
+rev. 107
 
 자주 쓰는 git 명령을 작업 영역과 역할로 분류한다. `<BRANCH>`, `<REMOTE>`, `<COMMIT>`, `<FILE>` 과
 같은 자리표시자는 실제 이름으로 바꿔 쓴다. 문법은 PowerShell 과 bash 에서 공통이다. 문서에서
@@ -169,10 +169,10 @@ git fetch --prune                          # clean up refs for branches gone fro
 
 ---
 
-## 4. Nested Repositories
+## 4. External Repositories
 
-Main repository 안에 다른 repository 를 특정 commit 으로 고정해 하위 folder 로 넣는다. 두 가지
-방식이 있으며, submodule 은 pointer 만 두고 subtree 는 code 를 통째로 합친다.
+다른 repository 의 code 를 특정 commit 으로 고정해 main repository 의 하위 folder 로 들인다. 두
+가지 방식이 있으며, submodule 은 pointer 만 두고 subtree 는 code 를 통째로 합친다.
 
 Table 2. Submodule versus subtree.
 
@@ -185,12 +185,13 @@ Table 2. Submodule versus subtree.
 | Push | Folder 로 이동해 직접 push 한다 | `git subtree push` 를 쓴다 |
 | Best for | Version 고정과 독립 관리에 적합하다 | 의존 code 를 품어 단순화하는 데 적합하다 |
 
-`git submodule` 은 repository root 에서 실행하기를 권장하고, `git subtree` 는 root 실행이
-강제되며 그렇지 않으면 toplevel error 가 발생한다.
+`git submodule` 은 repository root 에서 실행하기를 권장한다. `git subtree` 는 모든 하위 명령을
+`.git` 이 있는 repository root folder 에서 실행해야 하며, 하위 folder 에서 실행하면
+`You must run this command from the top-level of the working tree` error 가 발생한다.
 
 ### 4.1. Creation
 
-다른 repository 를 하위 folder 로 처음 더해 nesting 을 만드는 단계이며, 두 방식 중 하나를 고른다.
+다른 repository 를 하위 folder 로 처음 더하는 단계이며, 두 방식 중 하나를 고른다.
 
 #### Submodule — link by pointer
 
@@ -223,7 +224,7 @@ Main repository 에는 submodule 의 commit hash 만 담기므로, 받는 쪽은
 명령 없이 보통 folder 처럼 바로 쓰며 `.gitmodules` 도 생기지 않는다.
 
 ```bash
-git subtree add --prefix=<PATH> <URL> <BRANCH> --squash   # add a repo at <PATH> from repo root
+git subtree add --prefix=<PATH> <URL> <BRANCH> --squash   # add another repo at <PATH>
 git subtree push --prefix=<PATH> <URL> <BRANCH>           # push <PATH> changes back to that remote
 ```
 
@@ -232,7 +233,7 @@ option 을 빼면 원본 commit 이 그대로 섞여 들어온다.
 
 ### 4.2. Track
 
-Main repository 를 받은 뒤 nested 내용을 채운다. Subtree 는 main history 에 이미 들어 있어
+Main repository 를 받은 뒤 하위 folder 의 내용을 채운다. Subtree 는 main history 에 이미 들어 있어
 `clone` 만으로 따라오고, submodule 은 pointer 만 있어 따로 받아 채워야 한다.
 
 #### Submodule — populate from remote
