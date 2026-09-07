@@ -1,12 +1,10 @@
 # Git CLI (Command Line Interface)
 
-rev. 106
+Rev. 107 | Created: 2026-06-17 | Updated: 2026-09-07 22:59 UTC
 
-자주 쓰는 git 명령을 작업 영역과 역할로 분류한다. `<BRANCH>`, `<REMOTE>`, `<COMMIT>`, `<FILE>` 과
-같은 자리표시자는 실제 이름으로 바꿔 쓴다. 문법은 PowerShell 과 bash 에서 공통이다. 문서에서
+자주 쓰는 git 명령을 작업 영역과 역할로 분류한다. `<BRANCH>`, `<COMMIT>`, `<FILE>`, `<PATH>`,
+`<URL>` 과 같은 자리표시자는 실제 이름으로 바꿔 쓴다. 문법은 PowerShell 과 bash 에서 공통이다. 문서에서
 사용한 용어의 정의는 [Appendix A. Terminology](#appendix-a-terminology) 에 정리한다.
-
----
 
 ## 1. Four Standard Areas
 
@@ -16,7 +14,7 @@ File 은 아래 네 영역을 오간다. 대부분의 명령은 어느 영역에
 ```text
 [ Local ]                                           [ Remote ]
 ---------------------------------------------------------------+------------------
- 1. Working Tree  --->  2. Stage (Index)  --->  3. Local Repo  --->  4. Remote Repo
+ 1. Working tree  --->  2. Stage (index)  --->  3. Local repo  --->  4. Remote repo
        |                        |                     |                      |
        |     [git add]          |                     |                      |
        |----------------------->|                     |                      |
@@ -39,8 +37,6 @@ Table 1. The four standard areas and their commands.
 | Stage (index) | 다음 commit 에 담아 둔 변경이다 | `add`, `restore --staged` |
 | Local repository | Commit 되어 history 에 굳은 상태다 | `commit`, `reset`, `revert` |
 | Remote repository | Server 에 있는 공유 repository 다 | `push`, `fetch`, `pull` |
-
----
 
 ## 2. Repository Lifecycle
 
@@ -103,8 +99,6 @@ rm -rf .git                                # revert to a plain folder; history i
 
 Remote repository 자체는 hosting service 의 설정 화면에서 삭제하며, git 명령으로는 지워지지 않는다.
 
----
-
 ## 3. Branch Lifecycle
 
 Branch 는 만들어져 remote 에 올라가고, 다른 사람이 받아 다듬다가, 작업이 끝나면 삭제된다.
@@ -166,8 +160,6 @@ git branch -d <BRANCH>                     # delete a merged local branch; -D fo
 git push origin --delete <BRANCH>          # delete the remote branch
 git fetch --prune                          # clean up refs for branches gone from remote
 ```
-
----
 
 ## 4. Nested Repositories
 
@@ -265,8 +257,6 @@ git -C <DEP> worktree remove <PATH>        # remove the unfolded folder when don
 
 Worktree 로 펼친 folder 는 다른 repository 의 사본이므로, main repository 에서는 보통
 `.gitignore` 로 제외해 main history 에 담지 않는다.
-
----
 
 ## 5. Commands
 
@@ -446,7 +436,7 @@ git archive --prefix=app/ -o src.zip HEAD    # place bundled files under app/
 `git archive` 는 추적 중인 file 만 담는다. `.gitignore` 로 제외한 file 과 `.git` folder 는 빠지므로
 배포용 snapshot 에 적합하다.
 
-### 5.9. Windows
+## 6. Windows Environment
 
 Windows 는 경로를 260자로 제한한다. Folder 가 깊어 경로가 길면 git 작업이 막히므로 확장 경로 API
 를 켠다.
@@ -474,19 +464,28 @@ git version                                # check the installed git version
 
 ## Appendix A. Terminology
 
-+ **.git** — Repository 의 모든 것이 담긴 숨김 folder 다. Commit, branch, history, 설정이 여기에 들어 있어 이 folder 가 곧 local repository 다. `git init` 으로 만들어지거나 `git clone` 으로 받아 오며, 지우면 history 가 사라지고 보통 folder 로 돌아간다.
-+ **.gitattributes** — 경로별 취급 규칙을 적는 file 이다. 줄바꿈 정규화, diff 와 merge 방식, LFS 지정 등을 경로 pattern 에 걸어 둔다.
-+ **.gitignore** — 추적하지 않을 file 을 pattern 으로 적는 file 이다. Build 산출물, cache, 비밀 key 등을 적어 두면 `git status` 와 `git add` 에서 빠지며, 이미 추적 중인 file 에는 적용되지 않는다.
-+ **.gitmodules** — Submodule 의 경로와 remote 주소를 적어 두는 file 이다. `git submodule add` 로 채워진다.
-+ **Branch** — Commit 을 가리키는 움직이는 이름표다. 본줄을 건드리지 않고 갈라져 작업하다 나중에 합친다.
-+ **Detached HEAD** — HEAD 가 branch 가 아닌 특정 commit 을 직접 가리키는 상태다. 여기서 commit 하면 어느 branch 에도 매이지 않아, branch 를 새로 만들지 않으면 잃기 쉽다.
-+ **HEAD** — 현재 위치를 가리키는 pointer 다. 보통 현재 branch 의 맨 끝 commit 을 가리키며, branch 가 아닌 특정 commit 을 직접 가리키면 detached 상태가 된다.
-+ **Local repository** — 내 machine 에 있는 repository 다. Commit, branch, history 가 `.git` folder 에 담겨 network 없이도 모든 작업이 가능하다.
-+ **Main** — 기본 branch 의 현재 표준 이름이며 예전의 master 를 대체한다.
-+ **Master** — 기본 branch 의 옛 표준 이름이다. 동작은 main 과 같고 오래된 repository 에 남아 있다.
-+ **Origin** — `git clone` 시 자동으로 붙는 remote 의 기본 이름이며 주소 대신 쓰는 별칭이다.
-+ **Remote repository** — Server 에 있는 공유 repository 다. 여럿이 push 와 pull 로 history 를 주고받는 중심점이다.
-+ **Remote-tracking branch** — Remote branch 를 local 에 비춰 둔 읽기용 이름이며 `fetch` 때 갱신된다.
-+ **Repository** — Project 의 모든 file 과 history 를 담는 저장 단위이며 local 과 remote 양쪽에 존재한다.
-+ **State** — 변경된 file 이 거치는 단계다. modified 는 working tree 에서 고쳤지만 아직 담지 않은 상태이고, staged 는 `git add` 로 다음 commit 에 담은 상태이며, committed 는 `git commit` 으로 history 에 굳은 상태다.
-+ **Working tree** — 편집 중인 실제 file 이 펼쳐진 작업 folder 다. 고친 내용을 `git add` 로 stage 에 담고 `git commit` 으로 굳힌다.
+- **.git**: Repository 의 모든 것이 담긴 숨김 folder 다. Commit, branch, history, 설정이 여기에 들어 있어 이 folder 가 곧 local repository 다. `git init` 으로 만들어지거나 `git clone` 으로 받아 오며, 지우면 history 가 사라지고 보통 folder 로 돌아간다.
+- **.gitattributes**: 경로별 취급 규칙을 적는 file 이다. 줄바꿈 정규화, diff 와 merge 방식, LFS 지정 등을 경로 pattern 에 걸어 둔다.
+- **.gitignore**: 추적하지 않을 file 을 pattern 으로 적는 file 이다. Build 산출물, cache, 비밀 key 등을 적어 두면 `git status` 와 `git add` 에서 빠지며, 이미 추적 중인 file 에는 적용되지 않는다.
+- **.gitmodules**: Submodule 의 경로와 remote 주소를 적어 두는 file 이다. `git submodule add` 로 채워진다.
+- **Branch**: Commit 을 가리키는 움직이는 이름표다. 본줄을 건드리지 않고 갈라져 작업하다 나중에 합친다.
+- **Commit**: 변경을 history 에 굳혀 남긴 기록 단위이며, 각 commit 은 고유한 hash 로 식별된다.
+- **Detached HEAD**: HEAD 가 branch 가 아닌 특정 commit 을 직접 가리키는 상태다. 여기서 commit 하면 어느 branch 에도 매이지 않아, branch 를 새로 만들지 않으면 잃기 쉽다.
+- **HEAD**: 현재 위치를 가리키는 pointer 다. 보통 현재 branch 의 맨 끝 commit 을 가리키며, branch 가 아닌 특정 commit 을 직접 가리키면 detached 상태가 된다.
+- **Local repository**: 작업 machine 에 있는 repository 다. Commit, branch, history 가 `.git` folder 에 담겨 network 없이도 모든 작업이 가능하다.
+- **Main**: 기본 branch 의 현재 표준 이름이며 예전의 master 를 대체한다.
+- **Master**: 기본 branch 의 옛 표준 이름이다. 동작은 main 과 같고 오래된 repository 에 남아 있다.
+- **Merge**: 두 branch 의 history 를 합치는 동작이며, 합친 자국인 merge commit 을 남긴다.
+- **Origin**: `git clone` 시 자동으로 붙는 remote 의 기본 이름이며 주소 대신 쓰는 별칭이다.
+- **Rebase**: 현재 branch 의 commit 을 다른 branch 의 끝으로 옮겨 붙여 history 를 한 줄로 펴는 동작이다.
+- **Ref**: Commit 을 가리키는 이름이며 branch 와 `HEAD` 가 여기에 속한다.
+- **Remote repository**: Server 에 있는 공유 repository 다. 여럿이 push 와 pull 로 history 를 주고받는 중심점이다.
+- **Remote-tracking branch**: Remote branch 를 local 에 비춰 둔 읽기용 이름이며 `fetch` 때 갱신된다.
+- **Repository**: Project 의 모든 file 과 history 를 담는 저장 단위이며 local 과 remote 양쪽에 존재한다.
+- **Stage (index)**: 다음 commit 에 담을 변경을 모아 두는 영역이며 `git add` 로 채운다.
+- **Stash**: Commit 하기에 이른 working tree 의 변경을 잠시 치워 두는 보관 장소다.
+- **State**: 변경된 file 이 거치는 단계다. modified 는 working tree 에서 고쳤지만 아직 담지 않은 상태이고, staged 는 `git add` 로 다음 commit 에 담은 상태이며, committed 는 `git commit` 으로 history 에 굳은 상태다.
+- **Submodule**: 다른 repository 를 특정 commit 의 pointer 로만 참조해 하위 folder 에 두는 방식이다.
+- **Subtree**: 다른 repository 의 file 을 main history 로 합쳐 하위 folder 에 두는 방식이다.
+- **Working tree**: 편집 중인 실제 file 이 펼쳐진 작업 folder 다. 고친 내용을 `git add` 로 stage 에 담고 `git commit` 으로 굳힌다.
+- **Worktree**: 한 repository 에 연결된 별도의 작업 folder 이며, 같은 `.git` history 를 공유한다.
