@@ -1,6 +1,6 @@
 # Git CLI (Command Line Interface)
 
-Rev. 107 | Created: 2026-06-17 | Updated: 2026-09-07 22:59 UTC
+Rev. 108 | Created: 2026-06-17 | Updated: 2026-09-07 23:03 UTC
 
 자주 쓰는 git 명령을 작업 영역과 역할로 분류한다. `<BRANCH>`, `<COMMIT>`, `<FILE>`, `<PATH>`,
 `<URL>` 과 같은 자리표시자는 실제 이름으로 바꿔 쓴다. 문법은 PowerShell 과 bash 에서 공통이다. 문서에서
@@ -161,7 +161,7 @@ git push origin --delete <BRANCH>          # delete the remote branch
 git fetch --prune                          # clean up refs for branches gone from remote
 ```
 
-## 4. Nested Repositories
+## 4. External Repositories
 
 Main repository 안에 다른 repository 를 특정 commit 으로 고정해 하위 folder 로 넣는다. 두 가지
 방식이 있으며, submodule 은 pointer 만 두고 subtree 는 code 를 통째로 합친다.
@@ -177,8 +177,9 @@ Table 2. Submodule versus subtree.
 | Push | Folder 로 이동해 직접 push 한다 | `git subtree push` 를 쓴다 |
 | Best for | Version 고정과 독립 관리에 적합하다 | 의존 code 를 품어 단순화하는 데 적합하다 |
 
-`git submodule` 은 repository root 에서 실행하기를 권장하고, `git subtree` 는 root 실행이
-강제되며 그렇지 않으면 toplevel error 가 발생한다.
+`git subtree` 는 모든 하위 명령을 repository 의 root folder 에서 실행해야 한다. 하위 folder 에서
+실행하면 git 이 toplevel 이 아니라며 명령을 거부하므로, `--prefix` 에 적는 경로도 root 를 기준으로
+쓴다. `git submodule` 은 강제되지는 않으나 같은 이유로 root 에서 실행하기를 권장한다.
 
 ### 4.1. Creation
 
@@ -215,7 +216,8 @@ Main repository 에는 submodule 의 commit hash 만 담기므로, 받는 쪽은
 명령 없이 보통 folder 처럼 바로 쓰며 `.gitmodules` 도 생기지 않는다.
 
 ```bash
-git subtree add --prefix=<PATH> <URL> <BRANCH> --squash   # add a repo at <PATH> from repo root
+# run these from the repository root; <PATH> is relative to that root
+git subtree add --prefix=<PATH> <URL> <BRANCH> --squash   # add a repo at <PATH>
 git subtree push --prefix=<PATH> <URL> <BRANCH>           # push <PATH> changes back to that remote
 ```
 
@@ -242,6 +244,7 @@ git submodule update --remote <PATH>       # update the submodule to the remote'
 Subtree 는 `clone` 으로 이미 따라오므로, 원본 repository 의 새 변경만 가져와 갱신한다.
 
 ```bash
+# run from the repository root as well
 git subtree pull --prefix=<PATH> <URL> <BRANCH> --squash  # pull new changes into <PATH>
 ```
 
