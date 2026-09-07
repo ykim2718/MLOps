@@ -110,7 +110,7 @@ import psycopg2
 from psycopg2.extras import Json, RealDictCursor
 from tqdm import tqdm
 
-__version__ = "0.0.51"  # Semantic Versioning:  Version = Major.Minor.Patch
+__version__ = "0.0.52"  # Semantic Versioning:  Version = Major.Minor.Patch
 
 _BLOCK = None       # credential block name (-b); set by CLI or set_block(), used to read creds
 _PG_HOST = None      # CLI --pg-host: override the postgresql endpoint host only (creds unchanged)
@@ -601,7 +601,10 @@ def _cmd_manifest(args: argparse.Namespace) -> None:
 
 def _cmd_upload(args: argparse.Namespace) -> None:
     manifest_path = Path(args.manifest)
-    data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    try:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:            # broken manifest JSON -> crash naming the file, not just the position
+        raise ValueError(f"invalid JSON in manifest {manifest_path}: {exc}") from None
     if args.minio_key:                             # manifest.json is {minio_key: manifest, ...} -> pick one
         if not isinstance(data, dict) or args.minio_key not in data or args.minio_key == "__common__":
             avail = (", ".join(k for k in data if k != "__common__") if isinstance(data, dict)
