@@ -1,8 +1,6 @@
 # Auto-Sync Files from a Private Repo to a Public Repo with GitHub Actions
 
-rev. 17
-
----
+Rev. 18 | Created: 2026-07-18 | Updated: 2026-09-07 23:06 UTC
 
 ## 1. Purpose
 
@@ -26,8 +24,6 @@ file 에 국한되지 않으며, 지정한 경로이면 어떤 종류의 file �
 동기화는 원본에서 복사본으로 향하는 한 방향이다. 복사본은 push 할 때마다 원본 내용으로
 덮어써지므로 직접 수정하지 않는다. 대상 repository 에 원래 있던 다른 file 은 복사 대상에
 포함되지 않으므로 그대로 유지된다.
-
----
 
 ## 2. Deploy Key Authentication
 
@@ -68,8 +64,6 @@ Deploy key 는 계정 설정이 아니라 대상 repository 의 Settings 탭에�
    로 하며 값은 `sync_key` file 의 전체 내용을 넣는다.
 
 비공개 key file 인 `sync_key` 는 secret 으로 등록한 뒤 로컬에서 삭제한다.
-
----
 
 ## 3. Workflow File
 
@@ -146,8 +140,6 @@ commit 이 쌓인다.
 4. 복사 단계에서는 지정한 file 과 folder 를 대상 위치로 복사한다.
 5. Commit 단계에서는 내용이 달라졌을 때만 commit 하고 push 하며, 동일하면 건너뛴다.
 
----
-
 ## 4. Multiple Target Handling
 
 Workflow file 한 개로 여러 대상을 처리한다. Trigger 인 `paths:` 와 복사 명령을 함께 늘리면 되며,
@@ -192,8 +184,6 @@ rsync -av --delete shared/ target/shared/
       - 'docs/*.md'
 ```
 
----
-
 ## 5. Difference from PAT
 
 대상 repository 를 checkout 하는 한 줄만 다르다. Deploy key 는
@@ -207,19 +197,22 @@ rsync -av --delete shared/ target/shared/
 
 ## Appendix A. Terminology
 
-+ **CI/CD (Continuous Integration / Continuous Delivery)** — Code 변경을 자동으로 build 하고 test 하며 배포하는 개발 자동화 방식이다.
-+ **Deploy key** — 특정 repository 한 개에만 연결되는 SSH 공개 key 다. 쓰기 권한을 부여하면 그 repository 에 push 할 수 있고 만료가 없다. 계정 설정이 아니라 해당 repository 의 Settings 에서 등록하며, 같은 key 를 두 repository 에 deploy key 로 등록할 수 없다.
-+ **Ed25519** — SSH key 생성에 쓰는 최신 타원곡선 암호 algorithm 이다. 짧고 안전해 RSA 보다 권장된다.
-+ **git diff --staged** — Stage 에 올라온 변경을 보여 주는 명령이다. `--quiet` 를 붙이면 출력 없이 변경 유무만 종료 code 로 알려 주므로 조건 분기에 쓴다.
-+ **GitHub Actions** — GitHub 에 내장된 CI/CD 자동화 도구이며 push 같은 event 에 반응해 workflow 를 실행한다.
-+ **GITHUB_TOKEN** — Workflow 실행 시 GitHub 이 자동 발급하는 임시 token 이다. 해당 repository 내부 작업에만 권한이 있어 다른 repository 에는 쓸 수 없다.
-+ **PAT (Personal Access Token)** — GitHub 계정 비밀번호 대신 사용하는 인증용 token 문자열이다. 권한 범위와 만료일을 지정할 수 있으며, fine-grained PAT 은 특정 repository 와 특정 권한으로 범위를 좁힌 최신 방식이다.
-+ **paths** — `on: push:` 아래의 trigger filter 다. 여기에 지정한 file 이나 folder 가 바뀔 때만 workflow 가 실행되며 확장자에 국한되지 않는다.
-+ **Repository** — Code 와 file 과 history 를 담는 저장 단위이며 private 과 public 으로 구분된다.
-+ **rsync** — Folder 단위로 file 을 동기화하는 명령이다. `-a` 는 하위 구조를 보존하고, `-v` 는 log 를 출력하며, `--delete` 는 원본에서 지운 file 을 대상에서도 지운다.
-+ **Secret** — Repository 나 organization 에 저장하는 암호화된 값이다. Workflow 안에서 `${{ secrets.NAME }}` 으로 참조하며 log 에 노출되지 않고 이름은 대소문자를 구분한다.
-+ **SSH (Secure Shell)** — Network 로 원격 server 에 안전하게 접속하고 통신하는 암호화 protocol 이다. GitHub 은 SSH key pair 로 push 와 pull 인증을 지원한다.
-+ **SSH key pair** — 짝을 이루는 두 개의 key 다. 공개 key 는 server 에 등록하고 비공개 key 는 본인만 보관하며, 공개 key 로 잠근 것은 짝이 되는 비공개 key 로만 열 수 있어 신원이 증명된다.
-+ **Workflow** — `.github/workflows/` 안의 YAML file 로 정의하는 자동화 작업 묶음이며 하나 이상의 job 과 step 으로 구성된다.
-+ **workflow_dispatch** — Workflow 를 Actions 탭에서 수동으로 실행할 수 있게 해 주는 trigger 다.
-+ **YAML (YAML Ain't Markup Language)** — 들여쓰기로 구조를 표현하는 사람이 읽기 쉬운 설정 file 형식이며 workflow 정의에 사용된다.
+- **CI/CD (Continuous Integration / Continuous Delivery)**: Code 변경을 자동으로 build 하고 test 하며 배포하는 개발 자동화 방식이다.
+- **Deploy key**: 특정 repository 한 개에만 연결되는 SSH 공개 key 다. 쓰기 권한을 부여하면 그 repository 에 push 할 수 있고 만료가 없다. 계정 설정이 아니라 해당 repository 의 Settings 에서 등록하며, 같은 key 를 두 repository 에 deploy key 로 등록할 수 없다.
+- **Ed25519**: SSH key 생성에 쓰는 최신 타원곡선 암호 algorithm 이다. 짧고 안전해 RSA 보다 권장된다.
+- **git diff --staged**: Stage 에 올라온 변경을 보여 주는 명령이다. `--quiet` 를 붙이면 출력 없이 변경 유무만 종료 code 로 알려 주므로 조건 분기에 쓴다.
+- **GitHub Actions**: GitHub 에 내장된 CI/CD 자동화 도구이며 push 같은 event 에 반응해 workflow 를 실행한다.
+- **GITHUB_TOKEN**: Workflow 실행 시 GitHub 이 자동 발급하는 임시 token 이다. 해당 repository 내부 작업에만 권한이 있어 다른 repository 에는 쓸 수 없다.
+- **Job**: Workflow 안에서 하나의 runner 위에 배정되어 실행되는 작업 단위이며, 여러 step 을 순서대로 수행한다.
+- **PAT (Personal Access Token)**: GitHub 계정 비밀번호 대신 사용하는 인증용 token 문자열이다. 권한 범위와 만료일을 지정할 수 있으며, fine-grained PAT 은 특정 repository 와 특정 권한으로 범위를 좁힌 최신 방식이다.
+- **paths**: `on: push:` 아래의 trigger filter 다. 여기에 지정한 file 이나 folder 가 바뀔 때만 workflow 가 실행되며 확장자에 국한되지 않는다.
+- **Repository**: Code 와 file 과 history 를 담는 저장 단위이며 private 과 public 으로 구분된다.
+- **rsync**: Folder 단위로 file 을 동기화하는 명령이다. `-a` 는 하위 구조를 보존하고, `-v` 는 log 를 출력하며, `--delete` 는 원본에서 지운 file 을 대상에서도 지운다.
+- **Secret**: Repository 나 organization 에 저장하는 암호화된 값이다. Workflow 안에서 `${{ secrets.NAME }}` 으로 참조하며 log 에 노출되지 않고 이름은 대소문자를 구분한다.
+- **SSH (Secure Shell)**: Network 로 원격 server 에 안전하게 접속하고 통신하는 암호화 protocol 이다. GitHub 은 SSH key pair 로 push 와 pull 인증을 지원한다.
+- **SSH key pair**: 짝을 이루는 두 개의 key 다. 공개 key 는 server 에 등록하고 비공개 key 는 본인만 보관하며, 공개 key 로 잠근 것은 짝이 되는 비공개 key 로만 열 수 있어 신원이 증명된다.
+- **ssh-agent**: SSH 비공개 key 를 메모리에 올려 두고 인증에 쓰게 해 주는 program 이다.
+- **Step**: Job 을 이루는 실행 단위이며, action 을 부르거나 shell 명령을 실행한다.
+- **Workflow**: `.github/workflows/` 안의 YAML file 로 정의하는 자동화 작업 묶음이며 하나 이상의 job 과 step 으로 구성된다.
+- **workflow_dispatch**: Workflow 를 Actions 탭에서 수동으로 실행할 수 있게 해 주는 trigger 다.
+- **YAML (YAML Ain't Markup Language)**: 들여쓰기로 구조를 표현하는 사람이 읽기 쉬운 설정 file 형식이며 workflow 정의에 사용된다.
