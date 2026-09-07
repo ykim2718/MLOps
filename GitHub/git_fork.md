@@ -1,8 +1,6 @@
 # Git Fork — Collaboration Across Repository Boundaries
 
-rev. 5
-
----
+Rev. 6 | Created: 2026-08-05 | Updated: 2026-09-07 23:45 UTC
 
 ## 1. Purpose
 
@@ -44,8 +42,6 @@ Contributor 의 변경은 local 에서 origin 으로 push 되고, origin 에서 
 통해서만 들어가며, 그 pull request 를 실제로 합치는 역할은 Maintainer 다. 이 비대칭이 fork
 collaboration 의 핵심이다.
 
----
-
 ## 2. Fork, Clone, and Branch
 
 세 가지 모두 복사처럼 보이지만, 복사가 일어나는 장소와 권한 경계가 서로 다르다.
@@ -67,8 +63,6 @@ Branch 는 같은 repository 안에서 작업을 나누는 방법이며, 쓰기 
 
 Clone 만으로는 push 할 곳이 없다. 권한이 없는 repository 를 clone 한 뒤 push 하면 거절된다.
 Fork 는 Contributor 가 push 할 수 있는 repository 를 먼저 만들어 두는 단계다.
-
----
 
 ## 3. Collaboration Models
 
@@ -131,8 +125,6 @@ Table 2. Model selection by situation.
 
 Collaboration 을 하려면 fork 를 해야 한다는 것은 오해다. 권한을 줄 수 있는 상대라면 branch 가
 더 낫다. Fork 는 권한 경계를 넘기 위한 도구이지 collaboration 의 기본형이 아니다.
-
----
 
 ## 4. Contributor Workflow
 
@@ -236,8 +228,6 @@ git commit -m "review: address feedback"
 git push                                   # the existing pull request updates itself
 ```
 
----
-
 ## 5. Fork Synchronization
 
 Fork 는 자동으로 갱신되지 않는다. 만들어진 시점의 snapshot 이며, 그때부터 upstream 과 벌어진다.
@@ -296,8 +286,6 @@ git push origin --delete fix/typo-in-readme   # delete it on the fork as well
 git fetch --prune                          # clean up stale tracking refs
 ```
 
----
-
 ## 6. Maintainer Workflow
 
 기여를 받는 쪽의 관점이다. Fork 에서 오는 pull request 는 신뢰할 수 없는 code 로 다루는 것이
@@ -306,7 +294,8 @@ git fetch --prune                          # clean up stale tracking refs
 ### 6.1. Pull Request Review
 
 Pull request 의 code 를 로컬에서 실행해 보려면, Contributor 의 fork 를 remote 로 추가할 필요 없이
-pull request ref 를 바로 가져온다.
+pull request ref 를 바로 가져온다. Maintainer 는 원본 repository 를 clone 하므로, 아래 `origin` 은
+Table 3 과 달리 fork 가 아니라 그 원본을 가리킨다.
 
 ```bash
 git fetch origin pull/42/head:pr-42        # fetch pull request 42 into a local branch
@@ -348,12 +337,10 @@ Table 7. Workflow trigger behavior on a pull request from a fork.
 `pull_request` 로 도는 CI 는 fork pull request 에서 secret 을 받지 못하므로, secret 이 필요한 job 은
 fork pull request 에서 실패하거나 건너뛰도록 설계한다. `pull_request_target` 은 pull request 의
 code 를 checkout 해서 실행하면 안 된다. 외부인이 보낸 script 가 secret 을 쥔 채 실행되어 유출될 수
-있으며, label 부착처럼 code 실행이 없는 작업에만 쓴다. 저장소 설정에서 첫 Contributor 의 workflow 실행에
-Maintainer 승인을 요구하도록 지정할 수도 있다.
+있으며, label 부착처럼 code 실행이 없는 작업에만 쓴다. Repository 설정에서 첫 Contributor 의
+workflow 실행에 Maintainer 승인을 요구하도록 지정할 수도 있다.
 
 같은 조직의 repository 라면 fork 대신 branch 를 쓰는 편이 CI 설계가 훨씬 단순해진다.
-
----
 
 ## 7. Fork Mechanics
 
@@ -374,8 +361,6 @@ Table 8. Fork mechanics and constraints.
 
 누가 fork 를 만들 수 있는지는 원본의 공개 범위와 설정에 따라 달라진다. 조건은
 [Appendix B. Fork Permission Conditions](#appendix-b-fork-permission-conditions) 에 정리한다.
-
----
 
 ## 8. Fork as a Divergence Point
 
@@ -399,8 +384,6 @@ git push --mirror https://github.com/<CONTRIBUTOR>/my-own-project.git
 독립 repository 는 fork badge 와 pull request 경로가 없어 깔끔하지만, upstream 의 수정을
 받아오려면 remote 를 직접 추가해 merge 해야 한다. 원본을 계속 따라갈 생각이라면 fork 가 낫다.
 
----
-
 ## 9. Pitfalls
 
 Table 10. Common pitfalls and remedies.
@@ -414,8 +397,6 @@ Table 10. Common pitfalls and remedies.
 | Fork 의 `main` 이 upstream 과 충돌한다 | Fork 의 `main` 에서 직접 작업했다 | 작업을 별도 branch 로 옮긴 뒤 `git reset --hard upstream/main` 으로 기준선을 복구한다 |
 | Fork 의 CI 가 secret 이 없다며 실패한다 | `pull_request` 는 fork 에 secret 을 주지 않는다 | Secret 이 필요한 job 을 fork pull request 에서 건너뛰도록 조건을 추가한다 |
 | Force push 로 Maintainer 나 다른 Contributor 의 수정이 사라진다 | `--force` 를 사용했다 | 항상 `--force-with-lease` 를 사용한다 |
-
----
 
 ## 10. Command Summary
 
@@ -457,17 +438,20 @@ git fetch --prune
 
 ## Appendix A. Terminology
 
-+ **Contributor** — 변경을 만들어 pull request 로 합쳐 달라고 요청하는 의뢰자다. 원본 repository 에 쓰기 권한이 없고 자기 fork 에만 push 한다.
-+ **Fork network** — 같은 원본에서 갈라져 나온 fork 들의 묶음이며 commit object 를 공유한다.
-+ **Maintainer** — 원본 repository 에 대한 쓰기 권한을 가지고 pull request 를 검토하고 merge 하는 사람이다.
-+ **Origin** — Clone 한 repository 를 가리키는 기본 remote 이름이며, fork collaboration 에서는 Contributor 의 fork 를 가리킨다.
-+ **Pull request** — 자기 branch 를 다른 branch 나 repository 에 합쳐 달라고 요청하는 단위이며 review 의 단위이기도 하다.
-+ **Squash merge** — Pull request 의 여러 commit 을 하나로 압축해 합치는 방식이다.
-+ **Stale fork** — Upstream 과 오래 벌어진 fork 이며 충돌과 잘못된 pull request 의 주된 원인이다.
-+ **Topic branch** — 하나의 변경 주제를 담는 branch 이며 pull request 하나에 대응한다.
-+ **Upstream** — Fork 의 출처가 되는 원본 repository 이며 pull request 의 목적지다. Remote 이름으로도 같은 낱말을 쓴다.
-
----
+- **CI (Continuous Integration)**: Push 나 pull request 에 반응해 build 와 test 를 자동으로 실행하는 구조다.
+- **Contributor**: 변경을 만들어 pull request 로 합쳐 달라고 요청하는 의뢰자다. 원본 repository 에 쓰기 권한이 없고 자기 fork 에만 push 한다.
+- **Fork network**: 같은 원본에서 갈라져 나온 fork 들의 묶음이며 commit object 를 공유한다.
+- **Maintainer**: 원본 repository 에 대한 쓰기 권한을 가지고 pull request 를 검토하고 merge 하는 사람이다.
+- **Merge**: 두 branch 의 history 를 합치는 동작이며, pull request 를 원본에 반영하는 방법이기도 하다.
+- **Origin**: Clone 한 repository 를 가리키는 기본 remote 이름이며, fork collaboration 에서는 Contributor 의 fork 를 가리킨다.
+- **Pull request**: 자기 branch 를 다른 branch 나 repository 에 합쳐 달라고 요청하는 단위이며 review 의 단위이기도 하다.
+- **Rebase**: 현재 branch 의 commit 을 다른 branch 의 끝으로 옮겨 붙여 history 를 한 줄로 펴는 동작이다.
+- **Secret**: Repository 에 저장하는 암호화된 값이며 workflow 안에서만 참조되고 log 에 노출되지 않는다.
+- **Squash merge**: Pull request 의 여러 commit 을 하나로 압축해 합치는 방식이다.
+- **Stale fork**: Upstream 과 오래 벌어진 fork 이며 충돌과 잘못된 pull request 의 주된 원인이다.
+- **Topic branch**: 하나의 변경 주제를 담는 branch 이며 pull request 하나에 대응한다.
+- **Upstream**: Fork 의 출처가 되는 원본 repository 이며 pull request 의 목적지다. Remote 이름으로도 같은 낱말을 쓴다.
+- **Workflow**: CI 가 실행하는 자동화 작업 묶음이며, trigger 와 실행 단계로 이루어진다.
 
 ## Appendix B. Fork Permission Conditions
 
@@ -498,9 +482,8 @@ Private repository 의 fork 에는 추가 제약이 따른다. Fork 는 private 
 network 안에 머무르며 public 으로 바꿀 수 없다. 원본에 대한 접근 권한이 회수되면 그 사람의 fork
 도 함께 제거되어, private code 가 fork 형태로 남지 않는다.
 
-읽기 권한을 이미 준 상대라면 fork 보다 branch 가 낫다. 쓰기 권한을 주고 3.1 의 shared repository
-model 로 가면 remote 가 하나로 끝나고 CI 설계도 단순해진다. Fork 는 권한을 줄 수 없는 상대를 위한
-도구이므로, 권한을 줄 수 있는 상황에서 fork 를 고르면 관리 비용만 늘어난다.
+Private repository 에서는 이미 읽기 권한을 준 상대이므로, forking 을 허용하기보다 쓰기 권한을 주고
+3.1 의 shared repository model 로 가는 편이 낫다.
 
 Self-hosted git service 는 정책이 다를 수 있다. 관리자가 forking 을 인스턴스 단위로 막을 수 있어
 public repository 라도 fork 버튼이 보이지 않을 수 있으므로, 해당 인스턴스의 설정을 확인한다.
