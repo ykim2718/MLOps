@@ -1,8 +1,5 @@
-> ⚠️ **This is an auto-synced copy.** Do not edit here.
-
 # MongoDB — Document Database
-
-Rev. 56 | Created: 2026-06-15 | Updated: 2026-08-14 21:32 CDT
+Rev. 57 | Created: 2026-06-15 | Updated: 2026-09-26 09:51 CDT
 
 MongoDB 는 이 스택에서 **document 데이터베이스**로 쓰입니다. [DB-Engines 랭킹](https://db-engines.com/en/ranking) 기준 **2026년 현재 관계형 (relational) DB 를 제외하면 가장 인기 있는 DB 엔진** 으로, 비관계형 (NoSQL) 계열에서 1위입니다. 데이터를 행·열의 테이블이 아니라 **document (JSON 형태의 BSON)** 로 저장하며, 한 인스턴스 안에서 `yControl` · `yImprove` 같은 여러 **논리 DB** 를 함께 운영합니다. 각 DB 는 **collection** (관계형 DB 의 테이블에 해당) 을 담고, collection 은 document 를 담습니다. PostgreSQL 과 달리 빈 DB·collection 을 미리 만들지 않고, **첫 쓰기 (insert) 시점에 자동 생성** 됩니다.
 
@@ -27,13 +24,16 @@ MongoDB 는 도커 컨테이너로 실행됩니다. `docker compose up -d` 를 �
 
 ```yaml
 # docker-compose.yml
-# __version__ = "0.0.10"
+# __version__ = "0.0.13"
 
 name: mongodb                       # Fix the project name (prefix of container and volume names).
 
 services:
   mongo:
     image: mongo:7
+    # enforce authentication (root user already created in the volume) and run as a single-member replica set rs0,
+    # so that the oplog exists for change streams. --auth with --replSet requires a keyfile; regenerated at every start.
+    command: ["bash", "-c", "rm -f /tmp/keyfile && head -c 756 /dev/urandom | base64 > /tmp/keyfile && chmod 400 /tmp/keyfile && chown 999:999 /tmp/keyfile && exec docker-entrypoint.sh mongod --auth --replSet rs0 --keyFile /tmp/keyfile"]
     env_file:
       - docker-compose.env_example          # injects MONGO_INITDB_ROOT_USERNAME / MONGO_INITDB_ROOT_PASSWORD
     ports:
@@ -41,7 +41,8 @@ services:
     volumes:
       - mongo-data:/data/db
     healthcheck:
-      test: ["CMD-SHELL", "mongosh -u $$MONGO_INITDB_ROOT_USERNAME -p $$MONGO_INITDB_ROOT_PASSWORD --quiet --eval 'db.adminCommand({ ping: 1 })'"]
+      # ping needs no authentication even when auth is enabled, so no credentials here
+      test: ["CMD-SHELL", "mongosh --quiet --eval 'db.adminCommand({ ping: 1 })'"]
       interval: 5s
       retries: 10
     networks:
@@ -63,12 +64,13 @@ networks:
 
 - `name: mongodb` 는 프로젝트명을 파일에 고정합니다. 이 값이 컨테이너·볼륨 이름의 앞가지가 되므로, `-p` 를 붙이지 않아도 (혹은 다른 폴더에서 띄워도) 항상 같은 프로젝트·같은 볼륨에 붙어 등록한 데이터가 어긋나지 않습니다.
 - `image: mongo:7` 은 공식 MongoDB 7 이미지를 사용한다는 뜻입니다.
+- `command` 는 인증 (`--auth`) 을 켠 채 mongod 를 member 하나짜리 replica set `rs0` (`--replSet rs0`) 으로 띄웁니다. 인증과 replica set 을 함께 쓰면 member 사이 인증용 keyfile (`--keyFile`) 이 필요하므로, 기동할 때마다 `/tmp/keyfile` 을 새로 만들고 mongod 실행 계정 (uid 999) 만 읽을 수 있게 합니다. Replica set 으로 띄우는 목적은 [Replica Set](#replica-set) 에 적습니다.
 - `env_file` 은 루트 계정 (`MONGO_INITDB_ROOT_USERNAME` / `MONGO_INITDB_ROOT_PASSWORD`) 을 yml 에 평문으로 두지 않고 `docker-compose.env` 에서 읽어 주입합니다.
 - `ports: "27017:27017"` 는 호스트 파이썬·도구와 다른 컴퓨터가 접속할 수 있도록 27017 포트를 노출합니다.
 - `volumes: mongo-data:/data/db` 는 DB 데이터를 named volume 에 영속 저장하여, 컨테이너를 지워도 데이터가 보존되게 합니다.
-- `healthcheck` 는 `mongosh` 로 `db.adminCommand({ ping: 1 })` 을 보내 기동 완료를 확인합니다. 명령 안의 `$$MONGO_INITDB_ROOT_USERNAME` 처럼 `$$` 는 compose 가 `$` 로 바꿔 컨테이너 셸이 `env_file` 값으로 확장합니다.
+- `healthcheck` 는 `mongosh` 로 `db.adminCommand({ ping: 1 })` 을 보내 기동 완료를 확인합니다. `ping` 은 인증이 켜져 있어도 계정 없이 응답하므로 명령에 계정을 넣지 않습니다.
 - `networks: mlops` 는 같은 호스트의 다른 서비스가 `mongo` 서비스명으로 접속하도록 공유 외부 네트워크에 연결합니다.
-- `restart: unless-stopped` 는 컨테이너가 비정상 종료되어도 자동으로 다시 띄웁니다 (사용자가 직접 멈춘 경우는 제외합니다).
+- `restart: unless-stopped` 는 컨테이너가 abnormal exit 으로 종료되어도 자동으로 다시 띄웁니다 (사용자가 직접 멈춘 경우는 제외합니다).
 - `logging` 은 stdout 로그를 저장하는 `json-file` 드라이버에 회전 (rotation) 을 걸어, 파일 하나가 `max-size` (10MB) 를 넘으면 새 파일로 바꾸고 최대 `max-file` (10개) 까지만 보관합니다. 생략하면 로그가 무한정 커집니다. 로그 파일의 실제 위치는 `docker inspect --format '{{.LogPath}}' <Project Name>-mongo-1` 로 확인하고, 내용은 `docker logs <Project Name>-mongo-1` 으로 봅니다.
 
 #### Execution Command
@@ -140,14 +142,36 @@ PostgreSQL 의 init SQL 같은 **DB 생성 단계가 없습니다** — DB·coll
   MONGO_INITDB_ROOT_PASSWORD=CHANGE_ME
   ```
 
-  - 컨테이너 셸 명령 (예: healthcheck) 안에서 위 값을 참조할 때는 `$$MONGO_INITDB_ROOT_USERNAME` 처럼 `$$` 로 적습니다. `$$` 는 compose 가 `$` 로 바꿔 컨테이너 셸이 `env_file` 값으로 확장하며, `$` 단독은 compose 가 먼저 가로채므로 쓰지 않습니다.
+  - compose 파일의 컨테이너 셸 명령 안에서 위 값을 참조할 때는 `$$MONGO_INITDB_ROOT_USERNAME` 처럼 `$$` 로 적습니다. `$$` 는 compose 가 `$` 로 바꿔 컨테이너 셸이 `env_file` 값으로 확장하며, `$` 단독은 compose 가 먼저 가로채므로 쓰지 않습니다.
   - 호스트 파이썬용 연결 문자열 (URI) 은 `mongodb://<user>:<password>@<host>:27017/?authSource=admin` 형식으로 만들어 환경변수 (예: `MONGODB_URI`) 로 둡니다.
   - 루트·일반 사용자는 `admin` DB 에 만들어지므로, 그 계정으로 인증할 때는 `authSource=admin` 이 필요합니다.
   - 모든 `CHANGE_ME` 는 강한 계정/비밀번호로 교체하고, 실제 `docker-compose.env` 는 git 이 아니라 안전한 채널로 공유합니다.
 
+### Replica Set
+
+  이 인스턴스는 member 하나짜리 replica set `rs0` 으로 동작합니다. Change stream 은 oplog (`local.oplog.rs`) 를 읽는데 oplog 는 replica set member 에만 있으므로, collection 에 document 가 추가될 때 client 가 바로 받으려면 replica set 이어야 합니다. Member 가 하나이므로 복제본은 생기지 않고, 그 member 가 primary 가 되어 모든 쓰기를 oplog 에 기록합니다.
+
+  `--replSet rs0` 으로 처음 기동한 뒤 한 번만 replica set 을 초기화합니다. 초기화 설정은 data volume 의 `local` DB 에 저장되므로 재기동이나 container 재생성 뒤에는 다시 실행하지 않습니다.
+
+  ```bash
+  # (1) initiate once — the member host is localhost:27017.
+  docker exec mongodb-mongo-1 \
+    mongosh -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin \
+    --quiet --eval "rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'localhost:27017' }] })"
+
+  # (2) check — 'rs0' and 'true' mean the member is the primary of rs0.
+  docker exec mongodb-mongo-1 \
+    mongosh -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin \
+    --quiet --eval "db.hello().setName + ' ' + db.hello().isWritablePrimary"
+  ```
+
+  - Member host 를 `localhost:27017` 로 등록했으므로, 같은 호스트의 client 는 연결 문자열을 바꾸지 않고 접속합니다.
+  - 다른 container (`mongo` 서비스명) 나 다른 컴퓨터의 client 는 연결 문자열에 `directConnection=true` 를 붙입니다. 붙이지 않으면 driver 가 replica set 이 알려 준 `localhost:27017` 로 다시 접속하려다 실패합니다.
+  - Keyfile 은 member 사이 인증에 쓰이므로 member 하나에서는 기동마다 새로 만들어도 됩니다. Member 를 더 붙이려면 모든 member 가 같은 keyfile 을 읽도록 고정한 파일을 mount 해야 합니다.
+
 ## 3. Access
 
-컨테이너가 27017 을 노출하므로, 호스트나 다른 컴퓨터에서 표준 MongoDB 클라이언트로 접속할 수 있습니다. 접속 정보는 코드에 기록하지 말고 환경변수나 파라미터로 주입합니다 ([§2 Credentials](#credentials) 참고). 루트·일반 사용자는 `admin` DB 에 만들어지므로 연결 문자열에 **`authSource=admin`** 을 붙입니다.
+컨테이너가 27017 을 노출하므로, 호스트나 다른 컴퓨터에서 표준 MongoDB 클라이언트로 접속할 수 있습니다. 접속 정보는 코드에 기록하지 말고 환경변수나 파라미터로 주입합니다 ([§2 Credentials](#credentials) 참고). 루트·일반 사용자는 `admin` DB 에 만들어지므로 연결 문자열에 **`authSource=admin`** 을 붙입니다. 다른 container 나 다른 컴퓨터에서 접속할 때는 [Replica Set](#replica-set) 에 적은 대로 **`directConnection=true`** 도 붙입니다 (예: `mongodb://<user>:<password>@<host>:27017/?authSource=admin&directConnection=true`).
 
 ### Python (`pymongo`)
 
@@ -209,11 +233,17 @@ db.dropUser("analyst")                                                 // delete
 
 ## Appendix A. Terminology
 
-- **mongosh** — MongoDB Shell. MongoDB 에 접속해 명령을 실행하는 공식 CLI 이며, `mongo:7` 이미지에 함께 들어 있습니다.
-- **database** — collection 을 담는 최상위 논리 단위 (관계형 DB 의 database 에 해당). 첫 쓰기 때 자동 생성됩니다.
-- **collection** — document 를 담는 그릇 (관계형 DB 의 테이블에 해당). schema 가 고정되지 않습니다.
-- **document** — MongoDB 의 기본 레코드. 필드-값 쌍으로 이뤄진 JSON 형태이며 내부적으로 **BSON** (Binary JSON) 으로 저장됩니다.
 - **authSource** — 사용자 자격증명이 저장된 DB. 사용자를 `admin` 에 만들면 연결 시 `authSource=admin` 을 지정합니다.
+- **change stream** — collection 의 변경 (insert·update 등) 을 client 에 바로 전달하는 기능. oplog 를 읽으므로 replica set 에서만 동작합니다.
+- **collection** — document 를 담는 그릇 (관계형 DB 의 테이블에 해당). schema 가 고정되지 않습니다.
+- **database** — collection 을 담는 최상위 논리 단위 (관계형 DB 의 database 에 해당). 첫 쓰기 때 자동 생성됩니다.
+- **directConnection** — 연결 문자열 option. `true` 이면 driver 가 replica set 이 알려 준 member 주소 대신 적은 주소로만 접속합니다.
+- **document** — MongoDB 의 기본 레코드. 필드-값 쌍으로 이뤄진 JSON 형태이며 내부적으로 **BSON** (Binary JSON) 으로 저장됩니다.
+- **keyfile** — replica set member 끼리 서로를 인증할 때 쓰는 공유 비밀 파일. 인증과 replica set 을 함께 켜면 필요합니다.
+- **mongosh** — MongoDB Shell. MongoDB 에 접속해 명령을 실행하는 공식 CLI 이며, `mongo:7` 이미지에 함께 들어 있습니다.
+- **oplog** — primary 가 모든 쓰기를 순서대로 기록하는 `local.oplog.rs` collection. Secondary 는 이것을 읽어 복제하고, change stream 도 이것을 읽습니다.
+- **primary** — replica set 에서 쓰기를 받는 member. Member 가 하나이면 그 member 가 primary 입니다.
+- **replica set** — 같은 data 를 나눠 가진 mongod member 들의 묶음. Primary 의 oplog 를 secondary 가 뒤따라 적용해 복제합니다.
 
 ## Appendix B. MongoDB CLI
 
@@ -232,6 +262,7 @@ db.dropUser("analyst")                                                 // delete
 | Index | `db.<c>.createIndex({ <field>: 1 })` | 인덱스 생성. |
 | User | `db.createUser({...})` · `db.getUsers()` · `db.dropUser("<u>")` | 사용자 관리 (`admin` DB 에서). |
 | Admin | `db.adminCommand({ ping: 1 })` | server 상태 확인 (healthcheck 와 동일). |
+| Replica Set | `rs.initiate({...})` · `rs.status()` · `db.hello().setName` | replica set 초기화·상태·이름 확인. |
 
 > mongosh 안에서 `db` 는 현재 선택된 DB (`use <db>`) 를 가리킵니다. 사용자 생성·조회는 `use admin` 후 실행합니다.
 
