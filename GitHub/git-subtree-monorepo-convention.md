@@ -1,8 +1,6 @@
 # Git Subtree Monorepo Convention — Distributing Code Locked to an Exact Commit Hash
 
-rev. 5
-
----
+Rev. 6 | Created: 2026-07-18 | Updated: 2026-09-07 23:08 UTC
 
 ## 1. Purpose
 
@@ -15,8 +13,6 @@ download 규약을 정의한다. 문서에서 사용한 용어의 정의는
 3. Commit hash 하나로 작업 전체를 한 번에 받는다.
 4. Upload 와 download 가 단순하고 관리가 쉽다.
 5. Hardcoding 을 하지 않는다. Repository URL 과 commit hash 와 경로를 code 에 박지 않는다.
-
----
 
 ## 2. Decision
 
@@ -84,8 +80,6 @@ Table 2. Whether each method satisfies the requirements.
 `cp` 로 넣을 때 외부 repository 의 `.git` 을 함께 넣으면 등록되지 않은 내부 repository 가 되어
 submodule 과 같은 문제가 생기므로, 반드시 `.git` 을 제거하고 plain file 로 넣는다.
 
----
-
 ## 3. Directory Layout
 
 ```text
@@ -104,8 +98,6 @@ Fig 1. Monorepo directory layout.
 `main` 에 commit 하는 것으로 끝난다. Branch 를 만들지 않고 `main` 에 직접 commit 하며, 배포와
 실행에 쓰는 것은 `main` 의 commit hash 다.
 
----
-
 ## 4. Reproducibility
 
 배포와 실행 대상은 항상 branch 나 tag 가 아니라 40자 commit hash 로 지정한다. Tag 와 branch 는
@@ -113,8 +105,6 @@ Fig 1. Monorepo directory layout.
 
 Monorepo 이므로 commit 하나를 받으면 그 시점의 작업 전체 tree 가 통째로 온다. 어떤 flow code 가
 실행되었는지가 commit hash 하나로 완전히 고정된다.
-
----
 
 ## 5. Hardcoding Prohibition
 
@@ -128,8 +118,6 @@ export FLOW_PATH="<FLOW_PATH>"
 ```
 
 실행할 flow 경로도 위와 같이 환경변수나 인자로 주입하고 code 에 박지 않는다.
-
----
 
 ## 6. Upload Command
 
@@ -163,9 +151,8 @@ git subtree pull --prefix=common/<SHARED> <REMOTE_URL> main --squash
 ```
 
 `<SHARED>` 는 외부 upstream 을 흡수해 둔 subtree folder 의 이름이고, `<REMOTE_URL>` 은 그 upstream
-repository 의 주소다.
-
----
+repository 의 주소다. `git subtree` 는 monorepo 의 root folder 에서 실행해야 하며, 하위 folder 에서
+실행하면 git 이 toplevel 이 아니라며 거부한다. `--prefix` 에 적는 경로도 root 를 기준으로 쓴다.
 
 ## 7. Download Command
 
@@ -234,15 +221,18 @@ commit hash 로 고정한 시점의 code 가 그대로 재현된다.
 
 ## Appendix A. Terminology
 
-+ **Commit hash** — Commit 하나를 가리키는 40자 식별자다. 불변이므로 version 을 고정하는 기준으로 쓴다.
-+ **Detached HEAD** — HEAD 가 branch 가 아니라 특정 commit 을 직접 가리키는 상태다.
-+ **Embedded repository** — 다른 repository 의 `.git` 이 하위 folder 에 그대로 딸려 들어와 등록되지 않은 내부 repository 가 된 상태다.
-+ **Gitlink** — 부모 repository 가 submodule 의 commit 을 가리키기 위해 저장하는 pointer 다.
-+ **Monorepo** — 여러 작업과 code 를 하나의 repository 에 모아 두는 구조다.
-+ **Shallow fetch** — `--depth` option 으로 history 의 일부만 받아 오는 fetch 다.
-+ **Submodule** — 외부 repository 를 pointer 로만 참조해 하위 folder 에 두는 방식이다.
-+ **Subtree** — 외부 repository 의 내용을 부모 repository 의 history 로 흡수해 하위 folder 에 두는 방식이다.
-+ **Symlink** — 다른 경로를 가리키는 symbolic link 다. git 은 link 의 경로 문자열만 저장한다.
-+ **Upstream** — Subtree 나 fork 의 출처가 되는 외부 repository 다.
-+ **Vendoring** — 외부 code 를 복사해 자기 repository 안에 plain file 로 포함시키는 방식이다.
-+ **Worktree** — 같은 repository 에 연결된 별도의 작업 directory 다. Main worktree 는 맨 처음 만들어진 기본 작업 directory 를 가리킨다.
+- **Commit hash**: Commit 하나를 가리키는 40자 식별자다. 불변이므로 version 을 고정하는 기준으로 쓴다.
+- **Detached HEAD**: HEAD 가 branch 가 아니라 특정 commit 을 직접 가리키는 상태다.
+- **Embedded repository**: 다른 repository 의 `.git` 이 하위 folder 에 그대로 딸려 들어와 등록되지 않은 내부 repository 가 된 상태다.
+- **Flow**: 하나의 실험을 실행하는 code 단위이며, monorepo 의 하위 folder 에 file 로 놓인다.
+- **Gitlink**: 부모 repository 가 submodule 의 commit 을 가리키기 위해 저장하는 pointer 다.
+- **Monorepo**: 여러 작업과 code 를 하나의 repository 에 모아 두는 구조다.
+- **Read-tree**: 다른 tree 나 commit 을 index 의 지정한 경로로 직접 읽어 넣는 저수준 명령이다.
+- **Shallow fetch**: `--depth` option 으로 history 의 일부만 받아 오는 fetch 다.
+- **Submodule**: 외부 repository 를 pointer 로만 참조해 하위 folder 에 두는 방식이다.
+- **Subtree**: 외부 repository 의 내용을 부모 repository 의 history 로 흡수해 하위 folder 에 두는 방식이다.
+- **Symlink**: 다른 경로를 가리키는 symbolic link 다. git 은 link 의 경로 문자열만 저장한다.
+- **Tag**: 특정 commit 에 붙이는 이름표다. 옮겨 붙일 수 있으므로 version 고정의 기준으로 쓰지 않는다.
+- **Upstream**: Subtree 나 fork 의 출처가 되는 외부 repository 다.
+- **Vendoring**: 외부 code 를 복사해 자기 repository 안에 plain file 로 포함시키는 방식이다.
+- **Worktree**: 같은 repository 에 연결된 별도의 작업 directory 다. Main worktree 는 맨 처음 만들어진 기본 작업 directory 를 가리킨다.
