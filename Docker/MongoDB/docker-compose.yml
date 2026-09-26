@@ -1,12 +1,14 @@
 # docker-compose.yml
-# __version__ = "0.0.12"
+# __version__ = "0.0.13"
 
 name: mongodb                       # Fix the project name (prefix of container and volume names).
 
 services:
   mongo:
     image: mongo:7
-    command: ["mongod", "--auth"]   # enforce authentication (root user already created in the volume)
+    # enforce authentication (root user already created in the volume) and run as a single-member replica set rs0,
+    # so that the oplog exists for change streams. --auth with --replSet requires a keyfile; regenerated at every start.
+    command: ["bash", "-c", "rm -f /tmp/keyfile && head -c 756 /dev/urandom | base64 > /tmp/keyfile && chmod 400 /tmp/keyfile && chown 999:999 /tmp/keyfile && exec docker-entrypoint.sh mongod --auth --replSet rs0 --keyFile /tmp/keyfile"]
     env_file:
       - docker-compose.env_example          # injects MONGO_INITDB_ROOT_USERNAME / MONGO_INITDB_ROOT_PASSWORD
     ports:
