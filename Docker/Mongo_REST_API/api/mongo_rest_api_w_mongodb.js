@@ -47,9 +47,12 @@ app.use((req, res, next) => {
 
 // MongoDB 연결
 const credentials = readMongoCredentials();
+// directConnection: the single-member replica set advertises its member as localhost:27017, which inside this
+// container is the container itself; talk to the MONGO_URI host directly instead of following that name
+const clientOptions = { directConnection: true };
 const client = credentials
-  ? new MongoClient(MONGO_URI, { auth: credentials, authSource: 'admin' })
-  : new MongoClient(MONGO_URI);
+  ? new MongoClient(MONGO_URI, { ...clientOptions, auth: credentials, authSource: 'admin' })
+  : new MongoClient(MONGO_URI, clientOptions);
 let db;
 
 async function startServer() {
