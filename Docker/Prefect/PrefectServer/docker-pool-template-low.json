@@ -31,7 +31,18 @@
       "network_mode": { "title": "Network Mode", "type": "string" },
       "auto_remove": { "title": "Auto Remove", "type": "boolean", "default": true },
       "mem_limit": { "title": "Memory Limit", "type": "string", "default": "4g" },
-      "stream_output": { "title": "Stream Output", "type": "boolean", "default": true }
+      "stream_output": { "title": "Stream Output", "type": "boolean", "default": true },
+      "volumes": {
+        "title": "Volumes",
+        "type": "array",
+        "items": { "type": "string" },
+        "default": []
+      },
+      "container_create_kwargs": {
+        "title": "Container Create Kwargs",
+        "type": "object",
+        "default": {}
+      }
     }
   },
   "job_configuration": {
@@ -43,6 +54,8 @@
     "network_mode": "{{ network_mode }}",
     "auto_remove": "{{ auto_remove }}",
     "mem_limit": "{{ mem_limit }}",
-    "stream_output": "{{ stream_output }}"
+    "stream_output": "{{ stream_output }}",
+    "volumes": "{{ volumes }}",
+    "container_create_kwargs": "{{ container_create_kwargs }}"
   }
 }
