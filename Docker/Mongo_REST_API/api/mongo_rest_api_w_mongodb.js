@@ -11,7 +11,7 @@ const MONGO_URI = process.env.MONGO_URI || 'mongodb://host.docker.internal:27017
 const API_PORT = process.env.API_PORT || 3000;
 
 // single credential source shared by every environment; no file = no authentication
-const CREDENTIALS_PATH = path.join(os.homedir(), '.config', 'y', 'mongo_credentials.json');
+const CREDENTIALS_PATH = path.join(os.homedir(), '.config', 'y', 'ymongo.json');
 
 function readMongoCredentials() {
   if (!fs.existsSync(CREDENTIALS_PATH)) return null;
