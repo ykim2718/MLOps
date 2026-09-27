@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # run_worker.sh — start the Prefect worker compose stack on a worker machine.
-# __version__ = "0.0.21"  # Semantic Versioning:  Version = Major.Minor.Patch
+# __version__ = "0.0.23"  # Semantic Versioning:  Version = Major.Minor.Patch
 #
 # Brings up prefect_worker, which polls the given work pool. WORK_POOL/WORKER_LIMIT are read from
 # this shell at "docker compose up" (compose interpolation), so they are exported below.
@@ -11,16 +11,22 @@
 #
 #   ./run_worker.sh --work-pool high_performance    # a high-tier machine
 #   ./run_worker.sh --work-pool low_performance     # a low-tier machine
+#   ./run_worker.sh --work-pool low_performance --worker-ip 192.168.0.13   # when the LAN IP is not detected
+#
+# The worker is named '<hostname>@<LAN IP>' so the Prefect server (and dashboards reading it) can tell
+# which machine each worker runs on; the Prefect API records no host for a worker otherwise.
 #
 set -euo pipefail
 
 WORK_POOL="high_performance"   # the work pool this machine polls: high_performance | low_performance
 WORKER_LIMIT=8                 # max pipeline_flow containers this machine spawns concurrently
+WORKER_IP=""                   # LAN IP of this machine; empty = detected below
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --work-pool)    WORK_POOL="$2"; shift 2 ;;
         --worker-limit) WORKER_LIMIT="$2"; shift 2 ;;
+        --worker-ip)    WORKER_IP="$2"; shift 2 ;;
         *) echo "Unknown option: $1" >&2; exit 1 ;;
     esac
 done
@@ -87,9 +93,28 @@ else
     echo "Using work pool '$WORK_POOL'."
 fi
 
+# --- Name the worker after this machine: <hostname>@<LAN IP> ---------------------------------------
+# On Windows (Git Bash, or WSL whose own IP is internal) the LAN IP comes from the Windows default-route
+# interface; on Linux from the source address of the default route.
+if [ -z "$WORKER_IP" ] && command -v powershell.exe >/dev/null 2>&1; then
+    WORKER_IP="$(powershell.exe -NoProfile -Command \
+        "(Get-NetIPConfiguration | Where-Object IPv4DefaultGateway | Select-Object -First 1).IPv4Address.IPAddress" \
+        2>/dev/null | tr -d '\r' || true)"
+fi
+if [ -z "$WORKER_IP" ] && command -v ip >/dev/null 2>&1; then
+    WORKER_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") {print $(i + 1); exit}}')"
+fi
+if ! printf '%s' "$WORKER_IP" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+    echo "Could not detect this machine's LAN IP (got '$WORKER_IP'); pass it with --worker-ip <ip>." >&2
+    exit 1
+fi
+WORKER_NAME="$(hostname)@${WORKER_IP}"
+echo "Worker name: $WORKER_NAME"
+
 # For the worker compose ${...} interpolation — export so this docker compose up sees them.
 export WORK_POOL
 export WORKER_LIMIT
+export WORKER_NAME
 
 # Bring the worker stack down (keeping volumes) and back up in the background.
 # project name comes from the compose file's top-level name: (prefect-worker), so down only ever touches this stack.
