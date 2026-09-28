@@ -1,6 +1,6 @@
 # Ubuntu CLI
 
-Rev. 16 | Created: 2026-07-06 | Updated: 2026-09-28 23:55 UTC
+Rev. 17 | Created: 2026-07-06 | Updated: 2026-09-28 23:56 UTC
 
 > Commands in this document are written for **Ubuntu**.
 
@@ -196,10 +196,18 @@ Services often left running without need:
 sudo systemctl disable --now snapd.service snapd.socket    # Snap daemon, if no Snap apps are used
 sudo systemctl disable --now bluetooth.service             # Bluetooth, if unused
 sudo systemctl disable --now ModemManager.service          # Modem control, if no modem card is installed
+sudo systemctl disable --now cups.service                  # Printer support, if no printer is used
 ```
 
 - `disable --now` — Stops the service immediately and prevents it from starting at boot.
 - Re-enable with `sudo systemctl enable --now <SERVICE>`.
+
+`disable --now` is the same as running `stop` and `disable` separately:
+
+```bash
+sudo systemctl stop bluetooth       # Stop now
+sudo systemctl disable bluetooth    # Do not start at boot
+```
 
 ### A.3 Clean up unused packages and cache periodically
 
