@@ -1,6 +1,6 @@
 # Ubuntu CLI
 
-Rev. 15 | Created: 2026-07-06 | Updated: 2026-09-28 23:47 UTC
+Rev. 16 | Created: 2026-07-06 | Updated: 2026-09-28 23:55 UTC
 
 > Commands in this document are written for **Ubuntu**.
 
@@ -186,7 +186,8 @@ sudo systemctl set-default graphical.target     # Restore GUI mode at boot
 Background daemons that start at boot hold memory even when unused.
 
 ```bash
-systemd-analyze blame    # Startup time taken by each service
+systemd-analyze blame                                   # Startup time taken by each service
+systemctl list-units --type=service --state=running    # Services currently running
 ```
 
 Services often left running without need:
