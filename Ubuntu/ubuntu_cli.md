@@ -2,7 +2,7 @@
 
 # Ubuntu CLI
 
-Rev. 12 | Created: 2026-07-06 | Updated: 2026-08-14 21:32 CDT
+Rev. 13 | Created: 2026-07-06 | Updated: 2026-09-28 23:42 UTC
 
 > Commands in this document are written for **Ubuntu**.
 
@@ -164,3 +164,40 @@ sudo bash -c 'apt update && apt install -y curl && systemctl restart docker'
 ```bash
 sudo !!    # Repeat the last command with sudo prepended
 ```
+
+---
+
+## Appendix A. Reducing System Resource Usage
+
+Main ways to cut CPU, RAM, and disk usage so that Ubuntu runs lighter and faster.
+
+### A.1 Switch to CLI-only mode
+
+On a server or a terminal-oriented machine, turning off the desktop GUI (GNOME) alone saves about 1–1.5 GB of RAM or more.
+
+```bash
+sudo systemctl set-default multi-user.target    # Boot into text (terminal) mode by default
+sudo systemctl set-default graphical.target     # Restore GUI mode at boot
+```
+
+- Takes effect from the next boot.
+- `startx` — Starts the GUI on demand while in text mode.
+
+### A.2 Disable unneeded boot services
+
+Background daemons that start at boot hold memory even when unused.
+
+```bash
+systemd-analyze blame    # Startup time taken by each service
+```
+
+Services often left running without need:
+
+```bash
+sudo systemctl disable --now snapd.service snapd.socket    # Snap daemon, if no Snap apps are used
+sudo systemctl disable --now bluetooth.service             # Bluetooth, if unused
+sudo systemctl disable --now ModemManager.service          # Modem control, if no modem card is installed
+```
+
+- `disable --now` — Stops the service immediately and prevents it from starting at boot.
+- Re-enable with `sudo systemctl enable --now <SERVICE>`.
