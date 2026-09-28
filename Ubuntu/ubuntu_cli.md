@@ -2,7 +2,7 @@
 
 # Ubuntu CLI
 
-Rev. 13 | Created: 2026-07-06 | Updated: 2026-09-28 23:42 UTC
+Rev. 14 | Created: 2026-07-06 | Updated: 2026-09-28 23:43 UTC
 
 > Commands in this document are written for **Ubuntu**.
 
@@ -201,3 +201,13 @@ sudo systemctl disable --now ModemManager.service          # Modem control, if n
 
 - `disable --now` — Stops the service immediately and prevents it from starting at boot.
 - Re-enable with `sudo systemctl enable --now <SERVICE>`.
+
+### A.3 Clean up unused packages and cache periodically
+
+```bash
+sudo apt autoremove --purge -y    # Remove unused dependency packages
+sudo apt clean                    # Delete the apt package cache to free disk space
+```
+
+- `--purge` — Also removes the configuration files of the deleted packages.
+- `apt clean` — Empties `/var/cache/apt/archives`; packages are downloaded again when reinstalled.
