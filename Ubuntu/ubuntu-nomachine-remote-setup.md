@@ -1,8 +1,6 @@
-> ⚠️ **This is an auto-synced copy. Do not edit here.**
-
 # 우분투 원격 접속 서버 구축
 
-Rev. 19 | Created: 2026-07-14 | Updated: 2026-08-14 21:32 CDT
+Rev. 20 | Created: 2026-07-14 | Updated: 2026-09-28 23:49 UTC
 
 <table width="100%">
 <tr>
