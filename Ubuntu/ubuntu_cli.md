@@ -186,7 +186,7 @@ sudo systemctl set-default graphical.target     # Restore GUI mode at boot
 Background daemons that start at boot hold memory even when unused.
 
 ```bash
-systemd-analyze blame                                   # Startup time taken by each service
+systemd-analyze blame                                  # Startup time taken by each service
 systemctl list-units --type=service --state=running    # Services currently running
 ```
 
