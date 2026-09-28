@@ -1,8 +1,6 @@
-> ⚠️ **This is an auto-synced copy.** Do not edit here.
-
 # Ubuntu CLI
 
-Rev. 14 | Created: 2026-07-06 | Updated: 2026-09-28 23:43 UTC
+Rev. 15 | Created: 2026-07-06 | Updated: 2026-09-28 23:47 UTC
 
 > Commands in this document are written for **Ubuntu**.
 
