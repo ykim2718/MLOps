@@ -1,6 +1,6 @@
 # Ubuntu CLI (Korean)
 
-Rev. 1 | Created: 2026-09-30 | Updated: 2026-09-30 12:42 CDT
+Rev. 2 | Created: 2026-09-30 | Updated: 2026-09-30 21:14 UTC
 
 > 이 문서의 명령은 **Ubuntu** 기준이다.
 
@@ -222,7 +222,7 @@ Table 1. SSH 접속 option
 - **TCP**: SSH 와 대부분의 network service 가 쓰는 연결 지향 transport protocol.
 - **UID**: User ID. 사용자 계정을 식별하는 번호.
 
-## Appendix B. Reducing System Resource Usage
+## Appendix B. Ubuntu Resource Optimization
 
 Ubuntu 를 더 가볍고 빠르게 돌리기 위해 CPU, RAM, disk 사용량을 줄이는 주요 방법.
 
