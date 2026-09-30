@@ -1,5 +1,5 @@
 # Docker Hub (Image Registry)
-Rev. 7 | Created: 2026-07-03 | Updated: 2026-09-30 00:18 CDT
+Rev. 8 | Created: 2026-07-03 | Updated: 2026-09-30 07:59 CDT
 
 - [1. Auth](#1-auth)
 - [2. Upload — commit · tag · push](#2-upload--commit--tag--push)
@@ -85,9 +85,10 @@ docker image inspect <image>:<tag>             # 이미 받은 로컬 이미지�
 ### Server
 
 ```yaml
-# Docker/Registry/docker-compose.yml
-# __version__ = "0.1.0.2026.9.30"  # Semantic Versioning: Major.Minor.Patch.Date(YYYY.M.D)
+# docker-compose.yml
+# __version__ = "0.1.1.2026.9.30"  # Semantic Versioning: Major.Minor.Patch.Date(YYYY.M.D)
 # 0.1.0: kick-off; private image registry on port 5000, images kept in the registry-data volume
+# 0.1.1: host port 12357 (5000 is taken by MLflow); the registry itself still listens on 5000 inside
 
 name: registry                      # Fix the project name (prefix of container and volume names).
 
@@ -96,7 +97,7 @@ services:
     image: registry:2
     container_name: registry
     ports:
-      - "5000:5000"   # push as localhost:5000/<image> on this machine, pull as <this machine's LAN IP>:5000/<image>
+      - "12357:5000"  # push as localhost:12357/<image> on this machine, pull as <this machine's LAN IP>:12357/<image>
     volumes:
       - registry-data:/var/lib/registry
     healthcheck:
@@ -114,20 +115,20 @@ volumes:
 ```bash
 # Bash, in Docker/Registry
 docker compose up -d                       # start the registry in the background
-curl http://localhost:5000/v2/_catalog     # list the repositories the registry holds
+curl http://localhost:12357/v2/_catalog     # list the repositories the registry holds
 ```
 
-> 다른 machine 이 pull 하려면 registry 를 띄운 machine 의 방화벽에서 TCP 5000 inbound 를 엽니다.
+> 다른 machine 이 pull 하려면 registry 를 띄운 machine 의 방화벽에서 TCP 12357 inbound 를 엽니다.
 
 ### Push
 
 ```bash
 # Bash, on the registry machine
-docker tag <image>:<tag> localhost:5000/<image>:<tag>   # name the image for the registry
-docker push localhost:5000/<image>:<tag>                # upload only the layers the registry lacks
+docker tag <image>:<tag> localhost:12357/<image>:<tag>   # name the image for the registry
+docker push localhost:12357/<image>:<tag>                # upload only the layers the registry lacks
 ```
 
-> registry 를 띄운 machine 에서는 `localhost:5000` 으로 push 합니다. docker 는 localhost 의 registry 에 한해 TLS 없는 HTTP 접속을 허용하므로 daemon 설정을 고치지 않습니다.
+> registry 를 띄운 machine 에서는 `localhost:12357` 로 push 합니다. docker 는 localhost 의 registry 에 한해 TLS 없는 HTTP 접속을 허용하므로 daemon 설정을 고치지 않습니다.
 
 ### Pull
 
@@ -136,14 +137,14 @@ TLS 없는 registry 에서 받으려면 받는 machine 의 docker daemon 에 그
 ```json
 // /etc/docker/daemon.json
 {
-  "insecure-registries": ["<host>:5000"]
+  "insecure-registries": ["<host>:12357"]
 }
 ```
 
 ```bash
 # Bash, on the pulling machine
 sudo systemctl restart docker            # reload daemon.json
-docker pull <host>:5000/<image>:<tag>    # download only the layers this machine lacks
+docker pull <host>:12357/<image>:<tag>    # download only the layers this machine lacks
 ```
 
 > `daemon.json` 에 다른 key 가 이미 있으면 파일을 덮어쓰지 않고 `insecure-registries` 만 더합니다. Docker Desktop 은 Settings → Docker Engine 의 JSON 에 같은 key 를 넣습니다.
