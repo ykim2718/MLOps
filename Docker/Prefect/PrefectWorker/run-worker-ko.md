@@ -1,5 +1,5 @@
 # run_worker.sh
-Rev. 0 | Created: 2026-09-30 | Updated: 2026-09-30 10:13 CDT
+Rev. 1 | Created: 2026-09-30 | Updated: 2026-09-30 12:57 CDT
 
 > **Goal** — 한 machine 에서 Prefect worker container 를 띄워, 지정한 docker work pool 또는 그 pool 의 work queue 하나에 들어온 run 을 그 machine 이 실행하게 한다. 잘못된 pool·queue 이름으로 worker 가 run 을 하나도 받지 못하는 일은 기동 전에 막는다.
 >
@@ -109,10 +109,9 @@ LAN IP 를 자동으로 읽지 못하는 machine 에서 worker 이름에 넣을 
 
 ### C.4 Worker for One Queue
 
-`low_performance` pool 의 `urgent` queue 만 polling 하는 worker 를, pool 전체를 맡는 worker 옆에 한도 2 로 띄운다. `urgent` queue 가 server 에 먼저 있어야 한다.
+`low_performance` pool 의 `urgent` queue 만 polling 하는 worker 를, pool 전체를 맡는 worker 옆에 한도 2 로 띄운다. `urgent` queue 를 만들고 pool 한도를 `default` queue 로 옮기는 절차는 [prefect-work-queue-ko.md](../prefect-work-queue-ko.md) 를 따르며, queue 가 server 에 먼저 있어야 한다.
 
 ```bash
-prefect work-queue create urgent --pool low_performance --priority 1
 ./run_worker.sh --work-pool low_performance --work-queue urgent --worker-limit 2
 ```
 

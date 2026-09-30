@@ -1,5 +1,5 @@
 # Prefect Work Queue
-Rev. 0 | Created: 2026-09-30 | Updated: 2026-09-30 12:48 CDT
+Rev. 1 | Created: 2026-09-30 | Updated: 2026-09-30 12:57 CDT
 
 - [1. Purpose](#1-purpose)
 - [2. Summary](#2-summary)
@@ -22,6 +22,10 @@ Rev. 0 | Created: 2026-09-30 | Updated: 2026-09-30 12:48 CDT
 - [References](#references)
 - [Appendix A. Terminology](#appendix-a-terminology)
 - [Appendix B. Work Queue CLI](#appendix-b-work-queue-cli)
+- [Appendix C. Urgent Queue](#appendix-c-urgent-queue)
+  - [C.1 Purpose](#c1-purpose)
+  - [C.2 Method](#c2-method)
+  - [C.3 Server State](#c3-server-state)
 
 ## 1. Purpose
 
@@ -39,6 +43,8 @@ Work queue 는 work pool 안의 대기열이며, priority 와 concurrency limit 
 2. Pool 의 concurrency limit 을 지우고 같은 값을 `default` queue 에 건다. Pool 한도는 그 pool 의 모든 queue 에 함께 걸리므로, 남겨 두면 전용 queue 의 run 도 pool 한도에 막힌다 ([5.2](#52-moving-the-concurrency-limit)).
 3. Deployment 를 `work_queue_name=<QUEUE>` 로 등록한다 ([5.3](#53-assigning-a-deployment)).
 4. `prefect worker start --pool <POOL> --work-queue <QUEUE> --limit <N>` 으로 그 queue 만 polling 하는 worker 를 pool 전체를 맡는 worker 옆에 띄운다 ([5.4](#54-starting-a-dedicated-worker)).
+
+네 단계를 실제 pool 에 적용한 예와 그 server 의 상태는 [Appendix C](#appendix-c-urgent-queue) 에 있다.
 
 ## 3. Taxonomy and its Hierarchy
 
@@ -91,13 +97,13 @@ Queue 는 한 pool 안에서 순서와 개수를 나누고, 실행 방식이 갈
 
 ### 4.1 Default Queue
 
-Pool 을 만들면 server 가 `default` 라는 queue 를 priority 1 로 함께 만든다 [[4](#ref-4)]. Deployment 에 `work_queue_name` 이 없으면 그 deployment 의 run 은 `default` queue 에 들어간다 [[5](#ref-5)]. Deployment 가 pool 에 없는 queue 이름을 대면 server 가 등록 시점에 그 이름의 queue 를 만든다 [[5](#ref-5)]. 이 자동 생성은 priority 를 받지 않으므로, priority 를 정하려면 deployment 등록 전에 queue 를 먼저 만든다 ([5.1](#51-creating-a-queue)).
+Pool 을 만들면 server 가 `default` 라는 queue 를 priority 1 로 함께 만든다 [[1](#ref-1)]. Deployment 에 `work_queue_name` 이 없으면 그 deployment 의 run 은 `default` queue 에 들어간다 [[2](#ref-2)]. Deployment 가 pool 에 없는 queue 이름을 대면 server 가 등록 시점에 그 이름의 queue 를 만든다 [[2](#ref-2)]. 이 자동 생성은 priority 를 받지 않으므로, priority 를 정하려면 deployment 등록 전에 queue 를 먼저 만든다 ([5.1](#51-creating-a-queue)).
 
 ### 4.2 Priority
 
-Priority 는 pool 안에서 겹치지 않는 양의 정수이고, 숫자가 작을수록 먼저 내주며 1 이 가장 앞이다 [[1](#ref-1)]. Server 는 앞 순위 queue 의 기다리는 run 을 모두 내준 뒤에 다음 순위 queue 의 run 을 내준다. 동시 실행 한도에 여유가 있어도 이 순서는 바뀌지 않는다 [[1](#ref-1)]. Priority 는 기다리는 run 에만 작용하고, 이미 도는 run 은 그대로 둔다.
+Priority 는 pool 안에서 겹치지 않는 양의 정수이고, 숫자가 작을수록 먼저 내주며 1 이 가장 앞이다 [[3](#ref-3)]. Server 는 앞 순위 queue 의 기다리는 run 을 모두 내준 뒤에 다음 순위 queue 의 run 을 내준다. 동시 실행 한도에 여유가 있어도 이 순서는 바뀌지 않는다 [[3](#ref-3)]. Priority 는 기다리는 run 에만 작용하고, 이미 도는 run 은 그대로 둔다.
 
-Priority 를 주지 않고 만든 queue 는 비어 있는 가장 앞 순위를 받고, 빈 순위가 없으면 가장 뒤 순위 다음을 받는다 [[4](#ref-4)]. 이미 있는 순위를 주면 server 가 나머지 queue 의 순위를 한 칸씩 뒤로 밀어 겹침을 없앤다 [[4](#ref-4)]. `--priority 1` 로 만든 queue 는 `default` 를 2 로 밀어내고 가장 앞 순위가 된다.
+Priority 를 주지 않고 만든 queue 는 비어 있는 가장 앞 순위를 받고, 빈 순위가 없으면 가장 뒤 순위 다음을 받는다 [[1](#ref-1)]. 이미 있는 순위를 주면 server 가 나머지 queue 의 순위를 한 칸씩 뒤로 밀어 겹침을 없앤다 [[1](#ref-1)]. `--priority 1` 로 만든 queue 는 `default` 를 2 로 밀어내고 가장 앞 순위가 된다.
 
 ### 4.3 Concurrency Limit
 
@@ -111,11 +117,11 @@ Table 3. Three concurrency limits
 | work queue | `prefect work-queue set-concurrency-limit <QUEUE> <N> --pool <POOL>` | runs of that queue                          |
 | worker     | `prefect worker start --limit <N>`                  | runs that one worker process has started    |
 
-Pool 한도는 그 pool 의 모든 queue 에 함께 걸린다 [[1](#ref-1)]. 전용 queue 와 전용 worker 를 두어도 pool 한도가 차 있으면 전용 queue 의 run 도 기다린다. 그래서 급한 run 을 위한 자리를 떼어 두려면 pool 한도를 지우고 같은 값을 `default` queue 에 걸어, 한도를 나머지 run 에만 남긴다 ([5.2](#52-moving-the-concurrency-limit)). Worker 의 `--limit` 은 그 worker 하나가 동시에 띄우는 run 의 수이며, 같은 queue 를 polling 하는 worker 가 둘이면 queue 의 run 은 두 worker 의 `--limit` 을 합한 수까지 동시에 돌 수 있다.
+Pool 한도는 그 pool 의 모든 queue 에 함께 걸린다 [[3](#ref-3)]. 전용 queue 와 전용 worker 를 두어도 pool 한도가 차 있으면 전용 queue 의 run 도 기다린다. 그래서 급한 run 을 위한 자리를 떼어 두려면 pool 한도를 지우고 같은 값을 `default` queue 에 걸어, 한도를 나머지 run 에만 남긴다 ([5.2](#52-moving-the-concurrency-limit)). Worker 의 `--limit` 은 그 worker 하나가 동시에 띄우는 run 의 수이며, 같은 queue 를 polling 하는 worker 가 둘이면 queue 의 run 은 두 worker 의 `--limit` 을 합한 수까지 동시에 돌 수 있다.
 
 ### 4.4 Status
 
-Queue 는 `READY`, `NOT_READY`, `PAUSED` 세 상태를 갖는다 [[1](#ref-1)].
+Queue 는 `READY`, `NOT_READY`, `PAUSED` 세 상태를 갖는다 [[3](#ref-3)].
 
 - `READY` 는 최근 60 초 안에 worker 가 그 queue 를 polling 한 상태이다.
 - `NOT_READY` 는 60 초 넘게 polling 이 없는 상태이며, run 은 queue 에 쌓이고 worker 가 오면 `READY` 로 돌아간다.
@@ -123,7 +129,7 @@ Queue 는 `READY`, `NOT_READY`, `PAUSED` 세 상태를 갖는다 [[1](#ref-1)].
 
 ### 4.5 Worker Polling
 
-Worker 는 pool 하나에 붙고, `--work-queue` 를 주지 않으면 그 pool 의 모든 queue 를 polling 한다 [[3](#ref-3)]. `--work-queue` 는 여러 번 줄 수 있고, 주면 그 queue 들만 polling 한다 [[3](#ref-3)].
+Worker 는 pool 하나에 붙고, `--work-queue` 를 주지 않으면 그 pool 의 모든 queue 를 polling 한다 [[4](#ref-4)]. `--work-queue` 는 여러 번 줄 수 있고, 주면 그 queue 들만 polling 한다 [[4](#ref-4)].
 
 Queue 의 run 은 그 queue 를 polling 하는 worker 가운데 먼저 가져간 쪽이 실행한다. Pool 전체를 맡는 worker 도 전용 queue 를 polling 하므로, 전용 worker 는 그 queue 에 한도를 더할 뿐이다. 특정 queue 의 run 을 특정 machine 에서만 돌리려면, 다른 machine 의 worker 가 모두 `--work-queue` 로 자기 queue 만 polling 하게 하여 그 queue 를 polling 하는 worker 를 그 machine 의 것 하나로 남긴다.
 
@@ -251,15 +257,15 @@ Table 4. Symptom, cause and fix
 ## References
 
 <a id="ref-1"></a>
-[1] Prefect. [Work pools](https://docs.prefect.io/v3/concepts/work-pools). Prefect 3 documentation, Concepts.<br>
+[1] PrefectHQ. [src/prefect/server/models/workers.py](https://github.com/PrefectHQ/prefect/blob/main/src/prefect/server/models/workers.py). Prefect source, `create_work_pool` and `create_work_queue`.<br>
 <a id="ref-2"></a>
-[2] Prefect. [prefect work-queue](https://docs.prefect.io/v3/api-ref/cli/work-queue). Prefect 3 documentation, CLI reference.<br>
+[2] PrefectHQ. [src/prefect/server/api/deployments.py](https://github.com/PrefectHQ/prefect/blob/main/src/prefect/server/api/deployments.py). Prefect source, `create_deployment`.<br>
 <a id="ref-3"></a>
-[3] Prefect. [prefect worker](https://docs.prefect.io/v3/api-ref/cli/worker). Prefect 3 documentation, CLI reference.<br>
+[3] Prefect. [Work pools](https://docs.prefect.io/v3/concepts/work-pools). Prefect 3 documentation, Concepts.<br>
 <a id="ref-4"></a>
-[4] PrefectHQ. [src/prefect/server/models/workers.py](https://github.com/PrefectHQ/prefect/blob/main/src/prefect/server/models/workers.py). Prefect source, `create_work_pool` and `create_work_queue`.<br>
+[4] Prefect. [prefect worker](https://docs.prefect.io/v3/api-ref/cli/worker). Prefect 3 documentation, CLI reference.<br>
 <a id="ref-5"></a>
-[5] PrefectHQ. [src/prefect/server/api/deployments.py](https://github.com/PrefectHQ/prefect/blob/main/src/prefect/server/api/deployments.py). Prefect source, `create_deployment`.
+[5] Prefect. [prefect work-queue](https://docs.prefect.io/v3/api-ref/cli/work-queue). Prefect 3 documentation, CLI reference.
 
 ---
 
@@ -293,4 +299,55 @@ Table 5. prefect work-queue subcommands
 | `clear-concurrency-limit` | `<QUEUE> --pool <POOL>`                            | queue 한도 제거                                          |
 | `delete`                  | `<QUEUE> --pool <POOL>`                            | queue 삭제                                               |
 
-옵션의 정확한 이름과 기본값은 `prefect work-queue <SUBCOMMAND> --help` 가 그 CLI 판 기준으로 보여 준다 [[2](#ref-2)].
+옵션의 정확한 이름과 기본값은 `prefect work-queue <SUBCOMMAND> --help` 가 그 CLI 판 기준으로 보여 준다 [[5](#ref-5)].
+
+## Appendix C. Urgent Queue
+
+`low_performance` pool 의 `urgent` queue 는 도는 run 을 취소하는 deployment 하나를 위해 만들었다. 이 appendix 는 그 queue 를 만든 목적, 적용한 명령, 그리고 2026-09-30 에 server 에서 읽은 상태를 적는다.
+
+### C.1 Purpose
+
+`webull-subscribe` 는 시세 stream 을 구독하며 끝나지 않고 도는 run 이고, `webull-subscribe-stop` 은 그 run 을 취소하는 run 이다. 둘 다 `low_performance` pool 에 있으므로, 구독 run 과 다른 run 이 pool 한도를 채운 상태에서 `default` queue 에 들어간 취소 run 은 `Late` 로 기다리고, 취소하려던 run 은 그동안 계속 돈다. 취소 run 을 `urgent` queue 에 두고 그 queue 만 polling 하는 worker 를 붙여, 한도와 무관하게 바로 시작하게 한다.
+
+Table 6. Deployments of the pool that the urgent queue serves
+
+| Deployment                      | Queue     | Parameters                                                  | Schedule |
+| :-----------------------------: | :-------: | :---------------------------------------------------------: | :------: |
+| `finance/webull-subscribe`      | `default` | subscribe AAPL and SOXL quote and snapshot, save-to watched_stock_prices_basic_from_webull | none     |
+| `finance/webull-subscribe-stop` | `urgent`  | `cancel_deployment_runs -deployment webull-subscribe`       | none     |
+
+두 deployment 는 schedule 없이 사람이 trigger 한다. 취소 run 은 deployment 이름 `webull-subscribe` 의 도는 run 을 취소하고 끝난다.
+
+### C.2 Method
+
+[2. Summary](#2-summary) 의 네 단계 가운데 1, 3, 4 를 `low_performance` pool 에 적용했고, step 2 는 [C.3](#c3-server-state) 의 상태대로 아직 남아 있다.
+
+```bash
+prefect work-queue create urgent --pool low_performance --priority 1        # step 1
+prefect work-pool clear-concurrency-limit low_performance                  # step 2, first half
+prefect work-queue set-concurrency-limit default 6 --pool low_performance  # step 2, second half
+prefect worker start --pool low_performance --work-queue urgent --name yrocket-nb1-urgent@<LAN_IP>   # step 4
+```
+
+- Step 3 은 `finance/webull-subscribe-stop` 을 `work_pool_name="low_performance"`, `work_queue_name="urgent"` 로 등록한 것이다 ([5.3](#53-assigning-a-deployment)).
+- 전용 worker 는 pool 전체를 맡는 worker `yrocket-nb1@<LAN_IP>` 와 같은 machine 에서 돈다. 이름 뒤의 `-urgent` 가 전용 worker 를 가리킨다 ([5.4](#54-starting-a-dedicated-worker)).
+- Step 2 의 `6` 은 pool 에 걸려 있던 한도이다 ([C.3](#c3-server-state)).
+
+### C.3 Server State
+
+2026-09-30 에 `prefect` CLI 로 읽은 server 의 상태이다. Queue 와 deployment 와 worker 는 C.2 대로 있고, pool 한도는 아직 pool 에 남아 있다.
+
+```text
+Work Queues in Work Pool 'low_performance'
+┏━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━┓
+┃ Name    ┃ Priority ┃ Concurrency Limit ┃
+┡━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━┩
+│ urgent  │ 1        │ None              │
+│ default │ 2        │ None              │
+└─────────┴──────────┴───────────────────┘
+```
+
+- `urgent` 가 priority 1 이고, pool 을 만들 때 1 이었던 `default` 는 2 로 밀렸다 ([4.2](#42-priority)).
+- `prefect work-pool inspect low_performance` 의 `concurrency_limit` 은 `6` 이고, 두 queue 의 한도는 `None` 이다. Step 2 의 두 명령은 아직 적용되지 않은 상태이며, pool 의 run 이 6 개 돌면 `urgent` queue 의 run 도 pool 한도에 막혀 기다린다 ([4.3](#43-concurrency-limit)). C.2 의 두 번째와 세 번째 명령을 실행하면 한도가 `default` queue 로 옮겨 간다.
+- `low_performance` pool 의 worker 는 `yrocket-nb1@<LAN_IP>` 와 `yrocket-nb1-urgent@<LAN_IP>` 둘이고 모두 `ONLINE` 이다. `urgent` queue 는 두 worker 가 함께 polling 하므로, 취소 run 은 둘 중 먼저 가져간 쪽이 실행한다 ([4.5](#45-worker-polling)).
+- `prefect deployment inspect "finance/webull-subscribe-stop"` 의 `work_queue_name` 은 `urgent` 이고, `finance/webull-subscribe` 의 것은 `default` 이다.
