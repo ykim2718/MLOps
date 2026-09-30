@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # run_worker.sh — start the Prefect worker compose stack on a worker machine.
-# __version__ = "0.0.23"  # Semantic Versioning:  Version = Major.Minor.Patch
+# __version__ = "0.0.24"  # Semantic Versioning:  Version = Major.Minor.Patch
 #
 # Brings up prefect_worker, which polls the given work pool. WORK_POOL/WORKER_LIMIT are read from
 # this shell at "docker compose up" (compose interpolation), so they are exported below.
@@ -12,21 +12,26 @@
 #   ./run_worker.sh --work-pool high_performance    # a high-tier machine
 #   ./run_worker.sh --work-pool low_performance     # a low-tier machine
 #   ./run_worker.sh --work-pool low_performance --worker-ip 192.168.0.13   # when the LAN IP is not detected
+#   ./run_worker.sh --work-pool low_performance --work-queue urgent --worker-limit 2   # a second worker, one queue only
 #
 # The worker is named '<hostname>@<LAN IP>' so the Prefect server (and dashboards reading it) can tell
 # which machine each worker runs on; the Prefect API records no host for a worker otherwise.
+# With --work-queue the worker polls that queue of the pool only, is named '<hostname>-<queue>@<LAN IP>', and runs
+# as its own compose project (prefect-worker-<queue>), so it starts and stops beside the pool-wide worker.
 #
 set -euo pipefail
 
 WORK_POOL="high_performance"   # the work pool this machine polls: high_performance | low_performance
 WORKER_LIMIT=8                 # max pipeline_flow containers this machine spawns concurrently
 WORKER_IP=""                   # LAN IP of this machine; empty = detected below
+WORK_QUEUE=""                  # one work queue of the pool to poll; empty = every queue of the pool
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --work-pool)    WORK_POOL="$2"; shift 2 ;;
         --worker-limit) WORKER_LIMIT="$2"; shift 2 ;;
         --worker-ip)    WORKER_IP="$2"; shift 2 ;;
+        --work-queue)   WORK_QUEUE="$2"; shift 2 ;;
         *) echo "Unknown option: $1" >&2; exit 1 ;;
     esac
 done
@@ -93,6 +98,13 @@ else
     echo "Using work pool '$WORK_POOL'."
 fi
 
+# --- Validate the work queue: prefect worker start would silently create a mistyped queue ------------
+if [ -n "$WORK_QUEUE" ] && ! prefect work-queue inspect "$WORK_QUEUE" --pool "$WORK_POOL" >/dev/null 2>&1; then
+    echo "Work queue '$WORK_QUEUE' is not in work pool '$WORK_POOL'. Create it first, e.g.:" >&2
+    echo "  prefect work-queue create $WORK_QUEUE --pool $WORK_POOL --priority 1" >&2
+    exit 1
+fi
+
 # --- Name the worker after this machine: <hostname>@<LAN IP> ---------------------------------------
 # On Windows (Git Bash, or WSL whose own IP is internal) the LAN IP comes from the Windows default-route
 # interface; on Linux from the source address of the default route.
@@ -108,15 +120,23 @@ if ! printf '%s' "$WORKER_IP" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; the
     echo "Could not detect this machine's LAN IP (got '$WORKER_IP'); pass it with --worker-ip <ip>." >&2
     exit 1
 fi
+PROJECT="prefect-worker"       # the compose file's top-level name
+WORK_QUEUE_OPTION=""
 WORKER_NAME="$(hostname)@${WORKER_IP}"
+if [ -n "$WORK_QUEUE" ]; then
+    PROJECT="prefect-worker-${WORK_QUEUE}"
+    WORK_QUEUE_OPTION="--work-queue ${WORK_QUEUE}"
+    WORKER_NAME="$(hostname)-${WORK_QUEUE}@${WORKER_IP}"
+fi
 echo "Worker name: $WORKER_NAME"
 
 # For the worker compose ${...} interpolation — export so this docker compose up sees them.
 export WORK_POOL
 export WORKER_LIMIT
 export WORKER_NAME
+export WORK_QUEUE_OPTION
 
 # Bring the worker stack down (keeping volumes) and back up in the background.
-# project name comes from the compose file's top-level name: (prefect-worker), so down only ever touches this stack.
-docker compose -f "$COMPOSE" down
-docker compose -f "$COMPOSE" up -d
+# -p names the project, so down only ever touches this stack (the pool-wide worker or one queue's worker).
+docker compose -p "$PROJECT" -f "$COMPOSE" down
+docker compose -p "$PROJECT" -f "$COMPOSE" up -d

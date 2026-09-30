@@ -9,15 +9,16 @@
 #
 # Build (once):  docker build -f Dockerfile.worker -t prefect-worker:latest .
 # Start:         ./run_worker.sh --work-pool high_performance
-# __version__ = "0.0.13"
+# __version__ = "0.0.14"
 name: prefect-worker   # compose project name baked in (replaces -p); run_worker.sh relies on it
 services:
   prefect_worker:
     image: prefect-worker:latest   # built once from Dockerfile.worker (prefect + prefect-docker)
     env_file:
       - ../docker-compose.env_example       # PREFECT_API_URL (shared, kept at Docker/Prefect root)
-    # --name <hostname>@<LAN IP> (set by run_worker.sh) tells the server which machine this worker runs on
-    command: prefect worker start --type docker --pool ${WORK_POOL:-high_performance} --limit ${WORKER_LIMIT:-8} --no-create-pool-if-not-found --name ${WORKER_NAME:?run_worker.sh sets WORKER_NAME}
+    # --name <hostname>@<LAN IP> (set by run_worker.sh) tells the server which machine this worker runs on;
+    # WORK_QUEUE_OPTION (run_worker.sh --work-queue) is "--work-queue <queue>" for a one-queue worker, else empty
+    command: prefect worker start --type docker --pool ${WORK_POOL:-high_performance} ${WORK_QUEUE_OPTION:-} --limit ${WORKER_LIMIT:-8} --no-create-pool-if-not-found --name ${WORKER_NAME:?run_worker.sh sets WORKER_NAME}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock   # host docker socket, to spawn sibling containers
     networks:
