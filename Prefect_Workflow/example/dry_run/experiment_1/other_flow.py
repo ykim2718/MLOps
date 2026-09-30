@@ -5,7 +5,7 @@ does NOT have to be named my_flow.py, nor live at the repo root. pipeline.py run
 deployment's `payload` parameter names (default "my_flow.py"), resolved relative to the fetched
 repo root, so a run can point at a different filename and/or subfolder. Select it at trigger time
 with `-Payload experiment_1/other_flow.py` (my_trigger.ps1 / .bat) or
-`--payload experiment_1/other_flow.py` (my_trigger.sh / _pool.sh); see prefect.md §6 (pipeline.py).
+`--payload experiment_1/other_flow.py` (my_trigger.sh / _pool.sh); see prefect-ko.md §6 (pipeline.py).
 
 Validates workflow wiring only: each @task and config variable stands in for the
 real example/ file (train_prepare.py, train_featurize.py, train.py, validate.py,
@@ -21,7 +21,7 @@ Run by pipeline.py (orchestrator) when the run's payload = experiment_1/other_fl
 Local debugging — run ephemerally with no Prefect server (MLflow tracking also skipped):
     python other_flow.py --run-on local --data-folder <dir>
 """
-__version__ = "0.0.3"
+__version__ = "0.0.4"
 
 import argparse
 import os

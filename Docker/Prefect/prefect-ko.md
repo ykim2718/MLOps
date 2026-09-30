@@ -1,5 +1,5 @@
 # Prefect Pipeline Orchestration on Docker
-Rev. 608 | Created: 2026-06-13 | Updated: 2026-09-30 09:59 CDT
+Rev. 609 | Created: 2026-06-13 | Updated: 2026-09-30 15:31 UTC
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
@@ -248,7 +248,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
 
   왜 다른 머신은 이름이 안 되나 — 기본 `bridge` network 는 **호스트 로컬**이라, 각 머신에 같은 이름 `mlops` 를 만들어도 **이름만 같을 뿐 별개의 network** 입니다. docker 서비스 이름은 그 호스트의 network 안에서만 해석되므로 **머신을 넘지 못합니다.** 그래서 크로스머신 접근은 LAN IP 로 합니다.
 
-  > docker 이름을 **머신을 넘어** 쓰려면 Docker Swarm 의 **overlay network** 가 필요하지만, 전 노드가 **LAN-native Linux** 여야 동작합니다 (Windows/macOS 의 Docker Desktop 노드는 불가 — [docker_network.md §2 Swarm Overlay Network](../docker_network.md#2-swarm-overlay-network)). 이 스택은 OS 혼합·단순성을 위해 기본적으로 **LAN IP 모델** 을 씁니다.
+  > docker 이름을 **머신을 넘어** 쓰려면 Docker Swarm 의 **overlay network** 가 필요하지만, 전 노드가 **LAN-native Linux** 여야 동작합니다 (Windows/macOS 의 Docker Desktop 노드는 불가 — [docker_network-ko.md §2 Swarm Overlay Network](../docker_network-ko.md#2-swarm-overlay-network)). 이 스택은 OS 혼합·단순성을 위해 기본적으로 **LAN IP 모델** 을 씁니다.
 
 #### Create the Network
 

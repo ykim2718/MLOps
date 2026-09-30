@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# healthcheck.sh - health & wiring check for the Prefect MLOps stack (per prefect.md "1. Architecture").
-# __version__ = "0.0.35"  # Semantic Versioning:  Version = Major.Minor.Patch  (bash port of healthcheck.ps1)
+# healthcheck.sh - health & wiring check for the Prefect MLOps stack (per prefect-ko.md "1. Architecture").
+# __version__ = "0.0.36"  # Semantic Versioning:  Version = Major.Minor.Patch  (bash port of healthcheck.ps1)
 #
 # Read-only. It inspects, it never changes anything. It verifies the always-on pieces are up and
 # correctly wired, then prints an ASCII diagram of the architecture with live [ OK ] / [WARN] / [FAIL]:
@@ -198,7 +198,7 @@ get_local_workers "$WORKER_IMAGE" "$NETWORK"
 
 # ---------- 2. render the diagram --------------------------------------------
 echo
-printf '%sArchitecture status  (prefect.md  1. Architecture)%s\n' "$C_CYAN" "$RESET"
+printf '%sArchitecture status  (prefect-ko.md  1. Architecture)%s\n' "$C_CYAN" "$RESET"
 echo
 
 if $netOk; then node OK "docker network: $NETWORK"; else node FAIL "docker network: $NETWORK"; fi
