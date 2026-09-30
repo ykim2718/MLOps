@@ -1,6 +1,6 @@
 # Ubuntu CLI
 
-Rev. 21 | Created: 2026-07-06 | Updated: 2026-09-30 12:42 CDT
+Rev. 22 | Created: 2026-07-06 | Updated: 2026-09-30 21:14 UTC
 
 > Commands in this document are written for **Ubuntu**.
 
@@ -222,7 +222,7 @@ Table 1. SSH connection options
 - **TCP**: Connection-oriented transport protocol used by SSH and most network services.
 - **UID**: User ID; number that identifies a user account.
 
-## Appendix B. Reducing System Resource Usage
+## Appendix B. Ubuntu Resource Optimization
 
 Main ways to cut CPU, RAM, and disk usage so that Ubuntu runs lighter and faster.
 
