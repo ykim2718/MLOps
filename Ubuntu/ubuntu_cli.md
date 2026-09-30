@@ -1,6 +1,6 @@
 # Ubuntu CLI
 
-Rev. 19 | Created: 2026-07-06 | Updated: 2026-09-30 13:00 UTC
+Rev. 20 | Created: 2026-07-06 | Updated: 2026-09-30 14:26 UTC
 
 > Commands in this document are written for **Ubuntu**.
 
@@ -188,11 +188,45 @@ Table 1. SSH connection options
 
 ---
 
-## Appendix A. Reducing System Resource Usage
+## Appendix A. Terminology
+
+- **apt**: Package manager of Ubuntu; installs, updates, and removes software packages.
+- **CLI**: Command-line interface; text commands typed in a terminal.
+- **daemon**: Background process with no terminal, usually started at boot.
+- **dotfile**: File or directory whose name starts with `.`; hidden from plain `ls`.
+- **GID**: Group ID; number that identifies a group.
+- **GNOME**: Default desktop environment of Ubuntu.
+- **GUI**: Graphical user interface; windows, icons, and mouse input.
+- **home directory**: Personal directory of a user, `/home/<USER>`.
+- **interface**: Network connection point of a host, physical or virtual (e.g. `eth0`, `wlan0`, `lo`).
+- **IP address**: Numeric address of a host on a network (e.g. `192.168.0.10`).
+- **LAN**: Local area network; hosts on the same local network segment.
+- **login shell**: Shell started at login; reads the login profile of the user.
+- **loopback**: Virtual interface `lo` through which a host reaches itself (`127.0.0.1`).
+- **MAC address**: Hardware address of a network interface, fixed per device.
+- **port**: Number from 0 to 65535 that identifies a service on a host.
+- **primary group**: Group given to new files of a user; one per user.
+- **private key**: Secret half of a key pair; decrypts or signs, never shared.
+- **public key**: Shareable half of a key pair; encrypts or verifies.
+- **root**: Superuser account with full privileges (UID 0).
+- **service**: Program managed by systemd, usually a daemon.
+- **shell**: Program that reads and runs typed commands (e.g. `bash`).
+- **Snap**: Package format of Canonical that bundles an app with its dependencies.
+- **SSH**: Secure Shell; encrypted protocol for remote login and command execution.
+- **sudo**: Command that runs another command with root privileges.
+- **sudoers**: Configuration file `/etc/sudoers` that defines who may use sudo.
+- **supplementary group**: Additional group of a user beyond the primary group.
+- **symlink**: Symbolic link; file that points to another path.
+- **systemd**: Init system and service manager of Ubuntu; controlled with `systemctl`.
+- **target**: systemd unit that groups services into a system state (e.g. `multi-user.target`).
+- **TCP**: Connection-oriented transport protocol used by SSH and most network services.
+- **UID**: User ID; number that identifies a user account.
+
+## Appendix B. Reducing System Resource Usage
 
 Main ways to cut CPU, RAM, and disk usage so that Ubuntu runs lighter and faster.
 
-### A.1 Switch to CLI-only mode
+### B.1 Switch to CLI-only mode
 
 On a server or a terminal-oriented machine, turning off the desktop GUI (GNOME) alone saves about 1–1.5 GB of RAM or more.
 
@@ -204,7 +238,7 @@ sudo systemctl set-default graphical.target     # Restore GUI mode at boot
 - Takes effect from the next boot.
 - `startx` — Starts the GUI on demand while in text mode.
 
-### A.2 Disable unneeded boot services
+### B.2 Disable unneeded boot services
 
 Background daemons that start at boot hold memory even when unused.
 
@@ -232,7 +266,7 @@ sudo systemctl stop bluetooth       # Stop now
 sudo systemctl disable bluetooth    # Do not start at boot
 ```
 
-### A.3 Clean up unused packages and cache periodically
+### B.3 Clean up unused packages and cache periodically
 
 ```bash
 sudo apt autoremove --purge -y    # Remove unused dependency packages
