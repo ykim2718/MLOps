@@ -1,6 +1,5 @@
 # Prefect Pipeline Orchestration on Docker
-
-Rev. 607 | Created: 2026-06-13 | Updated: 2026-08-14 21:32 CDT
+Rev. 608 | Created: 2026-06-13 | Updated: 2026-09-30 09:59 CDT
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
@@ -558,14 +557,16 @@ worker 는 **`docker` work pool** 을 polling 해 job 마다 `pipeline_flow` 컨
   #
   # Build (once):  docker build -f Dockerfile.worker -t prefect-worker:latest .
   # Start:         ./run_worker.sh --work-pool high_performance
-  # __version__ = "0.0.11"
+  # __version__ = "0.0.14"
   name: prefect-worker   # compose project name baked in (replaces -p); run_worker.sh relies on it
   services:
     prefect_worker:
       image: prefect-worker:latest   # built once from Dockerfile.worker (prefect + prefect-docker)
       env_file:
         - ../docker-compose.env_example       # PREFECT_API_URL (shared, kept at Docker/Prefect root)
-      command: prefect worker start --type docker --pool ${WORK_POOL:-high_performance} --limit ${WORKER_LIMIT:-8} --no-create-pool-if-not-found
+      # --name <hostname>@<LAN IP> (set by run_worker.sh) tells the server which machine this worker runs on;
+      # WORK_QUEUE_OPTION (run_worker.sh --work-queue) is "--work-queue <queue>" for a one-queue worker, else empty
+      command: prefect worker start --type docker --pool ${WORK_POOL:-high_performance} ${WORK_QUEUE_OPTION:-} --limit ${WORKER_LIMIT:-8} --no-create-pool-if-not-found --name ${WORKER_NAME:?run_worker.sh sets WORKER_NAME}
       volumes:
         - /var/run/docker.sock:/var/run/docker.sock   # host docker socket, to spawn sibling containers
       networks:
@@ -581,7 +582,7 @@ worker 는 **`docker` work pool** 을 polling 해 job 마다 `pipeline_flow` 컨
   ```
 
   - `volumes: /var/run/docker.sock` — worker 가 호스트 도커로 `pipeline_flow` 컨테이너를 띄우는 통로입니다. Windows 도 같은 줄로 됩니다 — Docker Desktop 이 Linux 컨테이너용으로 이 경로에 도커 소켓을 노출하기 때문입니다 (호스트의 named pipe `\\.\pipe\docker_engine` 을 컨테이너 안 `/var/run/docker.sock` 로 연결).
-  - `command` — `prefect worker start` 만 합니다. prefect·prefect-docker 는 **이미지에 구워져** 있고 `PREFECT_API_URL` 은 env_file 이 주므로, 부팅 때 설치·export 가 없습니다 (`bash -c` 도 불필요). `--type docker` 로 docker worker 임을 고정하고, `--no-create-pool-if-not-found` 로 **없는 pool 을 자동 생성하지 않습니다** (오타 이름이 들어와도 process pool 이 몰래 생기지 않고 오류로 멈춤; pool 은 server [§4](#4-prefect-server-container) 가 이미 등록). `WORK_POOL`·`WORKER_LIMIT` 는 `docker compose up` 시 셸에서 읽는 변수입니다.
+  - `command` — `prefect worker start` 만 합니다. prefect·prefect-docker 는 **이미지에 구워져** 있고 `PREFECT_API_URL` 은 env_file 이 주므로, 부팅 때 설치·export 가 없습니다 (`bash -c` 도 불필요). `--type docker` 로 docker worker 임을 고정하고, `--no-create-pool-if-not-found` 로 **없는 pool 을 자동 생성하지 않습니다** (오타 이름이 들어와도 process pool 이 몰래 생기지 않고 오류로 멈춤; pool 은 server [§4](#4-prefect-server-container) 가 이미 등록). `WORK_POOL`·`WORKER_LIMIT`·`WORK_QUEUE_OPTION` 은 `docker compose up` 시 셸에서 읽는 변수입니다.
   - `--limit` 은 이 worker 가 **동시에 띄우는 컨테이너 수의 상한** 입니다 (동시성 세 층은 [§4 Work Pool Registration](#work-pool-registration) 의 여러 pool 표 참고).
 
   #### Execution Command
@@ -595,6 +596,7 @@ worker 는 **`docker` work pool** 을 polling 해 job 마다 `pipeline_flow` 컨
   - `run_worker.sh` (코드는 [Appendix H](#appendix-h-run_workersh)) — yaml 을 띄웁니다 (머신마다 1회).
   - `--work-pool <pool-name>` — 이 worker 가 붙을 work pool 이름입니다 (예: `high_performance`).
   - `--worker-limit <limit-count>` — 이 머신이 동시에 띄울 pipeline_flow 컨테이너 수 한도입니다 (기본 8).
+  - `--work-queue <queue>` — 생략하면 pool 의 모든 work queue 를 polling 합니다. 주면 그 queue 만 polling 하는 worker 를 `<hostname>-<queue>@<LAN IP>` 이름과 compose project `prefect-worker-<queue>` 로 따로 띄워, pool 전체를 맡는 worker 와 나란히 돌립니다 ([§5.3](#53-scaling)). server 에 없는 queue 이름이면 기동 전에 멈춥니다.
   - **pool 검증** — 기동 전에 server 에 등록된 **docker 타입** work pool 목록과 대조해, 없는 이름이면 목록을 번호로 보여주고 그중에서 고르게 합니다 (오타·미등록 pool, 그리고 자동 생성된 process pool 까지 걸러 헛도는 것을 막습니다). 조회는 host 의 `prefect` CLI (`work-pool ls --output json`) 로 합니다.
   - `docker compose up` (스크립트 내부) — 컨테이너가 뜨면 그 `command` 인 `prefect worker start` 가 컨테이너 안에서 실행됩니다.
 
@@ -607,6 +609,21 @@ worker 는 **`docker` work pool** 을 polling 해 job 마다 `pipeline_flow` 컨
 ### 5.3 Scaling
 
   **처리량·확장** — `--limit` 을 키우거나, **다른 머신에서 worker 를 더 띄워 같은 pool 에 붙입니다** (그 머신은 `docker-compose.env` 의 `PREFECT_API_URL`=`http://<server IP>:4200/api`, `docker-compose.worker.yml` 의 `networks:` 블록 제거). 여러 worker 는 같은 prefect server 에 있는 pool 의 큐를 나눠 가집니다.
+
+  **Queue 전용 worker** — 다른 run 이 한도를 채워도 곧바로 시작해야 하는 deployment 는 전용 work queue 에 넣고, 그 queue 만 polling 하는 worker 를 따로 띄웁니다. Prefect 에는 이미 도는 run 을 멈추고 자리를 넘기는 preemption 이 없으므로, 급한 run 이 쓸 한도를 따로 떼어 둡니다.
+
+  ```bash
+  # Bash, in PrefectWorker/
+  prefect work-queue create urgent --pool low_performance --priority 1          # once
+  prefect work-pool clear-concurrency-limit low_performance                    # a pool limit caps every queue
+  prefect work-queue set-concurrency-limit default 8 --pool low_performance    # keep the old cap on the other runs
+  ./run_worker.sh --work-pool low_performance --work-queue urgent --worker-limit 2
+  ```
+
+  - `--priority 1` — 여러 queue 에 기다리는 run 이 있으면 숫자가 작은 queue 의 run 을 먼저 내줍니다. 이미 도는 run 에는 영향이 없습니다.
+  - Pool 의 concurrency limit 은 그 pool 의 모든 queue 에 함께 걸립니다. 전용 worker 를 띄워도 pool 한도가 차면 urgent run 이 기다리므로, 한도를 pool 에서 `default` queue 로 옮깁니다.
+  - Deployment 는 `work_queue_name` 으로 queue 를 정합니다 (`deploy(..., work_queue_name="urgent")`). 정하지 않으면 `default` queue 에 들어갑니다.
+  - `--work-queue` 없이 뜬 worker 도 urgent queue 를 polling 하므로, 두 worker 중 먼저 가져간 쪽이 그 run 을 실행합니다.
 
 ### 5.4 Verification
 
@@ -1331,7 +1348,7 @@ echo "[register_variables] set: minio_endpoint, postgresql_host_port, mlflow_tra
 ```bash
 #!/usr/bin/env bash
 # run_worker.sh — start the Prefect worker compose stack on a worker machine.
-# __version__ = "0.0.20"  # Semantic Versioning:  Version = Major.Minor.Patch
+# __version__ = "0.0.24"  # Semantic Versioning:  Version = Major.Minor.Patch
 #
 # Brings up prefect_worker, which polls the given work pool. WORK_POOL/WORKER_LIMIT are read from
 # this shell at "docker compose up" (compose interpolation), so they are exported below.
@@ -1342,16 +1359,27 @@ echo "[register_variables] set: minio_endpoint, postgresql_host_port, mlflow_tra
 #
 #   ./run_worker.sh --work-pool high_performance    # a high-tier machine
 #   ./run_worker.sh --work-pool low_performance     # a low-tier machine
+#   ./run_worker.sh --work-pool low_performance --worker-ip 192.168.0.13   # when the LAN IP is not detected
+#   ./run_worker.sh --work-pool low_performance --work-queue urgent --worker-limit 2   # a second worker, one queue only
+#
+# The worker is named '<hostname>@<LAN IP>' so the Prefect server (and dashboards reading it) can tell
+# which machine each worker runs on; the Prefect API records no host for a worker otherwise.
+# With --work-queue the worker polls that queue of the pool only, is named '<hostname>-<queue>@<LAN IP>', and runs
+# as its own compose project (prefect-worker-<queue>), so it starts and stops beside the pool-wide worker.
 #
 set -euo pipefail
 
 WORK_POOL="high_performance"   # the work pool this machine polls: high_performance | low_performance
 WORKER_LIMIT=8                 # max pipeline_flow containers this machine spawns concurrently
+WORKER_IP=""                   # LAN IP of this machine; empty = detected below
+WORK_QUEUE=""                  # one work queue of the pool to poll; empty = every queue of the pool
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --work-pool)    WORK_POOL="$2"; shift 2 ;;
         --worker-limit) WORKER_LIMIT="$2"; shift 2 ;;
+        --worker-ip)    WORKER_IP="$2"; shift 2 ;;
+        --work-queue)   WORK_QUEUE="$2"; shift 2 ;;
         *) echo "Unknown option: $1" >&2; exit 1 ;;
     esac
 done
@@ -1418,14 +1446,48 @@ else
     echo "Using work pool '$WORK_POOL'."
 fi
 
+# --- Validate the work queue: prefect worker start would silently create a mistyped queue ------------
+if [ -n "$WORK_QUEUE" ] && ! prefect work-queue inspect "$WORK_QUEUE" --pool "$WORK_POOL" >/dev/null 2>&1; then
+    echo "Work queue '$WORK_QUEUE' is not in work pool '$WORK_POOL'. Create it first, e.g.:" >&2
+    echo "  prefect work-queue create $WORK_QUEUE --pool $WORK_POOL --priority 1" >&2
+    exit 1
+fi
+
+# --- Name the worker after this machine: <hostname>@<LAN IP> ---------------------------------------
+# On Windows (Git Bash, or WSL whose own IP is internal) the LAN IP comes from the Windows default-route
+# interface; on Linux from the source address of the default route.
+if [ -z "$WORKER_IP" ] && command -v powershell.exe >/dev/null 2>&1; then
+    WORKER_IP="$(powershell.exe -NoProfile -Command \
+        "(Get-NetIPConfiguration | Where-Object IPv4DefaultGateway | Select-Object -First 1).IPv4Address.IPAddress" \
+        2>/dev/null | tr -d '\r' || true)"
+fi
+if [ -z "$WORKER_IP" ] && command -v ip >/dev/null 2>&1; then
+    WORKER_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") {print $(i + 1); exit}}')"
+fi
+if ! printf '%s' "$WORKER_IP" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+    echo "Could not detect this machine's LAN IP (got '$WORKER_IP'); pass it with --worker-ip <ip>." >&2
+    exit 1
+fi
+PROJECT="prefect-worker"       # the compose file's top-level name
+WORK_QUEUE_OPTION=""
+WORKER_NAME="$(hostname)@${WORKER_IP}"
+if [ -n "$WORK_QUEUE" ]; then
+    PROJECT="prefect-worker-${WORK_QUEUE}"
+    WORK_QUEUE_OPTION="--work-queue ${WORK_QUEUE}"
+    WORKER_NAME="$(hostname)-${WORK_QUEUE}@${WORKER_IP}"
+fi
+echo "Worker name: $WORKER_NAME"
+
 # For the worker compose ${...} interpolation — export so this docker compose up sees them.
 export WORK_POOL
 export WORKER_LIMIT
+export WORKER_NAME
+export WORK_QUEUE_OPTION
 
 # Bring the worker stack down (keeping volumes) and back up in the background.
-# project name comes from the compose file's top-level name: (prefect-worker), so down only ever touches this stack.
-docker compose -f "$COMPOSE" down
-docker compose -f "$COMPOSE" up -d
+# -p names the project, so down only ever touches this stack (the pool-wide worker or one queue's worker).
+docker compose -p "$PROJECT" -f "$COMPOSE" down
+docker compose -p "$PROJECT" -f "$COMPOSE" up -d
 ```
 
 ## Appendix I. credentials.py
