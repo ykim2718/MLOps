@@ -1,5 +1,5 @@
 # run_worker.sh
-Rev. 1 | Created: 2026-09-30 | Updated: 2026-09-30 12:57 CDT
+Rev. 2 | Created: 2026-09-30 | Updated: 2026-09-30 13:06 CDT
 
 > **Goal** — 한 machine 에서 Prefect worker container 를 띄워, 지정한 docker work pool 또는 그 pool 의 work queue 하나에 들어온 run 을 그 machine 이 실행하게 한다. 잘못된 pool·queue 이름으로 worker 가 run 을 하나도 받지 못하는 일은 기동 전에 막는다.
 >
@@ -122,7 +122,7 @@ LAN IP 를 자동으로 읽지 못하는 machine 에서 worker 이름에 넣을 
 ```bash
 #!/usr/bin/env bash
 # run_worker.sh — start the Prefect worker compose stack on a worker machine.
-# __version__ = "0.0.24"  # Semantic Versioning:  Version = Major.Minor.Patch
+# __version__ = "0.0.25"  # Semantic Versioning:  Version = Major.Minor.Patch
 #
 # Brings up prefect_worker, which polls the given work pool. WORK_POOL/WORKER_LIMIT are read from
 # this shell at "docker compose up" (compose interpolation), so they are exported below.
@@ -133,7 +133,7 @@ LAN IP 를 자동으로 읽지 못하는 machine 에서 worker 이름에 넣을 
 #
 #   ./run_worker.sh --work-pool high_performance    # a high-tier machine
 #   ./run_worker.sh --work-pool low_performance     # a low-tier machine
-#   ./run_worker.sh --work-pool low_performance --worker-ip 192.168.0.13   # when the LAN IP is not detected
+#   ./run_worker.sh --work-pool low_performance --worker-ip <LAN_IP>   # when the LAN IP is not detected
 #   ./run_worker.sh --work-pool low_performance --work-queue urgent --worker-limit 2   # a second worker, one queue only
 #
 # The worker is named '<hostname>@<LAN IP>' so the Prefect server (and dashboards reading it) can tell
