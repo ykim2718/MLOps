@@ -1,8 +1,6 @@
-> ⚠️ **This is an auto-synced copy. Do not edit here.**
-
 # VS Code Development with Docker Desktop and a Prebuilt Image
 
-Rev. 36 | Created: 2026-07-14 | Updated: 2026-08-14 21:32 CDT
+Rev. 37 | Created: 2026-07-14 | Updated: 2026-09-30 00:17 CDT
 
 Docker Desktop에서 `yrocket/pipeline-flow:latest` 이미지로 컨테이너를 실행하고, VS Code를 컨테이너 내부에 연결하여 개발 환경으로 사용한다.
 

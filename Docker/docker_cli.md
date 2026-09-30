@@ -1,8 +1,6 @@
-> ⚠️ **This is an auto-synced copy.** Do not edit here.
-
 # Docker CLI (Command Line Interface)
 
-Rev. 108 | Created: 2026-06-15 | Updated: 2026-08-14 21:32 CDT
+Rev. 109 | Created: 2026-06-15 | Updated: 2026-09-30 00:17 CDT
 
 각 컴포넌트를 도커로 띄우고 운영할 때 공통으로 쓰는 명령을 모았습니다.
 

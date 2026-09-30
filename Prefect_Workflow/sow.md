@@ -1,8 +1,6 @@
-> ⚠️ **This is an auto-synced copy.** Do not edit here.
-
 # Statement of Work (작업 명세서)
 
-Rev. 12 | Created: 2026-06-21 | Updated: 2026-08-14 21:32 CDT
+Rev. 13 | Created: 2026-06-21 | Updated: 2026-09-30 00:17 CDT
 
 | Field | Content |
 |---|---|
