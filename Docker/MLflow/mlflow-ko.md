@@ -1,6 +1,6 @@
 # MLflow — Experiment Tracking & Model Registry
 
-Rev. 57 | Created: 2026-06-15 | Updated: 2026-09-30 00:17 CDT
+Rev. 58 | Created: 2026-06-15 | Updated: 2026-09-30 13:12 CDT
 
 MLflow 는 실험의 **파라미터·지표를 추적** 하고, 학습된 **모델을 레지스트리로 관리·배포·서빙** 하는 도구입니다. 이 스택에서는 저장소를 두 곳으로 나눠, 가벼운 메타데이터는 메타데이터 DB 에, 실제 산출물은 오브젝트 스토리지에 둡니다.
 
@@ -105,7 +105,7 @@ docker compose up -d
   # docker-compose.env_example  (all values are CHANGE_ME placeholders — do not expose real values)
   POSTGRES_USER=CHANGE_ME             # backend (PostgreSQL mlflow DB) account — same value as PostgreSQL
   POSTGRES_PASSWORD=CHANGE_ME
-  POSTGRES_HOST_PORT=192.168.0.13:5432  # backend host:port — postgres 가 다른 호스트면 그 LAN IP:포트
+  POSTGRES_HOST_PORT=<POSTGRESQL_IP>:5432  # backend host:port — postgres 가 다른 호스트면 그 LAN IP:포트
   AWS_ACCESS_KEY_ID=CHANGE_ME         # artifact (MinIO/S3) key — same value as the MinIO root account (or an issued key)
   AWS_SECRET_ACCESS_KEY=CHANGE_ME
   MLFLOW_S3_ENDPOINT_URL=http://minio:9000

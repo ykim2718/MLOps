@@ -1,6 +1,6 @@
 # Docker Network
 
-Rev. 4 | Created: 2026-07-12 | Updated: 2026-09-30 00:17 CDT
+Rev. 5 | Created: 2026-07-12 | Updated: 2026-09-30 13:12 CDT
 
 이 스택의 컨테이너 간 통신에 쓰는 docker network 를 정리합니다. 기본은 **Local Network** (호스트별 bridge + 크로스머신은 LAN IP) 이고, 전 노드가 LAN-native Linux 인 경우에 한해 **Swarm Overlay Network** 로 docker 서비스 이름을 머신 너머까지 통일할 수 있습니다.
 
@@ -9,7 +9,7 @@ Rev. 4 | Created: 2026-07-12 | Updated: 2026-09-30 00:17 CDT
 이 스택의 기본 방식입니다. 각 호스트에 로컬 bridge network `mlops` 를 두고, 접근 방식은 컨테이너가 **같은 머신**인지 **다른 머신**인지에 따라 갈립니다 (**LAN IP 모델**):
 
 - **같은 머신** → docker **서비스 이름** (`prefect_server`·`minio`·`postgres`·`mlflow`). 같은 호스트의 `mlops` 에 붙은 컨테이너끼리 이름으로 바로 찾습니다.
-- **다른 머신** → 그 서비스가 있는 **호스트의 LAN IP + 게시 포트** (예: `http://192.168.0.13:4200/api`, `<MinIO 호스트 IP>:9000`).
+- **다른 머신** → 그 서비스가 있는 **호스트의 LAN IP + 게시 포트** (예: `http://<SERVER_IP>:4200/api`, `<MinIO 호스트 IP>:9000`).
 
 왜 다른 머신은 이름이 안 되나 — 기본 `bridge` network 는 **호스트 로컬**이라, 각 머신에 같은 이름 `mlops` 를 만들어도 **이름만 같을 뿐 별개의 network** 입니다. docker 서비스 이름은 그 호스트의 network 안에서만 해석되므로 **머신을 넘지 못합니다.** 그래서 크로스머신 접근은 LAN IP 로 합니다. 이름을 머신 너머까지 쓰려면 [§2 Swarm Overlay Network](#2-swarm-overlay-network) 가 필요하지만, 전 노드가 LAN-native Linux 여야 합니다.
 
