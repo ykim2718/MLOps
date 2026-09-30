@@ -1,6 +1,6 @@
 # 우분투 원격 접속 서버 구축
 
-Rev. 20 | Created: 2026-07-14 | Updated: 2026-09-28 23:49 UTC
+Rev. 21 | Created: 2026-07-14 | Updated: 2026-09-30 15:30 UTC
 
 <table width="100%">
 <tr>
@@ -54,7 +54,7 @@ Rev. 20 | Created: 2026-07-14 | Updated: 2026-09-28 23:49 UTC
 - 부팅 USB 제작: Rufus로 `ubuntu-26.04-desktop-amd64.iso` 기록
   - 파티션 구성 GPT / 대상 시스템 UEFI / ISO 모드
 - 설치: "Erase disk and install Ubuntu"로 기존 OS 완전 삭제
-- 부팅 USB 제작 및 ISO 관련 문제는 → **Appendix A**, **Appendix B** 참조
+- 부팅 USB 제작 및 ISO 관련 문제는 → **[Appendix B](#appendix-b-rufus-multiple-partitions-usb-write-failure)**, **[Appendix C](#appendix-c-bad-iso-read--source-drive-m-problem)** 참조
 
 ### 2.2 Install NoMachine server (server, laptop)
 - 패키지: `nomachine_9.8.2_1_amd64.deb` (DEB / amd64)
@@ -69,8 +69,8 @@ Rev. 20 | Created: 2026-07-14 | Updated: 2026-09-28 23:49 UTC
   sudo systemctl status nxserver     # active (running)
   ```
 - 서비스는 부팅 시 자동 시작되어 서버 용도에 적합
-- RDP → NoMachine 전환 배경은 → **Appendix C** 참조
-- NoMachine 패키지 다운로드 및 형식(DEB/RPM) 문제는 → **Appendix D** 참조
+- RDP → NoMachine 전환 배경은 → **[Appendix D](#appendix-d-rdp-gnome-remote-desktop-limitations--display--keyboard-issues)** 참조
+- NoMachine 패키지 다운로드 및 형식(DEB/RPM) 문제는 → **[Appendix E](#appendix-e-nomachine-package-download-problems)** 참조
 
 ### 2.3 Auto-login setup (server, laptop)
 - 파일 편집:
@@ -84,7 +84,7 @@ Rev. 20 | Created: 2026-07-14 | Updated: 2026-09-28 23:49 UTC
   AutomaticLogin=<USERNAME>
   ```
 - 재부팅 시 비밀번호 입력 없이 바탕화면까지 자동 진입 → 원격 접속 가능한 상태 상시 유지
-- 이 설정이 필요했던 이유(헤드리스 접속 실패)는 → **Appendix E** 참조
+- 이 설정이 필요했던 이유(헤드리스 접속 실패)는 → **[Appendix F](#appendix-f-logout-headless-connection-failure--worked-around-via-auto-login)** 참조
 
 ### 2.4 Windows client connection (client, desktop)
 - **NoMachine** 클라이언트 실행 (RDP 클라이언트 `mstsc` 아님)
@@ -92,18 +92,52 @@ Rev. 20 | Created: 2026-07-14 | Updated: 2026-09-28 23:49 UTC
   - Host: `<SERVER_IP>`
   - 계정: `<USERNAME>` / 우분투 비밀번호
 - 결과: 화면 스케일링 정상, 키보드 정상 동작
-- RDP(mstsc)와의 혼동 문제는 → **Appendix F** 참조
+- RDP(mstsc)와의 혼동 문제는 → **[Appendix G](#appendix-g-client-connection-error--mstsc-rdp-vs-nomachine-confusion)** 참조
 
 ### 2.5 Operating rules
 - **재부팅(O)**: 자동 로그인으로 바탕화면 자동 진입 → 접속 정상
-- **로그아웃(X)**: GDM 로그인 화면으로 이동하며, 원격에서 키보드 입력 불가 (→ **Appendix E**)
+- **로그아웃(X)**: GDM 로그인 화면으로 이동하며, 원격에서 키보드 입력 불가 (→ **[Appendix F](#appendix-f-logout-headless-connection-failure--worked-around-via-auto-login)**)
 - 원격에서 노트북을 껐다 켜거나 재부팅해도, 자동 로그인 덕분에 부팅만 되면 재접속 가능
+
+---
+
+## Appendix A. Terminology
+
+- **amd64**: 64-bit x86 CPU architecture 의 Debian/Ubuntu 표기. `x86_64` 와 같음.
+- **auto-login**: 부팅 시 비밀번호 입력 없이 지정 사용자로 로그인하는 GDM 설정.
+- **CLI**: Command-line interface. terminal 에 입력하는 text 명령 방식.
+- **DEB**: Debian/Ubuntu 계열 package 형식 (`.deb`).
+- **diskpart**: Windows 의 disk·partition 관리 명령줄 도구.
+- **dpkg**: `.deb` package 를 설치·제거하는 저수준 도구.
+- **FUSE**: Filesystem in Userspace. kernel 수정 없이 file system 을 mount 하는 방식.
+- **GDM**: GNOME Display Manager. 로그인 화면과 auto-login 담당.
+- **GNOME**: Ubuntu 기본 desktop 환경.
+- **GPT**: GUID Partition Table. UEFI system 의 partition table 형식.
+- **headless**: 로그인된 화면 session 없이 운영하는 상태.
+- **ISO**: 광디스크 image file 형식. OS 설치 매체 배포에 사용.
+- **LAN**: Local area network. 같은 가정·사무실 내부 network.
+- **mount**: disk 나 공유 folder 를 directory 경로에 연결해 접근 가능하게 하는 것.
+- **mstsc**: Windows 원격 데스크톱 연결 client. RDP 사용.
+- **NoMachine**: NX protocol 기반 원격 데스크톱 software.
+- **NX protocol**: NoMachine 의 원격 화면 전송 protocol. 기본 port 4000.
+- **nxserver**: NoMachine server service.
+- **PAM**: Pluggable Authentication Modules. Linux 로그인 인증 framework.
+- **port**: host 에서 service 를 구분하는 0–65535 사이의 번호.
+- **RDP**: Remote Desktop Protocol. Microsoft 의 원격 데스크톱 protocol.
+- **RPM**: Red Hat 계열 package 형식. Ubuntu 에서 설치 불가.
+- **Rufus**: Windows 용 부팅 USB 제작 도구.
+- **SFTP**: SSH 위에서 동작하는 file 전송 protocol. 기본 port 22.
+- **SHA256**: file 무결성 확인에 쓰는 hash 함수.
+- **SSH**: Secure Shell. 암호화된 원격 로그인·명령 실행 protocol.
+- **UEFI**: BIOS 를 대체하는 PC firmware interface.
+- **Wayland**: Ubuntu 기본 display server protocol. X11 의 후속.
+- **X11**: 전통적인 Linux display server protocol.
 
 ---
 
 # Appendix — 문제 해결 기록
 
-## Appendix A. Rufus "multiple partitions" USB write failure
+## Appendix B. Rufus "multiple partitions" USB write failure
 
 **Problems**
 - Rufus에서 ISO/DD 모드 모두 "실패"
@@ -127,7 +161,7 @@ exit
 
 ---
 
-## Appendix B. Bad ISO read — source drive (M:) problem
+## Appendix C. Bad ISO read — source drive (M:) problem
 
 **Problems**
 - Rufus 기록 중 `libcdio: fread(): Permission denied`, `minimal.squashfs`(3.2GB) 읽기 실패
@@ -146,7 +180,7 @@ exit
 
 ---
 
-## Appendix C. RDP (gnome-remote-desktop) limitations — display & keyboard issues
+## Appendix D. RDP (gnome-remote-desktop) limitations — display & keyboard issues
 
 **Problems**
 1. 창은 큰데 우분투 화면만 작게 표시 (검은 여백)
@@ -164,7 +198,7 @@ exit
 
 ---
 
-## Appendix D. NoMachine package download problems
+## Appendix E. NoMachine package download problems
 
 **Problem 1 — wrong download URL**
 - 명령줄(`wget`/`curl -L`)로 받으면 실제 .deb가 아닌 HTML 페이지가 저장됨
@@ -190,7 +224,7 @@ sudo apt install -f
 
 ---
 
-## Appendix E. Logout (headless) connection failure → worked around via auto-login
+## Appendix F. Logout (headless) connection failure → worked around via auto-login
 
 **Goal**
 - 화면 크기 문제의 근본 해결을 위해, 노트북을 로그아웃 상태로 두고 NoMachine 가상 디스플레이로 접속(헤드리스)
@@ -221,7 +255,7 @@ sudo apt install -f
 
 ---
 
-## Appendix F. Client connection error — mstsc (RDP) vs NoMachine confusion
+## Appendix G. Client connection error — mstsc (RDP) vs NoMachine confusion
 
 **Problems**
 - Windows에서 접속 시 `mstsc error code: 0x904, Extended error code: 0x7`
@@ -241,7 +275,7 @@ sudo apt install -f
 
 ---
 
-## Appendix G. File transfer — NoMachine "Connect a disk" & SFTP
+## Appendix H. File transfer — NoMachine "Connect a disk" & SFTP
 
 **Situation**
 - NoMachine으로 접속한 Ubuntu 서버 ↔ Windows 클라이언트 간 파일을 주고받아야 함
