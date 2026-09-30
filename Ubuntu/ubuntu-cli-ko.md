@@ -1,6 +1,6 @@
 # Ubuntu CLI (Korean)
 
-Rev. 0 | Created: 2026-09-30 | Updated: 2026-09-30 14:26 UTC
+Rev. 1 | Created: 2026-09-30 | Updated: 2026-09-30 12:42 CDT
 
 > 이 문서의 명령은 **Ubuntu** 기준이다.
 
@@ -172,7 +172,7 @@ ssh <USER>@<HOST_IP>          # Log in to a remote host as <USER>
 ssh ubuntu@192.168.0.10       # Example
 ```
 
-<img src="ubuntu_cli_fig/fig1.png" width="720" style="max-width: 100%;" alt="Fig 1">
+<img src="ubuntu-cli_fig/fig1.png" width="720" style="max-width: 100%;" alt="Fig 1">
 
 Fig 1. SSH 는 client 와 server 가 주고받은 key 로 통신을 암호화한다
 

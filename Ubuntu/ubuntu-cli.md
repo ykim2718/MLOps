@@ -1,6 +1,6 @@
 # Ubuntu CLI
 
-Rev. 20 | Created: 2026-07-06 | Updated: 2026-09-30 14:26 UTC
+Rev. 21 | Created: 2026-07-06 | Updated: 2026-09-30 12:42 CDT
 
 > Commands in this document are written for **Ubuntu**.
 
@@ -172,7 +172,7 @@ ssh <USER>@<HOST_IP>          # Log in to a remote host as <USER>
 ssh ubuntu@192.168.0.10       # Example
 ```
 
-<img src="ubuntu_cli_fig/fig1.png" width="720" style="max-width: 100%;" alt="Fig 1">
+<img src="ubuntu-cli_fig/fig1.png" width="720" style="max-width: 100%;" alt="Fig 1">
 
 Fig 1. SSH encrypts traffic with keys exchanged between client and server
 
