@@ -1,5 +1,5 @@
 # Prefect Pipeline Orchestration on Docker
-Rev. 610 | Created: 2026-06-13 | Updated: 2026-09-30 12:42 CDT
+Rev. 611 | Created: 2026-06-13 | Updated: 2026-09-30 12:51 CDT
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
@@ -610,20 +610,7 @@ worker 는 **`docker` work pool** 을 polling 해 job 마다 `pipeline_flow` 컨
 
   **처리량·확장** — `--limit` 을 키우거나, **다른 머신에서 worker 를 더 띄워 같은 pool 에 붙입니다** (그 머신은 `docker-compose.env` 의 `PREFECT_API_URL`=`http://<server IP>:4200/api`, `docker-compose.worker.yml` 의 `networks:` 블록 제거). 여러 worker 는 같은 prefect server 에 있는 pool 의 큐를 나눠 가집니다.
 
-  **Queue 전용 worker** — 다른 run 이 한도를 채워도 곧바로 시작해야 하는 deployment 는 전용 work queue 에 넣고, 그 queue 만 polling 하는 worker 를 따로 띄웁니다. Prefect 에는 이미 도는 run 을 멈추고 자리를 넘기는 preemption 이 없으므로, 급한 run 이 쓸 한도를 따로 떼어 둡니다.
-
-  ```bash
-  # Bash, in PrefectWorker/
-  prefect work-queue create urgent --pool low_performance --priority 1          # once
-  prefect work-pool clear-concurrency-limit low_performance                    # a pool limit caps every queue
-  prefect work-queue set-concurrency-limit default 8 --pool low_performance    # keep the old cap on the other runs
-  ./run_worker.sh --work-pool low_performance --work-queue urgent --worker-limit 2
-  ```
-
-  - `--priority 1` — 여러 queue 에 기다리는 run 이 있으면 숫자가 작은 queue 의 run 을 먼저 내줍니다. 이미 도는 run 에는 영향이 없습니다.
-  - Pool 의 concurrency limit 은 그 pool 의 모든 queue 에 함께 걸립니다. 전용 worker 를 띄워도 pool 한도가 차면 urgent run 이 기다리므로, 한도를 pool 에서 `default` queue 로 옮깁니다.
-  - Deployment 는 `work_queue_name` 으로 queue 를 정합니다 (`deploy(..., work_queue_name="urgent")`). 정하지 않으면 `default` queue 에 들어갑니다.
-  - `--work-queue` 없이 뜬 worker 도 urgent queue 를 polling 하므로, 두 worker 중 먼저 가져간 쪽이 그 run 을 실행합니다.
+  **Queue 전용 worker** — 다른 run 이 한도를 채워도 곧바로 시작해야 하는 deployment 는 전용 work queue 에 넣고, 그 queue 만 polling 하는 worker 를 `./run_worker.sh --work-pool <pool> --work-queue <queue> --worker-limit <N>` 으로 pool 전체를 맡는 worker 옆에 띄웁니다. Work queue 의 원리 (default queue · priority · concurrency limit · status) 와 만들기 · deployment 배정 · 전용 worker · 검증 · 운영 절차는 [prefect-work-queue-ko.md](prefect-work-queue-ko.md) 를 따릅니다.
 
 ### 5.4 Verification
 
@@ -1118,7 +1105,7 @@ Flow Runs
 - **§5 Worker**
   - `prefect work-pool get-default-base-job-template --type docker` — 도커 worker 의 기본 base job template 을 출력합니다 (§5.1).
   - `prefect worker start --pool <name> [--limit N]` — worker 를 기동해 그 pool 을 polling 하며 job 을 실행합니다 (§5.2).
-  - `prefect work-pool set-concurrency-limit <pool> <N>` — pool 전체 동시 실행 상한을 설정합니다 (§5.3).
+  - `prefect work-pool set-concurrency-limit <pool> <N>` — pool 전체 동시 실행 상한을 설정합니다 ([§4 Work Pool Registration](#work-pool-registration)).
 - **§6 Pipeline Flow**
   - `prefect deploy` (또는 `flow.deploy(...)`) — deployment 를 등록합니다 (§6.2).
   - `prefect deployment ls` — server 에 등록된 deployment 를 표 (이름·ID·Work Pool) 로 출력합니다. 등급별 `high`·`low` 가 각자 pool 로 올라갔는지 확인합니다 (§6.2).
