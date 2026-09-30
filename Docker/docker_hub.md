@@ -1,5 +1,5 @@
 # Docker Hub (Image Registry)
-Rev. 8 | Created: 2026-07-03 | Updated: 2026-09-30 07:59 CDT
+Rev. 9 | Created: 2026-07-03 | Updated: 2026-09-30 09:53 CDT
 
 - [1. Auth](#1-auth)
 - [2. Upload — commit · tag · push](#2-upload--commit--tag--push)
@@ -81,6 +81,31 @@ docker image inspect <image>:<tag>             # 이미 받은 로컬 이미지�
 ## 5. Private Registry
 
 사설 registry 는 `registry:2` image 로 LAN 안에 띄우는 image 저장 server 입니다. Docker Hub 와 같은 push·pull 명령을 쓰며, 상대 쪽에 없는 layer 만 주고받으므로 code 만 바뀐 image 는 바뀐 layer 만 전송됩니다.
+
+### Flow
+
+Fig 1 은 image 가 registry 를 띄운 machine 에서 받는 machine 까지 가는 차례입니다.
+
+```text
+[registry machine]
+  docker build       <image>:<tag>
+  docker tag         localhost:12357/<image>:<tag>
+  docker push   ──►  registry container (host port 12357, volume registry-data)
+                           │  only the layers the pulling machine lacks
+                           ▼
+[pulling machine]    daemon.json: "insecure-registries": ["<host>:12357"]
+  docker pull        <host>:12357/<image>:<tag>
+  docker run         <host>:12357/<image>:<tag>
+```
+
+<a id="fig-1"></a>
+Fig 1. Private registry flow
+
+작업은 처음 한 번 하는 설정과 image 를 바꿀 때마다 하는 일로 나뉩니다.
+
+- 처음 한 번: registry container 기동과 방화벽 TCP 12357 inbound 허용 (Server), 받는 machine 마다 `insecure-registries` 등록 (Pull).
+- Image 를 바꿀 때마다: registry 를 띄운 machine 에서 build 뒤 tag·push (Push), 받는 machine 에서 pull (Pull).
+- 같은 tag (예: `latest`) 로 다시 push 한 image 는 받는 machine 이 다시 pull 해야 새 판으로 바뀝니다.
 
 ### Server
 
