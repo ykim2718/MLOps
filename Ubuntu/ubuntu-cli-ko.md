@@ -1,6 +1,6 @@
 # Ubuntu CLI (Korean)
 
-Rev. 2 | Created: 2026-09-30 | Updated: 2026-09-30 21:14 UTC
+Rev. 3 | Created: 2026-09-30 | Updated: 2026-09-30 21:33 UTC
 
 > 이 문서의 명령은 **Ubuntu** 기준이다.
 
@@ -194,6 +194,7 @@ Table 1. SSH 접속 option
 - **CLI**: Command-line interface. terminal 에 입력하는 text 명령 방식.
 - **daemon**: terminal 없이 background 에서 도는 process. 보통 부팅 시 시작.
 - **dotfile**: 이름이 `.` 으로 시작하는 file 이나 directory. 그냥 `ls` 로는 보이지 않음.
+- **GDM**: GNOME Display Manager. Ubuntu desktop 의 그래픽 로그인 화면.
 - **GID**: Group ID. group 을 식별하는 번호.
 - **GNOME**: Ubuntu 의 기본 desktop 환경.
 - **GUI**: Graphical user interface. window, icon, mouse 입력 방식.
@@ -221,6 +222,7 @@ Table 1. SSH 접속 option
 - **target**: service 들을 하나의 system 상태로 묶는 systemd unit (예: `multi-user.target`).
 - **TCP**: SSH 와 대부분의 network service 가 쓰는 연결 지향 transport protocol.
 - **UID**: User ID. 사용자 계정을 식별하는 번호.
+- **xinit**: `startx` 를 제공하는 package. Ubuntu desktop 에는 기본 설치되지 않음.
 
 ## Appendix B. Ubuntu Resource Optimization
 
@@ -233,10 +235,12 @@ server 나 terminal 위주로 쓰는 machine 에서는 desktop GUI (GNOME) 를 �
 ```bash
 sudo systemctl set-default multi-user.target    # Boot into text (terminal) mode by default
 sudo systemctl set-default graphical.target     # Restore GUI mode at boot
+sudo reboot                                     # Reboot to apply the new default
 ```
 
-- 다음 부팅부터 적용.
-- `startx` — text mode 에서 필요할 때 GUI 를 시작.
+- 다음 부팅부터 적용. 재부팅은 `sudo reboot`.
+- `startx` — 현재 session 에만 GUI 를 띄움. 다음 부팅은 여전히 text mode.
+- `sudo systemctl start gdm3` — `startx` 가 없을 때 (`xinit` 미설치) 그래픽 로그인 화면을 띄움.
 
 ### B.2 Disable unneeded boot services
 
