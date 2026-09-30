@@ -1,5 +1,5 @@
 # Prefect Work Queue
-Rev. 2 | Created: 2026-09-30 | Updated: 2026-09-30 12:59 CDT
+Rev. 3 | Created: 2026-09-30 | Updated: 2026-09-30 13:01 CDT
 
 - [1. Purpose](#1-purpose)
 - [2. Summary](#2-summary)
@@ -303,7 +303,7 @@ Table 5. prefect work-queue subcommands
 
 ## Appendix C. Urgent Queue
 
-`low_performance` pool 의 `urgent` queue 는 도는 run 을 취소하는 deployment 하나를 위해 만들었다. 이 appendix 는 그 queue 를 만든 목적, 적용한 명령, 그리고 2026-09-30 에 server 에서 읽은 상태를 적는다.
+`low_performance` pool 의 `urgent` queue 는 도는 run 을 취소하는 deployment 하나를 위해 만들었다. 이 appendix 는 그 queue 를 만든 목적, 적용한 명령, 그리고 적용 뒤 server 에서 읽은 상태를 적는다.
 
 ### C.1 Purpose
 
@@ -313,7 +313,7 @@ Table 6. Deployments of the pool that the urgent queue serves
 
 | Deployment                      | Queue     | Parameters                                                  | Schedule |
 | :-----------------------------: | :-------: | :---------------------------------------------------------: | :------: |
-| `finance/webull-subscribe`      | `default` | subscribe AAPL and SOXL quote and snapshot, save-to watched_stock_prices_basic_from_webull | none     |
+| `finance/webull-subscribe`      | `default` | subscribe quote and snapshot of given symbols, save to a given collection | none     |
 | `finance/webull-subscribe-stop` | `urgent`  | `cancel_deployment_runs -deployment webull-subscribe`       | none     |
 
 두 deployment 는 schedule 없이 사람이 trigger 한다. 취소 run 은 deployment 이름 `webull-subscribe` 의 도는 run 을 취소하고 끝난다.
@@ -326,16 +326,16 @@ Table 6. Deployments of the pool that the urgent queue serves
 prefect work-queue create urgent --pool low_performance --priority 1        # step 1
 prefect work-pool clear-concurrency-limit low_performance                  # step 2, first half
 prefect work-queue set-concurrency-limit default 6 --pool low_performance  # step 2, second half
-prefect worker start --pool low_performance --work-queue urgent --name yrocket-nb1-urgent@<LAN_IP>   # step 4
+prefect worker start --pool low_performance --work-queue urgent --name <HOSTNAME>-urgent@<LAN_IP>   # step 4
 ```
 
 - Step 3 은 `finance/webull-subscribe-stop` 을 `work_pool_name="low_performance"`, `work_queue_name="urgent"` 로 등록한 것이다 ([5.3](#53-assigning-a-deployment)).
-- 전용 worker 는 pool 전체를 맡는 worker `yrocket-nb1@<LAN_IP>` 와 같은 machine 에서 돈다. 이름 뒤의 `-urgent` 가 전용 worker 를 가리킨다 ([5.4](#54-starting-a-dedicated-worker)).
+- 전용 worker 는 pool 전체를 맡는 worker `<HOSTNAME>@<LAN_IP>` 와 같은 machine 에서 돈다. 이름 뒤의 `-urgent` 가 전용 worker 를 가리킨다 ([5.4](#54-starting-a-dedicated-worker)).
 - Step 2 의 `6` 은 pool 에 걸려 있던 한도이다 ([C.3](#c3-server-state)).
 
 ### C.3 Server State
 
-2026-09-30 에 `prefect` CLI 로 읽은 server 의 상태이다. Queue 와 deployment 와 worker 는 C.2 대로 있고, pool 한도는 아직 pool 에 남아 있다.
+적용 뒤 `prefect` CLI 로 읽은 server 의 상태이다. Queue 와 deployment 와 worker 는 C.2 대로 있고, pool 한도는 아직 pool 에 남아 있다.
 
 ```text
 Work Queues in Work Pool 'low_performance'
@@ -349,5 +349,5 @@ Work Queues in Work Pool 'low_performance'
 
 - `urgent` 가 priority 1 이고, pool 을 만들 때 1 이었던 `default` 는 2 로 밀렸다 ([4.2](#42-priority)).
 - `prefect work-pool inspect low_performance` 의 `concurrency_limit` 은 `6` 이고, 두 queue 의 한도는 `None` 이다. Step 2 의 두 명령은 아직 적용되지 않은 상태이며, pool 의 run 이 6 개 돌면 `urgent` queue 의 run 도 pool 한도에 막혀 기다린다 ([4.3](#43-concurrency-limit)). C.2 의 두 번째와 세 번째 명령을 실행하면 한도가 `default` queue 로 옮겨 간다.
-- `low_performance` pool 의 worker 는 `yrocket-nb1@<LAN_IP>` 와 `yrocket-nb1-urgent@<LAN_IP>` 둘이고 모두 `ONLINE` 이다. `urgent` queue 는 두 worker 가 함께 polling 하므로, 취소 run 은 둘 중 먼저 가져간 쪽이 실행한다 ([4.5](#45-worker-polling)).
+- `low_performance` pool 의 worker 는 `<HOSTNAME>@<LAN_IP>` 와 `<HOSTNAME>-urgent@<LAN_IP>` 둘이고 모두 `ONLINE` 이다. `urgent` queue 는 두 worker 가 함께 polling 하므로, 취소 run 은 둘 중 먼저 가져간 쪽이 실행한다 ([4.5](#45-worker-polling)).
 - `prefect deployment inspect "finance/webull-subscribe-stop"` 의 `work_queue_name` 은 `urgent` 이고, `finance/webull-subscribe` 의 것은 `default` 이다.
