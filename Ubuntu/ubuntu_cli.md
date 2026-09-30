@@ -1,6 +1,6 @@
 # Ubuntu CLI
 
-Rev. 17 | Created: 2026-07-06 | Updated: 2026-09-28 23:56 UTC
+Rev. 18 | Created: 2026-07-06 | Updated: 2026-09-30 03:19 UTC
 
 > Commands in this document are written for **Ubuntu**.
 
@@ -162,6 +162,29 @@ sudo bash -c 'apt update && apt install -y curl && systemctl restart docker'
 ```bash
 sudo !!    # Repeat the last command with sudo prepended
 ```
+
+## 5. SSH
+
+### 5.1 Connect to another Linux host
+
+```bash
+ssh <USER>@<HOST_IP>          # Log in to a remote host as <USER>
+ssh ubuntu@192.168.0.10       # Example
+```
+
+<img src="ubuntu_cli_fig/fig1.png" width="480" style="max-width: 100%;" alt="Fig 1">
+
+Fig 1. SSH encrypts traffic with keys exchanged between client and server
+
+### 5.2 Connection options
+
+Table 1. SSH connection options
+
+| Case | Command |
+|---|---|
+| Default port (22) | `ssh user@192.168.0.10` |
+| Custom port (e.g. 2222) | `ssh -p 2222 user@192.168.0.10` |
+| Private key file (`.pem`, `id_rsa`) | `ssh -i /path/to/key.pem user@192.168.0.10` |
 
 ---
 
