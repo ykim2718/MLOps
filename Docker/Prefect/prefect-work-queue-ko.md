@@ -1,5 +1,5 @@
 # Prefect Work Queue
-Rev. 1 | Created: 2026-09-30 | Updated: 2026-09-30 12:57 CDT
+Rev. 2 | Created: 2026-09-30 | Updated: 2026-09-30 12:59 CDT
 
 - [1. Purpose](#1-purpose)
 - [2. Summary](#2-summary)
@@ -30,7 +30,7 @@ Rev. 1 | Created: 2026-09-30 | Updated: 2026-09-30 12:57 CDT
 ## 1. Purpose
 
 - **Problem Statement**: work pool 하나의 concurrency limit 과 worker 의 `--limit` 을 그 pool 의 모든 deployment 가 나눠 쓰므로, 오래 도는 run 이 한도를 채우면 곧바로 시작해야 하는 run 도 `Late` 상태로 기다린다. Prefect 에는 도는 run 을 멈추고 자리를 넘기는 preemption 이 없다.
-- **Goal**: 실무자가 work queue 를 만들고, deployment 를 그 queue 에 배정하고, 그 queue 만 polling 하는 worker 를 띄워, 지정한 deployment 의 run 이 pool 의 다른 run 이 한도를 채운 상태에서도 그 queue 의 한도 안에서 바로 시작하게 한다.
+- **Goal**: 실무자의 Prefect Work Pool & Queue Guide 로서, 실무자가 work queue 를 만들고, deployment 를 그 queue 에 배정하고, 그 queue 만 polling 하는 worker 를 띄워, 지정한 deployment 의 run 이 pool 의 다른 run 이 한도를 채운 상태에서도 그 queue 의 한도 안에서 바로 시작하게 한다.
 - **Non-Goal**: work pool 등록, base job template, worker image build, Prefect server 설치는 다루지 않는다.
 
 ## 2. Summary
