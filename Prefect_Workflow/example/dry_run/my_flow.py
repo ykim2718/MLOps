@@ -8,13 +8,13 @@ train_prepare also counts the files under --data-folder and logs that to the
 Prefect run log + MLflow, so `python my_flow.py --data-folder <dir>` walks the
 whole prepare -> featurize -> train -> validate / test path end to end.
 
-Run by pipeline.py (orchestrator, prefect.md §4.3):
+Run by pipeline.py (orchestrator, prefect-ko.md §4.3):
     python my_flow.py --submitter <m> --data-folder <dir>
 
 Local debugging — run ephemerally with no Prefect server (MLflow tracking also skipped):
     python my_flow.py --run-on local --data-folder <dir>
 """
-__version__ = "0.0.21"
+__version__ = "0.0.22"
 
 import argparse
 import os

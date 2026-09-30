@@ -1,6 +1,6 @@
 # Troubleshooting
 
-Rev. 23 | Created: 2026-06-28 | Updated: 2026-09-30 00:17 CDT
+Rev. 24 | Created: 2026-06-28 | Updated: 2026-09-30 15:31 UTC
 
 운영 중 마주친 문제를 증상·원인·진단·해결 순으로 모읍니다. 새 이슈는 H2 항목으로 덧붙입니다.
 
@@ -146,7 +146,7 @@ Rev. 23 | Created: 2026-06-28 | Updated: 2026-09-30 00:17 CDT
   sudo docker logs --tail 15 prefect-server-prefect_server-1     # 정상 기동, TimeoutError 없음
   ```
 
-  STATUS 가 유지되고 `TimeoutError` 가 사라지면 `register_pool.sh` 도 바로 `Created work pool ...` 를 냅니다. 같은 원리로 다른 backing service (MinIO 9000 · MLflow 5000 · MongoDB 27017) 도 원격 호스트의 인바운드 방화벽이 열려야 LAN 에서 붙습니다 — 설치 시 [prefect.md §3](prefect.md) 의 포트 도달성 선검증으로 미리 걸러야 합니다.
+  STATUS 가 유지되고 `TimeoutError` 가 사라지면 `register_pool.sh` 도 바로 `Created work pool ...` 를 냅니다. 같은 원리로 다른 backing service (MinIO 9000 · MLflow 5000 · MongoDB 27017) 도 원격 호스트의 인바운드 방화벽이 열려야 LAN 에서 붙습니다 — 설치 시 [prefect-ko.md §3](prefect-ko.md) 의 포트 도달성 선검증으로 미리 걸러야 합니다.
 
 ## prefect_server fails to start after machine reboot — bind-mount source fabricated as empty folders
 

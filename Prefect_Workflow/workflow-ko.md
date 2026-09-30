@@ -1,6 +1,6 @@
 # Prefect AI/ML Workflow Automation
 
-Rev. 121 | Created: 2026-06-11 | Updated: 2026-08-14 21:32 CDT
+Rev. 122 | Created: 2026-06-11 | Updated: 2026-09-30 15:31 UTC
 
 Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환경입니다. 이 문서는 **전체 워크플로우의 인덱스 (개요)** 이고, 도구별 상세는 컴포넌트 문서로 잇습니다.
 
@@ -29,14 +29,14 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
 
 | Component | Service | Role | Dashboard | Docs |
 |-----------|---------|------|-----------|-----------|
-| **Prefect** | `prefect_server` · `prefect_worker` | 오케스트레이션 (파이프라인 실행/스케줄링). server 는 job 수집·UI, worker (`prefect_worker`) 는 job 마다 Pipeline Flow 컨테이너를 띄우며, 코드는 그 컨테이너가 실행합니다. | http://localhost:4200 | [prefect.md](../Docker/Prefect/prefect.md) |
-| **MinIO** | `minio` | 대용량 데이터/모델/아티팩트 저장 (S3 호환). 버킷은 `datasets`·`models`·`mlflow` 입니다. | http://localhost:9001 | [minio.md](../Docker/MinIO/minio.md) |
+| **Prefect** | `prefect_server` · `prefect_worker` | 오케스트레이션 (파이프라인 실행/스케줄링). server 는 job 수집·UI, worker (`prefect_worker`) 는 job 마다 Pipeline Flow 컨테이너를 띄우며, 코드는 그 컨테이너가 실행합니다. | http://localhost:4200 | [prefect-ko.md](../Docker/Prefect/prefect-ko.md) |
+| **MinIO** | `minio` | 대용량 데이터/모델/아티팩트 저장 (S3 호환). 버킷은 `datasets`·`models`·`mlflow` 입니다. | http://localhost:9001 | [minio-ko.md](../Docker/MinIO/minio-ko.md) |
 | **Git** | git | 코드 배송·버전 고정. Pipeline Flow 컨테이너가 `git_repo`·`git_commit_hash` 을 shallow `git fetch --depth 1` + `git worktree` 로 펼쳐 실행하고, 공통 코드는 `git subtree` (nested repo) 로 심습니다. | GitHub | - |
-| **MLflow** | `mlflow` | 실험 (params·metrics) 추적, 모델 레지스트리. backend=`postgres`, artifact=`minio`. | http://localhost:5000 | [mlflow.md](../Docker/MLflow/mlflow.md) |
-| **PostgreSQL** | `postgres` · <br>`pgadmin` | 모든 도구의 메타데이터 DB. `prefect`·`mlflow`·`optuna`·`catalog` 4개 논리 DB 를 운영합니다. | http://localhost:5050 (pgAdmin)<br>localhost:5432 (DB) | [postgresql.md](../Docker/PostgreSQL/postgresql.md) |
+| **MLflow** | `mlflow` | 실험 (params·metrics) 추적, 모델 레지스트리. backend=`postgres`, artifact=`minio`. | http://localhost:5000 | [mlflow-ko.md](../Docker/MLflow/mlflow-ko.md) |
+| **PostgreSQL** | `postgres` · <br>`pgadmin` | 모든 도구의 메타데이터 DB. `prefect`·`mlflow`·`optuna`·`catalog` 4개 논리 DB 를 운영합니다. | http://localhost:5050 (pgAdmin)<br>localhost:5432 (DB) | [postgresql-ko.md](../Docker/PostgreSQL/postgresql-ko.md) |
 | **Optuna** | python script | 하이퍼파라미터 튜닝 (trial 탐색). study storage 로 `postgres` 의 `optuna` DB 를 씁니다. | http://localhost:8080 (필요 시 기동) | [Appendix C](#appendix-c-optuna) |
 
-> 이 스택은 한 호스트에 `postgres`·`minio`·`mlflow`·`prefect_server`·`prefect_worker` (worker) 를 모아 띄우고, worker 가 job 마다 **Pipeline Flow 컨테이너** 를 일시적으로 띄우는 **Docker work pool** 구조입니다. 각 컨테이너는 받은 `git_repo`·`git_commit_hash` 을 shallow `git fetch` (`--depth 1`) + `git worktree` 로 펼쳐 실행하고 끝나면 스스로 파괴됩니다 (상세는 [prefect.md](../Docker/Prefect/prefect.md)).
+> 이 스택은 한 호스트에 `postgres`·`minio`·`mlflow`·`prefect_server`·`prefect_worker` (worker) 를 모아 띄우고, worker 가 job 마다 **Pipeline Flow 컨테이너** 를 일시적으로 띄우는 **Docker work pool** 구조입니다. 각 컨테이너는 받은 `git_repo`·`git_commit_hash` 을 shallow `git fetch` (`--depth 1`) + `git worktree` 로 펼쳐 실행하고 끝나면 스스로 파괴됩니다 (상세는 [prefect-ko.md](../Docker/Prefect/prefect-ko.md)).
 
 ---
 
@@ -265,13 +265,13 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
   real example/ file (train_prepare.py … optuna.json). No real ML — every stage just
   records that it ran, while train_prepare also counts the files under --data-folder.
 
-  Run by pipeline.py (orchestrator, prefect.md §4.3):
+  Run by pipeline.py (orchestrator, prefect-ko.md §4.3):
       python my_flow.py --submitter <m> --data-folder <dir>
 
   Local debugging — run ephemerally with no Prefect server (MLflow tracking also skipped):
       python my_flow.py --run-on local --data-folder <dir>
   """
-  __version__ = "0.0.21"
+  __version__ = "0.0.22"
 
   import argparse
   import os
@@ -622,7 +622,7 @@ python catalog.py objects epc                       # raw MinIO objects (not the
 
   **catalog.py 는 컨테이너 밖에서 실행** 되므로 자격증명은 Prefect 프로필 ([§5.2 Server Connection](#52-server-connection) 의 `prefect config set PREFECT_API_URL=...`) 로 연결된 **Prefect Secret 블록** 에서 가져옵니다 (멤버별 `Credentials` 블록, 없으면 default). 프로세스 환경변수나 `docker-compose.env` 파일은 쓰지 않습니다 (그 파일은 컨테이너 스택용이라 host 의 catalog.py 가 찾을 수 없음).
 
-  `Credentials` 블록 (블록 이름 = 임의의 소문자 식별자, 소문자·숫자·대시; 팀원 이름과 무관) 은 관리자가 `credentials.py` 로 1회 등록합니다 (`python credentials.py --json-path <name>.json --block-name <name>` — [prefect.md](../Docker/Prefect/prefect.md) §7 Credentials). 한 블록 안에 세 섹션 (`minio`·`postgresql_catalog`·`postgresql_optuna`; nested dict, `SecretDict` 로 가림) 이 들어 있고, 서비스 주소 (endpoint) 는 블록이 아니라 prefect Variable 입니다.
+  `Credentials` 블록 (블록 이름 = 임의의 소문자 식별자, 소문자·숫자·대시; 팀원 이름과 무관) 은 관리자가 `credentials.py` 로 1회 등록합니다 (`python credentials.py --json-path <name>.json --block-name <name>` — [prefect-ko.md](../Docker/Prefect/prefect-ko.md) §7 Credentials). 한 블록 안에 세 섹션 (`minio`·`postgresql_catalog`·`postgresql_optuna`; nested dict, `SecretDict` 로 가림) 이 들어 있고, 서비스 주소 (endpoint) 는 블록이 아니라 prefect Variable 입니다.
 
   | Section | Fields | Target |
   |---|---|---|
