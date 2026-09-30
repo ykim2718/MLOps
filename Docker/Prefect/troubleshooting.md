@@ -1,8 +1,6 @@
-> ⚠️ **This is an auto-synced copy.** Do not edit here.
-
 # Troubleshooting
 
-Rev. 22 | Created: 2026-06-28 | Updated: 2026-08-14 21:32 CDT
+Rev. 23 | Created: 2026-06-28 | Updated: 2026-09-30 00:17 CDT
 
 운영 중 마주친 문제를 증상·원인·진단·해결 순으로 모읍니다. 새 이슈는 H2 항목으로 덧붙입니다.
 

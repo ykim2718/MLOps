@@ -1,8 +1,6 @@
-> ⚠️ **This is an auto-synced copy.** Do not edit here.
-
 # Prefect Secret
 
-Rev. 11 | Created: 2026-06-14 | Updated: 2026-08-14 21:32 CDT
+Rev. 12 | Created: 2026-06-14 | Updated: 2026-09-30 00:17 CDT
 
 Prefect의 **Secret 블록**으로 비밀값 (키·비밀번호·자격증명) 을 **Prefect server 에 저장**하고, 코드에서 **이름으로 불러와** 안전하게 쓴다.
 
