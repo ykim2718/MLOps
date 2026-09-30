@@ -1,0 +1,24 @@
+# docker-compose.yml
+# __version__ = "0.1.0.2026.9.30"  # Semantic Versioning: Major.Minor.Patch.Date(YYYY.M.D)
+# 0.1.0: kick-off; private image registry on port 5000, images kept in the registry-data volume
+
+name: registry                      # Fix the project name (prefix of container and volume names).
+
+services:
+  registry:
+    image: registry:2
+    container_name: registry
+    ports:
+      - "5000:5000"   # push as localhost:5000/<image> on this machine, pull as <this machine's LAN IP>:5000/<image>
+    volumes:
+      - registry-data:/var/lib/registry
+    healthcheck:
+      # the v2 API root answers 200 while the registry serves
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:5000/v2/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  registry-data:
