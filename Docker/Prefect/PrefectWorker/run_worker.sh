@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # run_worker.sh — start the Prefect worker compose stack on a worker machine.
-# __version__ = "0.0.24"  # Semantic Versioning:  Version = Major.Minor.Patch
+# __version__ = "0.0.25"  # Semantic Versioning:  Version = Major.Minor.Patch
 #
 # Brings up prefect_worker, which polls the given work pool. WORK_POOL/WORKER_LIMIT are read from
 # this shell at "docker compose up" (compose interpolation), so they are exported below.
@@ -11,7 +11,7 @@
 #
 #   ./run_worker.sh --work-pool high_performance    # a high-tier machine
 #   ./run_worker.sh --work-pool low_performance     # a low-tier machine
-#   ./run_worker.sh --work-pool low_performance --worker-ip 192.168.0.13   # when the LAN IP is not detected
+#   ./run_worker.sh --work-pool low_performance --worker-ip <LAN_IP>   # when the LAN IP is not detected
 #   ./run_worker.sh --work-pool low_performance --work-queue urgent --worker-limit 2   # a second worker, one queue only
 #
 # The worker is named '<hostname>@<LAN IP>' so the Prefect server (and dashboards reading it) can tell

@@ -1,5 +1,5 @@
 # Prefect Pipeline Orchestration on Docker
-Rev. 611 | Created: 2026-06-13 | Updated: 2026-09-30 12:51 CDT
+Rev. 612 | Created: 2026-06-13 | Updated: 2026-09-30 13:06 CDT
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
@@ -87,7 +87,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
               Dockerfile.pruner · prune_loop.sh
      run    : run_server.sh                       # in PrefectServer/: create network + compose up -d
      config → ../docker-compose.env
-              PREFECT_SERVER_DATABASE_CONNECTION_URL = 192.168.0.13:5432/prefect
+              PREFECT_SERVER_DATABASE_CONNECTION_URL = <POSTGRESQL_IP>:5432/prefect
               PREFECT_API_URL                        = http://<server IP>:4200/api   # UI inherits this
        │
        └─ Work Pool Registration ── register_pool.sh    # routing 2 — pool routing: run → pool (once, after server up)
@@ -149,7 +149,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
 
      ```bash
      ./run_server.sh --yaml docker-compose.server.yml --network mlops
-     ./register_variables.sh --minio http://192.168.0.8:9000 --postgresql 192.168.0.13:5432 --mlflow http://192.168.0.8:5000
+     ./register_variables.sh --minio http://<MINIO_IP>:9000 --postgresql <POSTGRESQL_IP>:5432 --mlflow http://<MLFLOW_IP>:5000
      ./register_pool.sh --pool-name high_performance --template-file docker-pool-template-high.json --concurrency-limit 16
      ./register_pool.sh --pool-name low_performance --template-file docker-pool-template-low.json  --concurrency-limit 8
      ```
@@ -223,18 +223,18 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
 
   ```bash
   # on the backing host (needs sudo for the ufw rule)
-  sudo ./backing_ports.sh open -host 192.168.0.13 -port 5432  # PostgreSQL
-  sudo ./backing_ports.sh open -host 192.168.0.8 -port 9000  # MinIO
-  sudo ./backing_ports.sh open -host 192.168.0.8 -port 5000  # MLflow
+  sudo ./backing_ports.sh open -host <POSTGRESQL_IP> -port 5432  # PostgreSQL
+  sudo ./backing_ports.sh open -host <MINIO_IP> -port 9000  # MinIO
+  sudo ./backing_ports.sh open -host <MLFLOW_IP> -port 5000  # MLflow
   ```
 
   **② 소비 호스트 (server·worker) 에서 도달성 검증** (`check`) — backing 호스트가 **아닌** 다른 호스트에서 실행해야 loopback 이 아닌 실제 도달성을 봅니다.
 
   ```bash
   # on a consuming host (NOT the backing host), to see real reachability
-  ./backing_ports.sh check -host 192.168.0.13 -port 5432  # PostgreSQL
-  ./backing_ports.sh check -host 192.168.0.8 -port 9000  # MinIO
-  ./backing_ports.sh check -host 192.168.0.8 -port 5000  # MLflow
+  ./backing_ports.sh check -host <POSTGRESQL_IP> -port 5432  # PostgreSQL
+  ./backing_ports.sh check -host <MINIO_IP> -port 9000  # MinIO
+  ./backing_ports.sh check -host <MLFLOW_IP> -port 5000  # MLflow
   ```
 
   모든 포트가 `OPEN` 이면 다음으로 넘어갑니다 (backing service 자체의 설치·포트 게시는 각 서비스 문서를 따릅니다).
@@ -244,7 +244,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
   Prefect stack 의 컨테이너들은 docker network `mlops` 로 통신합니다. 접근 방식은 컨테이너가 **같은 머신**인지 **다른 머신**인지에 따라 갈립니다 (**LAN IP 모델**):
 
   - **같은 머신** → docker **서비스 이름** (`prefect_server`·`minio`·`postgres`·`mlflow`). 같은 호스트의 `mlops` 에 붙은 컨테이너끼리 이름으로 바로 찾습니다.
-  - **다른 머신** → 그 서비스가 있는 **호스트의 LAN IP + 게시 포트** (예: `http://192.168.0.13:4200/api`, `<MinIO 호스트 IP>:9000`).
+  - **다른 머신** → 그 서비스가 있는 **호스트의 LAN IP + 게시 포트** (예: `http://<SERVER_IP>:4200/api`, `<MinIO 호스트 IP>:9000`).
 
   왜 다른 머신은 이름이 안 되나 — 기본 `bridge` network 는 **호스트 로컬**이라, 각 머신에 같은 이름 `mlops` 를 만들어도 **이름만 같을 뿐 별개의 network** 입니다. docker 서비스 이름은 그 호스트의 network 안에서만 해석되므로 **머신을 넘지 못합니다.** 그래서 크로스머신 접근은 LAN IP 로 합니다.
 
@@ -477,16 +477,16 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
   backing service 주소 (MinIO·PostgreSQL·MLflow endpoint, 비밀 아님) 는 서버의 **Prefect Variable** 한 곳에 둡니다. flow 코드와 host 툴 (`catalog.py`) 이 모두 **서버에서** 읽으므로 (`Variable.get(...)`), docker-compose.env 를 컨테이너 밖에서 볼 필요가 없습니다. server 기동 후 `register_variables.sh` 로 한 번 등록합니다 (server 호스트에서 `docker compose exec prefect_server` — Work Pool Registration 과 같은 서버 부트스트랩 단계).
 
   ```bash
-  ./register_variables.sh --minio http://192.168.0.8:9000 --postgresql 192.168.0.13:5432 \
-                          --mlflow http://192.168.0.8:5000
+  ./register_variables.sh --minio http://<MINIO_IP>:9000 --postgresql <POSTGRESQL_IP>:5432 \
+                          --mlflow http://<MLFLOW_IP>:5000
   ```
 
-  각 Variable 이 **어떤 값으로** 등록됐는지 stdout 에 그대로 찍힙니다 (인자 없이 실행하면 default 값):
+  각 Variable 이 **어떤 값으로** 등록됐는지 stdout 에 그대로 찍힙니다 (세 옵션은 모두 필수입니다):
 
   ```text
-  Set variable 'minio_endpoint' to "http://192.168.0.8:9000"
-  Set variable 'postgresql_host_port' to "192.168.0.13:5432"
-  Set variable 'mlflow_tracking_uri' to "http://192.168.0.8:5000"
+  Set variable 'minio_endpoint' to "http://<MINIO_IP>:9000"
+  Set variable 'postgresql_host_port' to "<POSTGRESQL_IP>:5432"
+  Set variable 'mlflow_tracking_uri' to "http://<MLFLOW_IP>:5000"
   [register_variables] set: minio_endpoint, postgresql_host_port, mlflow_tracking_uri
   ```
 
@@ -896,16 +896,16 @@ Pipeline Flow 는 worker 가 job 마다 띄우는 per-flow 컨테이너입니다
   # -- Prefect server address (bootstrap) -------------------------------------
   # Server API address — used by the worker, by flow containers (via the base job template), and by
   # in-container CLI (register_pool). Set to the prefect_server host LAN IP.
-  PREFECT_API_URL=http://192.168.0.13:4200/api
+  PREFECT_API_URL=http://<SERVER_IP>:4200/api
   # API address the server hands to browsers for the dashboard (browsers live outside docker).
-  PREFECT_UI_API_URL=http://192.168.0.13:4200/api
+  PREFECT_UI_API_URL=http://<SERVER_IP>:4200/api
 
   # -- Prefect metadata DB (bootstrap) ----------------------------------------
   # Where the server stores flow runs / deployments / logs. Host = the PostgreSQL host LAN IP.
-  PREFECT_SERVER_DATABASE_CONNECTION_URL=postgresql+asyncpg://CHANGE_ME:CHANGE_ME@192.168.0.13:5432/prefect
+  PREFECT_SERVER_DATABASE_CONNECTION_URL=postgresql+asyncpg://CHANGE_ME:CHANGE_ME@<POSTGRESQL_IP>:5432/prefect
   ```
 
-  - **메타 DB 호스트** 는 PostgreSQL 이 있는 머신의 **LAN IP** (여기선 `192.168.0.13`) — IP 로 두면 server 와 같은 머신이든 다른 머신이든 동작합니다 (같은 머신·같은 `mlops` 망이면 서비스 이름 `postgres` 도 가능).
+  - **메타 DB 호스트** 는 PostgreSQL 이 있는 머신의 **LAN IP** (`<POSTGRESQL_IP>`) — IP 로 두면 server 와 같은 머신이든 다른 머신이든 동작합니다 (같은 머신·같은 `mlops` 망이면 서비스 이름 `postgres` 도 가능).
   - `PREFECT_UI_API_URL` — 브라우저는 docker network 밖이라 `prefect_server` 대신 **LAN IP**.
   - **backing 주소 (MinIO·PostgreSQL·MLflow) 는 여기 없습니다** — 서버 Variable 로 관리합니다 ([§4 Service Address Variables](#service-address-variables)). worker 는 자격증명·주소를 들지 않습니다.
 
@@ -1143,8 +1143,8 @@ backing service 포트 하나를 대상으로, action 에 따라 **도달성 확
 #           from the serving host it is a meaningless loopback (always OPEN).
 #   open  : open the inbound firewall (ufw) for the port. Run on the host that SERVES it (needs sudo). Idempotent.
 #
-#   ./backing_ports.sh check -host 192.168.0.13 -port 5432
-#   sudo ./backing_ports.sh open -host 192.168.0.13 -port 5432
+#   ./backing_ports.sh check -host <POSTGRESQL_IP> -port 5432
+#   sudo ./backing_ports.sh open -host <POSTGRESQL_IP> -port 5432
 set -euo pipefail
 
 ACTION="${1:-}"; [ $# -gt 0 ] && shift
@@ -1169,7 +1169,7 @@ if [ "$ACTION" = check ]; then
         echo "$HOST:$PORT BLOCKED"
     fi
 else   # open
-    subnet="${HOST%.*}.0/24"                # derive the LAN /24 from the address (192.168.0.13 -> 192.168.0.0/24)
+    subnet="${HOST%.*}.0/24"                # derive the LAN /24 from the address (a.b.c.13 -> a.b.c.0/24)
     echo "ensuring inbound $PORT/tcp from $subnet"
     sudo ufw allow from "$subnet" to any port "$PORT" proto tcp   # idempotent: ufw skips a duplicate rule
 fi
@@ -1290,20 +1290,20 @@ server 에 backing service **주소 Variable** (MinIO·PostgreSQL·MLflow endpoi
 ```bash
 #!/usr/bin/env bash
 # register_variables.sh — register the shared backing-service ADDRESS variables on the Prefect server.
-# __version__ = "0.0.9"  # Semantic Versioning:  Version = Major.Minor.Patch
+# __version__ = "0.0.10"  # Semantic Versioning:  Version = Major.Minor.Patch
 # Single, non-secret source of backing addresses (LAN IP). Flow code and host tools (catalog.py) read
 # them via prefect Variables from the server, so no docker-compose.env is needed outside containers.
 # Run after the server is up (run_server.sh). Idempotent (--overwrite).
 #
-#   ./register_variables.sh --minio http://192.168.0.8:9000 --postgresql 192.168.0.13:5432 \
-#                           --mlflow http://192.168.0.8:5000
+#   ./register_variables.sh --minio http://<MINIO_IP>:9000 --postgresql <POSTGRESQL_IP>:5432 \
+#                           --mlflow http://<MLFLOW_IP>:5000
 #
 set -euo pipefail
 
 COMPOSE="docker-compose.server.yml"          # the server compose (its top-level name: sets the project)
-MINIO_ENDPOINT="http://192.168.0.8:9000"     # MinIO S3 endpoint (data download / model upload)
-POSTGRESQL_HOST_PORT="192.168.0.13:5432"      # PostgreSQL host:port (catalog / optuna DBs)
-MLFLOW_TRACKING_URI="http://192.168.0.8:5000"   # MLflow tracking server
+MINIO_ENDPOINT=""          # MinIO S3 endpoint, e.g. http://<MINIO_IP>:9000 (data download / model upload)
+POSTGRESQL_HOST_PORT=""    # PostgreSQL host:port, e.g. <POSTGRESQL_IP>:5432 (catalog / optuna DBs)
+MLFLOW_TRACKING_URI=""     # MLflow tracking server, e.g. http://<MLFLOW_IP>:5000
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -1314,6 +1314,13 @@ while [ $# -gt 0 ]; do
         *) echo "Unknown option: $1" >&2; exit 1 ;;
     esac
 done
+
+# All three addresses are required: an empty or placeholder value would be registered silently and every
+# consumer (catalog.py / pipeline.py) would then fail far from here.
+if [ -z "$MINIO_ENDPOINT" ] || [ -z "$POSTGRESQL_HOST_PORT" ] || [ -z "$MLFLOW_TRACKING_URI" ]; then
+    echo "Usage: $0 --minio <URL> --postgresql <HOST:PORT> --mlflow <URL> [--compose <FILE>]" >&2
+    exit 1
+fi
 
 # set one variable on the server (overwrite so re-runs keep it in sync); echo the value we registered.
 set_var() {
@@ -1335,7 +1342,7 @@ echo "[register_variables] set: minio_endpoint, postgresql_host_port, mlflow_tra
 ```bash
 #!/usr/bin/env bash
 # run_worker.sh — start the Prefect worker compose stack on a worker machine.
-# __version__ = "0.0.24"  # Semantic Versioning:  Version = Major.Minor.Patch
+# __version__ = "0.0.25"  # Semantic Versioning:  Version = Major.Minor.Patch
 #
 # Brings up prefect_worker, which polls the given work pool. WORK_POOL/WORKER_LIMIT are read from
 # this shell at "docker compose up" (compose interpolation), so they are exported below.
@@ -1346,7 +1353,7 @@ echo "[register_variables] set: minio_endpoint, postgresql_host_port, mlflow_tra
 #
 #   ./run_worker.sh --work-pool high_performance    # a high-tier machine
 #   ./run_worker.sh --work-pool low_performance     # a low-tier machine
-#   ./run_worker.sh --work-pool low_performance --worker-ip 192.168.0.13   # when the LAN IP is not detected
+#   ./run_worker.sh --work-pool low_performance --worker-ip <LAN_IP>   # when the LAN IP is not detected
 #   ./run_worker.sh --work-pool low_performance --work-queue urgent --worker-limit 2   # a second worker, one queue only
 #
 # The worker is named '<hostname>@<LAN IP>' so the Prefect server (and dashboards reading it) can tell
@@ -1670,11 +1677,11 @@ pyarrow==15.0.2                # parquet I/O; mlflow 2.14.1 requires pyarrow<16
 **1) 데이터 호스트 (remote Ubuntu) — NFS export.** 폴더를 LAN 서브넷에 읽기전용으로 내보냅니다.
 
 ```bash
-# on the data host (e.g. 192.168.0.50)
+# on the data host (e.g. <DATA_HOST_IP>)
 sudo apt-get install -y nfs-kernel-server
 sudo mkdir -p /srv/datasets
 # export read-only to the LAN subnet
-echo "/srv/datasets 192.168.0.0/24(ro,sync,no_subtree_check)" | sudo tee -a /etc/exports
+echo "/srv/datasets <LAN_SUBNET>(ro,sync,no_subtree_check)" | sudo tee -a /etc/exports
 sudo exportfs -ra
 sudo systemctl enable --now nfs-kernel-server
 ```
@@ -1685,12 +1692,12 @@ sudo systemctl enable --now nfs-kernel-server
 # option A: mount on the host, then bind-mount into the container (step 3)
 sudo apt-get install -y nfs-common
 sudo mkdir -p /mnt/datasets
-sudo mount -t nfs 192.168.0.50:/srv/datasets /mnt/datasets        # ad-hoc
-echo "192.168.0.50:/srv/datasets /mnt/datasets nfs ro,_netdev 0 0" | sudo tee -a /etc/fstab   # persistent
+sudo mount -t nfs <DATA_HOST_IP>:/srv/datasets /mnt/datasets        # ad-hoc
+echo "<DATA_HOST_IP>:/srv/datasets /mnt/datasets nfs ro,_netdev 0 0" | sudo tee -a /etc/fstab   # persistent
 
 # option B: a docker NFS volume (no host mount needed)
 docker volume create --driver local \
-  --opt type=nfs --opt o=addr=192.168.0.50,ro \
+  --opt type=nfs --opt o=addr=<DATA_HOST_IP>,ro \
   --opt device=:/srv/datasets datasets_nfs
 ```
 

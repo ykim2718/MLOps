@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
 # register_variables.sh — register the shared backing-service ADDRESS variables on the Prefect server.
-# __version__ = "0.0.9"  # Semantic Versioning:  Version = Major.Minor.Patch
+# __version__ = "0.0.10"  # Semantic Versioning:  Version = Major.Minor.Patch
 # Single, non-secret source of backing addresses (LAN IP). Flow code and host tools (catalog.py) read
 # them via prefect Variables from the server, so no docker-compose.env is needed outside containers.
 # Run after the server is up (run_server.sh). Idempotent (--overwrite).
 #
-#   ./register_variables.sh --minio http://192.168.0.8:9000 --postgresql 192.168.0.13:5432 \
-#                           --mlflow http://192.168.0.8:5000
+#   ./register_variables.sh --minio http://<MINIO_IP>:9000 --postgresql <POSTGRESQL_IP>:5432 \
+#                           --mlflow http://<MLFLOW_IP>:5000
 #
 set -euo pipefail
 
 COMPOSE="docker-compose.server.yml"          # the server compose (its top-level name: sets the project)
-MINIO_ENDPOINT="http://192.168.0.8:9000"     # MinIO S3 endpoint (data download / model upload)
-POSTGRESQL_HOST_PORT="192.168.0.13:5432"      # PostgreSQL host:port (catalog / optuna DBs)
-MLFLOW_TRACKING_URI="http://192.168.0.8:5000"   # MLflow tracking server
+MINIO_ENDPOINT=""          # MinIO S3 endpoint, e.g. http://<MINIO_IP>:9000 (data download / model upload)
+POSTGRESQL_HOST_PORT=""    # PostgreSQL host:port, e.g. <POSTGRESQL_IP>:5432 (catalog / optuna DBs)
+MLFLOW_TRACKING_URI=""     # MLflow tracking server, e.g. http://<MLFLOW_IP>:5000
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -24,6 +24,13 @@ while [ $# -gt 0 ]; do
         *) echo "Unknown option: $1" >&2; exit 1 ;;
     esac
 done
+
+# All three addresses are required: an empty or placeholder value would be registered silently and every
+# consumer (catalog.py / pipeline.py) would then fail far from here.
+if [ -z "$MINIO_ENDPOINT" ] || [ -z "$POSTGRESQL_HOST_PORT" ] || [ -z "$MLFLOW_TRACKING_URI" ]; then
+    echo "Usage: $0 --minio <URL> --postgresql <HOST:PORT> --mlflow <URL> [--compose <FILE>]" >&2
+    exit 1
+fi
 
 # set one variable on the server (overwrite so re-runs keep it in sync); echo the value we registered.
 set_var() {
