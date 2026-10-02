@@ -1,6 +1,6 @@
 # Ubuntu CLI
 
-Rev. 23 | Created: 2026-07-06 | Updated: 2026-09-30 21:33 UTC
+Rev. 24 | Created: 2026-07-06 | Updated: 2026-10-02 23:53 UTC
 
 > Commands in this document are written for **Ubuntu**.
 
@@ -172,6 +172,8 @@ ssh <USER>@<HOST_IP>          # Log in to a remote host as <USER>
 ssh ubuntu@192.168.0.10       # Example
 ```
 
+- Server-side setup (`openssh-server`): [Appendix C](#appendix-c-ssh-server-setup).
+
 <img src="ubuntu-cli_fig/fig1.png" width="720" style="max-width: 100%;" alt="Fig 1">
 
 Fig 1. SSH encrypts traffic with keys exchanged between client and server
@@ -199,12 +201,14 @@ Table 1. SSH connection options
 - **GNOME**: Default desktop environment of Ubuntu.
 - **GUI**: Graphical user interface; windows, icons, and mouse input.
 - **home directory**: Personal directory of a user, `/home/<USER>`.
+- **host key**: Key pair of an SSH server that proves its identity to clients.
 - **interface**: Network connection point of a host, physical or virtual (e.g. `eth0`, `wlan0`, `lo`).
 - **IP address**: Numeric address of a host on a network (e.g. `192.168.0.10`).
 - **LAN**: Local area network; hosts on the same local network segment.
 - **login shell**: Shell started at login; reads the login profile of the user.
 - **loopback**: Virtual interface `lo` through which a host reaches itself (`127.0.0.1`).
 - **MAC address**: Hardware address of a network interface, fixed per device.
+- **OpenSSH**: Standard SSH implementation on Ubuntu and Windows; `openssh-server` package on the server side.
 - **port**: Number from 0 to 65535 that identifies a service on a host.
 - **primary group**: Group given to new files of a user; one per user.
 - **private key**: Secret half of a key pair; decrypts or signs, never shared.
@@ -221,6 +225,7 @@ Table 1. SSH connection options
 - **systemd**: Init system and service manager of Ubuntu; controlled with `systemctl`.
 - **target**: systemd unit that groups services into a system state (e.g. `multi-user.target`).
 - **TCP**: Connection-oriented transport protocol used by SSH and most network services.
+- **ufw**: Uncomplicated Firewall; front end of the Ubuntu firewall.
 - **UID**: User ID; number that identifies a user account.
 - **xinit**: Package that provides `startx`; not installed by default on the Ubuntu desktop.
 
@@ -279,3 +284,44 @@ sudo apt clean                    # Delete the apt package cache to free disk sp
 
 - `--purge` — Also removes the configuration files of the deleted packages.
 - `apt clean` — Empties `/var/cache/apt/archives`; packages are downloaded again when reinstalled.
+
+## Appendix C. SSH Server Setup
+
+SSH gives a remote terminal even in text mode (`multi-user.target`), where NoMachine and RustDesk have no desktop to share.
+
+### C.1 Install and start the server
+
+```bash
+sudo apt install -y openssh-server    # Install the SSH server
+sudo systemctl enable --now ssh       # Start now and at every boot
+systemctl status ssh                  # Expect: active (running)
+```
+
+### C.2 Open the firewall
+
+```bash
+sudo ufw status                       # Check whether the firewall is active
+sudo ufw allow ssh                    # Allow port 22 when it is active
+```
+
+- `Status: inactive` — No rule needed.
+
+### C.3 Connect from Windows
+
+Windows 10 and 11 include the OpenSSH client. Run in PowerShell:
+
+```powershell
+ssh <USER>@<SERVER_IP>                # Answer yes to trust the host key on first login
+```
+
+- `<SERVER_IP>` — Output of `hostname -I` on the server.
+- Port and key file options — Table 1.
+
+### C.4 Log in with a key (optional)
+
+```powershell
+ssh-keygen -t ed25519                 # Create a key pair on the client
+type $env:USERPROFILE\.ssh\id_ed25519.pub | ssh <USER>@<SERVER_IP> "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys"    # Copy the public key to the server
+```
+
+- Later logins skip the password prompt.

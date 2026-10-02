@@ -1,6 +1,6 @@
 # Ubuntu CLI (Korean)
 
-Rev. 3 | Created: 2026-09-30 | Updated: 2026-09-30 21:33 UTC
+Rev. 4 | Created: 2026-09-30 | Updated: 2026-10-02 23:53 UTC
 
 > 이 문서의 명령은 **Ubuntu** 기준이다.
 
@@ -172,6 +172,8 @@ ssh <USER>@<HOST_IP>          # Log in to a remote host as <USER>
 ssh ubuntu@192.168.0.10       # Example
 ```
 
+- server 쪽 설정 (`openssh-server`): [Appendix C](#appendix-c-ssh-server-setup).
+
 <img src="ubuntu-cli_fig/fig1.png" width="720" style="max-width: 100%;" alt="Fig 1">
 
 Fig 1. SSH 는 client 와 server 가 주고받은 key 로 통신을 암호화한다
@@ -199,12 +201,14 @@ Table 1. SSH 접속 option
 - **GNOME**: Ubuntu 의 기본 desktop 환경.
 - **GUI**: Graphical user interface. window, icon, mouse 입력 방식.
 - **home directory**: 사용자의 개인 directory, `/home/<USER>`.
+- **host key**: SSH server 가 client 에게 자신을 증명하는 key pair.
 - **interface**: host 의 network 연결 지점. 물리 또는 가상 (예: `eth0`, `wlan0`, `lo`).
 - **IP address**: network 에서 host 를 가리키는 숫자 주소 (예: `192.168.0.10`).
 - **LAN**: Local area network. 같은 local network 구간의 host 들.
 - **login shell**: login 할 때 시작되는 shell. 사용자의 login profile 을 읽음.
 - **loopback**: host 가 자기 자신에 접속하는 가상 interface `lo` (`127.0.0.1`).
 - **MAC address**: network interface 의 hardware 주소. 장치마다 고정.
+- **OpenSSH**: Ubuntu 와 Windows 의 표준 SSH 구현. server 쪽 package 는 `openssh-server`.
 - **port**: host 에서 service 를 구분하는 0–65535 사이의 번호.
 - **primary group**: 사용자가 만드는 새 file 에 붙는 group. 사용자당 하나.
 - **private key**: key pair 중 비밀인 쪽. 복호화나 서명에 쓰며 공유하지 않음.
@@ -221,6 +225,7 @@ Table 1. SSH 접속 option
 - **systemd**: Ubuntu 의 init system 이자 service manager. `systemctl` 로 제어.
 - **target**: service 들을 하나의 system 상태로 묶는 systemd unit (예: `multi-user.target`).
 - **TCP**: SSH 와 대부분의 network service 가 쓰는 연결 지향 transport protocol.
+- **ufw**: Uncomplicated Firewall. Ubuntu firewall 의 front end.
 - **UID**: User ID. 사용자 계정을 식별하는 번호.
 - **xinit**: `startx` 를 제공하는 package. Ubuntu desktop 에는 기본 설치되지 않음.
 
@@ -279,3 +284,44 @@ sudo apt clean                    # Delete the apt package cache to free disk sp
 
 - `--purge` — 삭제한 package 의 설정 file 도 함께 제거.
 - `apt clean` — `/var/cache/apt/archives` 를 비움; 다시 설치할 때 package 를 새로 내려받음.
+
+## Appendix C. SSH Server Setup
+
+SSH 는 NoMachine 과 RustDesk 가 공유할 desktop 이 없는 text mode (`multi-user.target`) 에서도 원격 terminal 을 준다.
+
+### C.1 Install and start the server
+
+```bash
+sudo apt install -y openssh-server    # Install the SSH server
+sudo systemctl enable --now ssh       # Start now and at every boot
+systemctl status ssh                  # Expect: active (running)
+```
+
+### C.2 Open the firewall
+
+```bash
+sudo ufw status                       # Check whether the firewall is active
+sudo ufw allow ssh                    # Allow port 22 when it is active
+```
+
+- `Status: inactive` — 규칙 추가 불필요.
+
+### C.3 Connect from Windows
+
+Windows 10 과 11 에는 OpenSSH client 가 들어 있다. PowerShell 에서 실행한다:
+
+```powershell
+ssh <USER>@<SERVER_IP>                # Answer yes to trust the host key on first login
+```
+
+- `<SERVER_IP>` — server 에서 `hostname -I` 로 확인.
+- port 와 key file option — Table 1.
+
+### C.4 Log in with a key (optional)
+
+```powershell
+ssh-keygen -t ed25519                 # Create a key pair on the client
+type $env:USERPROFILE\.ssh\id_ed25519.pub | ssh <USER>@<SERVER_IP> "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys"    # Copy the public key to the server
+```
+
+- 이후 login 은 비밀번호를 묻지 않음.
