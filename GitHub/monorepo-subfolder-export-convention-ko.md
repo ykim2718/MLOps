@@ -1,5 +1,5 @@
 # Monorepo Subfolder Export Convention — Publishing One Folder as a History-Free Snapshot
-Rev. 3 | Created: 2026-10-02 | Updated: 2026-10-02 23:57 UTC
+Rev. 4 | Created: 2026-10-02 | Updated: 2026-10-02 23:58 UTC
 
 - [1. Purpose](#1-purpose)
 - [2. Summary](#2-summary)
@@ -16,7 +16,7 @@ Rev. 3 | Created: 2026-10-02 | Updated: 2026-10-02 23:57 UTC
 ## 1. Purpose
 
 - **Problem Statement**: Git 의 push 단위는 branch 이므로 monorepo 의 하위 folder 하나만 골라 다른 remote repository 로 보낼 수 없고, subtree 로 그 folder 를 떼어 내면 folder 의 전 history 가 전송 대상이 되어 큰 binary file 이 쌓인 folder 에서는 전송이 끝나지 않는다.
-- **Goal**: 하위 folder 하나의 현재 내용만 다른 remote 의 `main` 으로 올려, 받는 쪽이 `clone` 한 번으로 그 folder 를 얻게 한다.
+- **Goal**: 하위 folder 하나의 현재 내용만 다른 remote 의 `main` 으로 올려 받는 쪽이 `clone` 한 번으로 그 folder 를 얻게 하고, 실무자가 이 문서만으로 방식을 골라 실행하고 결과를 확인할 수 있는 user guide 가 된다.
 - **Non-Goal**: Remote 의 변경을 monorepo 로 되받는 양방향 동기화는 다루지 않는다.
 
 ## 2. Summary
