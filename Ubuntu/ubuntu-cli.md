@@ -1,6 +1,6 @@
 # Ubuntu CLI
 
-Rev. 21 | Created: 2026-07-06 | Updated: 2026-09-30 12:42 CDT
+Rev. 23 | Created: 2026-07-06 | Updated: 2026-09-30 21:33 UTC
 
 > Commands in this document are written for **Ubuntu**.
 
@@ -194,6 +194,7 @@ Table 1. SSH connection options
 - **CLI**: Command-line interface; text commands typed in a terminal.
 - **daemon**: Background process with no terminal, usually started at boot.
 - **dotfile**: File or directory whose name starts with `.`; hidden from plain `ls`.
+- **GDM**: GNOME Display Manager; graphical login screen of the Ubuntu desktop.
 - **GID**: Group ID; number that identifies a group.
 - **GNOME**: Default desktop environment of Ubuntu.
 - **GUI**: Graphical user interface; windows, icons, and mouse input.
@@ -221,8 +222,9 @@ Table 1. SSH connection options
 - **target**: systemd unit that groups services into a system state (e.g. `multi-user.target`).
 - **TCP**: Connection-oriented transport protocol used by SSH and most network services.
 - **UID**: User ID; number that identifies a user account.
+- **xinit**: Package that provides `startx`; not installed by default on the Ubuntu desktop.
 
-## Appendix B. Reducing System Resource Usage
+## Appendix B. Ubuntu Resource Optimization
 
 Main ways to cut CPU, RAM, and disk usage so that Ubuntu runs lighter and faster.
 
@@ -233,10 +235,12 @@ On a server or a terminal-oriented machine, turning off the desktop GUI (GNOME) 
 ```bash
 sudo systemctl set-default multi-user.target    # Boot into text (terminal) mode by default
 sudo systemctl set-default graphical.target     # Restore GUI mode at boot
+sudo reboot                                     # Reboot to apply the new default
 ```
 
-- Takes effect from the next boot.
-- `startx` — Starts the GUI on demand while in text mode.
+- Takes effect from the next boot; reboot with `sudo reboot`.
+- `startx` — Starts the GUI for the current session only; the next boot is still text mode.
+- `sudo systemctl start gdm3` — Opens the graphical login screen when `startx` is missing (no `xinit`).
 
 ### B.2 Disable unneeded boot services
 
