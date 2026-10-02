@@ -1,5 +1,5 @@
 # Monorepo Subfolder Export Convention — Publishing One Folder as a History-Free Snapshot
-Rev. 0 | Created: 2026-10-02 | Updated: 2026-10-02 14:02 CDT
+Rev. 1 | Created: 2026-10-02 | Updated: 2026-10-02 15:10 CDT
 
 - [1. Purpose](#1-purpose)
 - [2. Summary](#2-summary)
@@ -9,6 +9,7 @@ Rev. 0 | Created: 2026-10-02 | Updated: 2026-10-02 14:02 CDT
 - [5. Application](#5-application)
 - [References](#references)
 - [Appendix A. Terminology](#appendix-a-terminology)
+- [Appendix B. Reference Implementation](#appendix-b-reference-implementation)
 
 ## 1. Purpose
 
@@ -85,6 +86,8 @@ SNAP=$(git commit-tree "$TREE" -p FETCH_HEAD -m "<MESSAGE>")
 git push <REMOTE_URL> "$SNAP":refs/heads/main
 ```
 
+이 절의 명령을 한 file 로 묶은 script 는 [Appendix B. Reference Implementation](#appendix-b-reference-implementation) 에 있다.
+
 `http.postBuffer` 는 기본값으로 둔다. 이 설정값보다 큰 전송은 chunked 로 나가고 작은 전송은 한 번의 POST 로 나가므로, 값을 전송량보다 크게 올리면 git 이 전부를 메모리에 모아 단일 POST 로 보내고 그 요청은 server 의 body 한도에 걸린다 [[3](#ref-3)].
 
 ## 5. Application
@@ -119,3 +122,31 @@ Remote 를 받는 쪽은 `clone` 한 뒤 필요하면 그 snapshot 의 commit ha
 - **Refspec**: `<src>:<dst>` 꼴로 적어 push 와 fetch 의 source 와 목적지를 지정하는 인자다.
 - **Subtree**: 다른 repository 의 내용을 부모 repository 의 history 로 흡수해 하위 folder 에 두는 방식이다.
 - **Tree**: Folder 하나의 내용을 담은 git object 이며, file 이름과 그 내용의 object 이름을 가진다.
+
+## Appendix B. Reference Implementation
+
+Orphan snapshot 을 한 번의 실행으로 올리는 script 이며, 값을 바꾸는 자리는 머리의 세 변수뿐이다.
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+REMOTE_URL='http://alice@192.0.2.10:3000/alice/Widget.git'
+DIR='Falcon'
+MESSAGE='snapshot'
+
+cd "$(git rev-parse --show-toplevel)"
+
+git add "$DIR"
+git diff --cached --quiet || git commit -m "$MESSAGE"
+
+TREE=$(git rev-parse "HEAD:$DIR")
+SNAP=$(git commit-tree "$TREE" -m "$MESSAGE")
+git -c http.postBuffer=1048576 push --force "$REMOTE_URL" "$SNAP:refs/heads/main"
+
+echo "pushed $DIR to $REMOTE_URL as commit $SNAP on main"
+```
+
+`REMOTE_URL` 은 받는 remote repository 의 주소이고, `DIR` 은 내보낼 하위 folder 이며, `MESSAGE` 는 monorepo 의 commit 과 snapshot 에 함께 쓰는 message 다. `cd "$(git rev-parse --show-toplevel)"` 는 script 를 어느 folder 에서 실행하더라도 monorepo 의 root 로 옮긴다. `git diff --cached --quiet || git commit` 은 stage 한 변경이 없을 때 commit 을 건너뛰어, `set -e` 아래에서 실행이 중단되지 않게 한다.
+
+Remote 에 이전 판을 쌓으려면 `git commit-tree` 줄 앞에 `git fetch "$REMOTE_URL" main` 을 두고, `-p FETCH_HEAD` 를 더하고, push 에서 `--force` 를 뺀다 (section 4).
