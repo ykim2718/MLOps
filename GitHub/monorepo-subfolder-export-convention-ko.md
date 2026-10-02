@@ -1,5 +1,5 @@
 # Monorepo Subfolder Export Convention — Publishing One Folder as a History-Free Snapshot
-Rev. 2 | Created: 2026-10-02 | Updated: 2026-10-02 23:54 UTC
+Rev. 3 | Created: 2026-10-02 | Updated: 2026-10-02 23:57 UTC
 
 - [1. Purpose](#1-purpose)
 - [2. Summary](#2-summary)
@@ -185,7 +185,11 @@ git -c http.postBuffer=1048576 push "$REMOTE_URL" "$SNAP:refs/heads/main"
 echo "pushed $DIR to $REMOTE_URL as commit $SNAP on main"
 ```
 
-`git fetch "$REMOTE_URL" main` 은 remote 의 현재 `main` 을 `FETCH_HEAD` 로 받아 오고, `-p FETCH_HEAD` 는 새 snapshot 의 parent 를 그 commit 으로 정한다 [[1](#ref-1)]. Remote 가 비어 있어 `main` 이 없으면 fetch 가 실패하고 `PARENT` 가 빈 채로 남아, 첫 snapshot 은 B.1 처럼 parent 없이 만들어진다. 새 snapshot 은 remote 의 `main` 에서 이어지므로 push 는 fast-forward 이고 `--force` 가 필요 없다.
+B.1 에서 바뀐 곳은 세 군데다 (`git diff` 기준).
+
+1. 추가 — `PARENT=()` 와 `if git fetch "$REMOTE_URL" main; then PARENT=(-p FETCH_HEAD); fi`: remote 의 현재 commit 을 `FETCH_HEAD` 로 받아 두고, 받지 못하면 `PARENT` 를 비운다. Remote 가 비어 있는 첫 실행에서는 이 경로로 parent 없는 snapshot 이 만들어진다.
+2. 변경 — `git commit-tree "$TREE" -m …` → `git commit-tree "$TREE" "${PARENT[@]}" -m …`: snapshot 이 remote 의 그 commit 을 부모로 갖는다 [[1](#ref-1)].
+3. 변경 — `push --force "$REMOTE_URL" …` → `push "$REMOTE_URL" …`: force 를 뺐으므로 fast-forward 가 아니면 push 가 거부된다.
 
 Table 2. Orphan and chained snapshot scripts compared
 
