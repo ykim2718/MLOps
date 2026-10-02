@@ -1,5 +1,5 @@
 # Monorepo Subfolder Export Convention — Publishing One Folder as a History-Free Snapshot
-Rev. 1 | Created: 2026-10-02 | Updated: 2026-10-02 15:10 CDT
+Rev. 2 | Created: 2026-10-02 | Updated: 2026-10-02 23:54 UTC
 
 - [1. Purpose](#1-purpose)
 - [2. Summary](#2-summary)
@@ -10,6 +10,8 @@ Rev. 1 | Created: 2026-10-02 | Updated: 2026-10-02 15:10 CDT
 - [References](#references)
 - [Appendix A. Terminology](#appendix-a-terminology)
 - [Appendix B. Reference Implementation](#appendix-b-reference-implementation)
+  - [B.1 Orphan Snapshot](#b1-orphan-snapshot)
+  - [B.2 Chained Snapshot](#b2-chained-snapshot)
 
 ## 1. Purpose
 
@@ -114,6 +116,8 @@ Remote 를 받는 쪽은 `clone` 한 뒤 필요하면 그 snapshot 의 commit ha
 
 - **Chained snapshot**: Remote 의 현재 commit 을 parent 로 두고 만든 snapshot commit 이다.
 - **Commit hash**: Commit 하나를 가리키는 40자 식별자다.
+- **Fast-forward**: Remote 의 ref 를 그 ref 에서 이어지는 commit 으로 옮기는 갱신이며, 이어지지 않으면 non-fast-forward 로 거부된다.
+- **FETCH_HEAD**: `git fetch` 가 마지막으로 받아 온 commit 을 가리키는 ref 다.
 - **Force push**: Remote 의 ref 를 기존 commit 과 이어지지 않는 commit 으로 바꿔 쓰는 push 다.
 - **Gitlink**: 부모 repository 가 다른 repository 의 commit 을 가리키기 위해 저장하는 pointer 다.
 - **Monorepo**: 여러 작업과 code 를 하나의 repository 에 모아 두는 구조다.
@@ -125,7 +129,11 @@ Remote 를 받는 쪽은 `clone` 한 뒤 필요하면 그 snapshot 의 commit ha
 
 ## Appendix B. Reference Implementation
 
-Orphan snapshot 을 한 번의 실행으로 올리는 script 이며, 값을 바꾸는 자리는 머리의 세 변수뿐이다.
+Section 4 의 두 방식을 각각 한 번의 실행으로 올리는 script 이며, 값을 바꾸는 자리는 두 script 모두 머리의 세 변수뿐이다.
+
+### B.1 Orphan Snapshot
+
+Remote 의 `main` 을 실행마다 parent 없는 snapshot commit 하나로 바꿔 쓴다.
 
 ```bash
 #!/usr/bin/env bash
@@ -149,4 +157,46 @@ echo "pushed $DIR to $REMOTE_URL as commit $SNAP on main"
 
 `REMOTE_URL` 은 받는 remote repository 의 주소이고, `DIR` 은 내보낼 하위 folder 이며, `MESSAGE` 는 monorepo 의 commit 과 snapshot 에 함께 쓰는 message 다. `cd "$(git rev-parse --show-toplevel)"` 는 script 를 어느 folder 에서 실행하더라도 monorepo 의 root 로 옮긴다. `git diff --cached --quiet || git commit` 은 stage 한 변경이 없을 때 commit 을 건너뛰어, `set -e` 아래에서 실행이 중단되지 않게 한다.
 
-Remote 에 이전 판을 쌓으려면 `git commit-tree` 줄 앞에 `git fetch "$REMOTE_URL" main` 을 두고, `-p FETCH_HEAD` 를 더하고, push 에서 `--force` 를 뺀다 (section 4).
+### B.2 Chained Snapshot
+
+B.1 을 고쳐, remote 의 현재 `main` 을 parent 로 두고 새 snapshot 을 그 위에 잇는다. Remote 의 `main` 에는 실행마다 snapshot commit 이 하나씩 쌓인다.
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+REMOTE_URL='http://alice@192.0.2.10:3000/alice/Widget.git'
+DIR='Falcon'
+MESSAGE='snapshot'
+
+cd "$(git rev-parse --show-toplevel)"
+
+git add "$DIR"
+git diff --cached --quiet || git commit -m "$MESSAGE"
+
+# chain onto the remote main; an empty remote has no main, so the first snapshot has no parent
+PARENT=()
+if git fetch "$REMOTE_URL" main; then PARENT=(-p FETCH_HEAD); fi
+
+TREE=$(git rev-parse "HEAD:$DIR")
+SNAP=$(git commit-tree "$TREE" "${PARENT[@]}" -m "$MESSAGE")
+git -c http.postBuffer=1048576 push "$REMOTE_URL" "$SNAP:refs/heads/main"
+
+echo "pushed $DIR to $REMOTE_URL as commit $SNAP on main"
+```
+
+`git fetch "$REMOTE_URL" main` 은 remote 의 현재 `main` 을 `FETCH_HEAD` 로 받아 오고, `-p FETCH_HEAD` 는 새 snapshot 의 parent 를 그 commit 으로 정한다 [[1](#ref-1)]. Remote 가 비어 있어 `main` 이 없으면 fetch 가 실패하고 `PARENT` 가 빈 채로 남아, 첫 snapshot 은 B.1 처럼 parent 없이 만들어진다. 새 snapshot 은 remote 의 `main` 에서 이어지므로 push 는 fast-forward 이고 `--force` 가 필요 없다.
+
+Table 2. Orphan and chained snapshot scripts compared
+
+| Item                           | B.1 Orphan snapshot              | B.2 Chained snapshot                       |
+| :----------------------------: | :------------------------------: | :----------------------------------------: |
+| Snapshot 의 parent             | 없음                             | Remote 의 현재 `main` (`FETCH_HEAD`)       |
+| Commit 전 단계                 | 없음                             | `git fetch "$REMOTE_URL" main`             |
+| Push                           | `--force`                        | Force 없음 (fast-forward)                  |
+| Remote 의 `main` history       | 실행마다 commit 하나로 바뀜      | 실행마다 commit 이 하나씩 쌓임             |
+| 이전 commit hash               | 다음 실행 뒤 닿을 수 없음        | 계속 닿을 수 있음                          |
+| Remote 에 직접 한 commit       | 다음 실행에서 사라짐             | Parent 로 남지만 그 file 은 다음 판에 없음 |
+| Fetch 실패 뒤 push             | 해당 없음                        | Parent 없는 commit 이 되어 거부됨          |
+
+두 script 모두 tree 는 monorepo 의 `HEAD:$DIR` 에서 가져오므로, 각 snapshot 의 내용은 같고 차이는 parent 와 push 방식뿐이다. Table 2 의 마지막 행은 안전장치이다. 비어 있지 않은 remote 에서 fetch 가 실패하면 parent 없는 commit 은 remote 의 `main` 에서 이어지지 않아, force 없는 push 가 non-fast-forward 로 거부되고 remote 는 바뀌지 않는다. 변경이 없는 실행도 B.2 에서는 내용이 같은 snapshot commit 을 하나 더 쌓는다.
