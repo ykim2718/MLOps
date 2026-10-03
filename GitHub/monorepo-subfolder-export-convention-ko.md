@@ -1,12 +1,18 @@
 # Monorepo Subfolder Export Convention — Publishing One Folder as a History-Free Snapshot
-Rev. 4 | Created: 2026-10-02 | Updated: 2026-10-02 23:58 UTC
+Rev. 5 | Created: 2026-10-02 | Updated: 2026-10-03 00:02 UTC
 
 - [1. Purpose](#1-purpose)
 - [2. Summary](#2-summary)
 - [3. Taxonomy and its Hierarchy](#3-taxonomy-and-its-hierarchy)
   - [3.1 Placement](#31-placement)
-- [4. Upload Command](#4-upload-command)
+- [4. Procedure](#4-procedure)
+  - [4.1 Prerequisites](#41-prerequisites)
+  - [4.2 Choose the Method](#42-choose-the-method)
+  - [4.3 Run](#43-run)
+  - [4.4 Verify](#44-verify)
+  - [4.5 How the Commands Work](#45-how-the-commands-work)
 - [5. Application](#5-application)
+- [6. Further Work](#6-further-work)
 - [References](#references)
 - [Appendix A. Terminology](#appendix-a-terminology)
 - [Appendix B. Reference Implementation](#appendix-b-reference-implementation)
@@ -21,9 +27,11 @@ Rev. 4 | Created: 2026-10-02 | Updated: 2026-10-02 23:58 UTC
 
 ## 2. Summary
 
-내보낼 folder 의 tree 를 그대로 가리키는 parent 없는 commit 하나를 만들어 remote 의 `main` 에 force push 한다. 전송량은 그 folder 의 현재 file 크기이고 history 는 전송하지 않으므로, folder 에 쌓인 과거 판의 크기가 전송 시간에 들어오지 않는다. 받는 쪽은 remote 를 `clone` 하면 그 folder 의 내용이 repository root 에 그대로 놓인다.
+방식은 remote 의 `main` 이 force push 를 받는지로 고른다. 받으면 orphan snapshot 을 쓰고, branch protection 으로 force push 가 막혀 있거나 이전 판을 remote 에 남겨야 하면 chained snapshot 을 쓴다. 두 방식 모두 script 하나를 Windows 의 Git Bash 나 Linux 의 shell 에서 실행하며, GitHub 와 Gitea 에 같은 방법으로 access token 을 써서 올린다.
 
-대가는 두 가지다. Remote 의 `main` 이 실행마다 새 commit 하나로 바뀌므로 이전 commit hash 는 닿을 수 없게 되고, remote 에서 monorepo 로 되받는 길이 없다. 이전 판을 remote 에 남겨야 하면 section 4 의 chained snapshot 을 쓴다.
+Orphan snapshot 은 내보낼 folder 의 tree 를 그대로 가리키는 parent 없는 commit 하나를 만들어 remote 의 `main` 에 force push 한다. 전송량은 그 folder 의 현재 file 크기이고 history 는 전송하지 않으므로, folder 에 쌓인 과거 판의 크기가 전송 시간에 들어오지 않는다. 받는 쪽은 remote 를 `clone` 하면 그 folder 의 내용이 repository root 에 그대로 놓인다.
+
+대가는 두 가지다. Remote 의 `main` 이 실행마다 새 commit 하나로 바뀌므로 이전 commit hash 는 닿을 수 없게 되고, remote 에서 monorepo 로 되받는 길이 없다. Chained snapshot 은 같은 tree 를 remote 의 현재 `main` 위에 이어 올리므로 force push 가 필요 없고 이전 commit hash 가 남는다.
 
 ## 3. Taxonomy and its Hierarchy
 
@@ -57,38 +65,53 @@ Table 1. Export methods by unit, history, and direction
 | Chained snapshot                       | Folder 하나     | Snapshot 만   | 단방향    | 그 folder 의 현재 file   | 내보낸 판을 remote 에 쌓는 경우                               |
 | Orphan snapshot                        | Folder 하나     | 없음          | 단방향    | 그 folder 의 현재 file   | 현재 내용만 배포하는 경우                                     |
 
-이 규약은 orphan snapshot 을 기본으로 쓰고, remote 에 이전 판을 남겨야 할 때만 chained snapshot 으로 바꾼다. 두 subtree 방법은 folder 의 전 history 를 전송하므로, 과거 판에 큰 binary file 이 쌓인 folder 에서는 전송량이 현재 file 크기의 몇 배가 된다.
+이 규약은 orphan snapshot 을 기본으로 쓰고, remote 에 이전 판을 남겨야 하거나 remote 의 `main` 이 force push 를 막을 때 chained snapshot 으로 바꾼다. 두 subtree 방법은 folder 의 전 history 를 전송하므로, 과거 판에 큰 binary file 이 쌓인 folder 에서는 전송량이 현재 file 크기의 몇 배가 된다.
 
-## 4. Upload Command
+## 4. Procedure
 
-Monorepo 의 root folder 에서 실행한다. `<DIR>` 은 내보낼 하위 folder 이고 `<REMOTE_URL>` 은 받는 remote repository 의 주소다.
+실무자는 4.1 의 준비를 한 번 마친 뒤, 실행할 때마다 4.3 과 4.4 를 따른다. 4.5 는 script 가 무엇을 하는지 설명한다.
+
+### 4.1 Prerequisites
+
+- **Git** — Windows 는 Git for Windows 를 설치하고 script 를 함께 설치되는 Git Bash 에서 실행한다. Linux 는 배포판의 `git` package 를 쓴다.
+- **Remote repository** — GitHub 나 Gitea 에 받는 repository 를 미리 만든다. 비어 있어도 된다.
+- **Access token** — 그 repository 에 쓰기 권한이 있는 access token 을 발급한다. Push 가 username 과 password 를 물으면 password 자리에 token 을 넣는다.
+- **`REMOTE_URL`** — HTTPS 주소를 쓴다. GitHub 는 `https://github.com/<OWNER>/<REPO>.git`, Gitea 는 `https://<GITEA_HOST>/<OWNER>/<REPO>.git` 꼴이다.
+
+Token 은 `REMOTE_URL` 에 넣지 않는다. 주소에 넣은 token 은 script file 과 shell history 에 그대로 남는다. Windows 의 Git for Windows 는 credential helper 가 token 을 저장해 다음 실행부터 묻지 않는다. Linux 에서 매번 묻지 않게 하려면 `git config --global credential.helper store` 를 쓰며, 이때 token 은 `~/.git-credentials` 에 평문으로 저장된다.
+
+### 4.2 Choose the Method
+
+Table 2. Method by remote condition
+
+| Remote `main` condition                   | Method           | Script |
+| :---------------------------------------: | :--------------: | :----: |
+| Force push 허용, 현재 판만 필요           | Orphan snapshot  | B.1    |
+| Branch protection 으로 force push 금지    | Chained snapshot | B.2    |
+| 이전 판을 remote 에 남겨야 함             | Chained snapshot | B.2    |
+
+Branch protection 이 직접 push 자체를 막으면 두 방식 모두 거부되므로, 그 account 의 push 를 허용하도록 protection 설정을 바꿔야 한다. 방식은 도중에 바꿀 수 있다. Orphan 에서 chained 로 바꾸면 B.2 가 remote 의 orphan commit 을 parent 로 두고 이어 올린다. Chained 에서 orphan 으로 바꾸면 B.1 의 force push 가 쌓인 snapshot 을 모두 닿을 수 없게 만든다.
+
+### 4.3 Run
+
+1. Table 2 로 고른 script 를 Appendix B 에서 복사해 monorepo 안에 file 로 저장한다 (예: `export-snapshot.sh`).
+2. Script 머리의 `REMOTE_URL`, `DIR`, `MESSAGE` 세 변수를 고친다.
+3. Linux 의 shell 이나 Windows 의 Git Bash 에서 `bash export-snapshot.sh` 로 실행한다. Script 가 monorepo 의 root 로 옮겨 가므로, 실행 위치는 monorepo 안이면 어디든 된다.
+4. 첫 실행에서 username 과 password 를 물으면 password 자리에 access token 을 넣는다.
+
+### 4.4 Verify
+
+Script 는 마지막 줄에 올린 commit hash 를 출력한다. Remote 의 `main` 이 그 commit 을 가리키면 성공이다.
 
 ```bash
-# run from the monorepo root
-git add <DIR>
-git commit -m "<MESSAGE>"
-
-# tree of the folder at HEAD, then an orphan commit that points to it
-TREE=$(git rev-parse HEAD:<DIR>)
-SNAP=$(git commit-tree "$TREE" -m "<MESSAGE>")
-
-git push --force <REMOTE_URL> "$SNAP":refs/heads/main
+git ls-remote <REMOTE_URL> main    # Hash must match the commit printed by the script
 ```
 
-`git commit-tree` 는 tree 하나와 parent 목록을 받아 commit 을 만든다 [[1](#ref-1)]. Parent 를 주지 않으면 그 commit 은 orphan commit 이 되어 history 가 없다. `git push` 의 refspec 은 source 자리에 임의의 commit 식별자를 받으므로 [[2](#ref-2)], branch 를 만들지 않고 그 commit 을 remote 의 `main` 으로 올린다.
+받는 쪽에서 `git clone <REMOTE_URL>` 하면 `<DIR>` 의 내용이 repository root 에 놓이고, monorepo 의 다른 folder 는 없다.
 
-이전 판을 remote 에 남기려면 remote 의 현재 `main` 을 parent 로 주고 force 없이 올린다.
+### 4.5 How the Commands Work
 
-```bash
-# run from the monorepo root; keep the previous snapshot as the parent
-git fetch <REMOTE_URL> main
-TREE=$(git rev-parse HEAD:<DIR>)
-SNAP=$(git commit-tree "$TREE" -p FETCH_HEAD -m "<MESSAGE>")
-
-git push <REMOTE_URL> "$SNAP":refs/heads/main
-```
-
-이 절의 명령을 한 file 로 묶은 script 는 [Appendix B. Reference Implementation](#appendix-b-reference-implementation) 에 있다.
+두 script 의 핵심은 `git commit-tree` 와 `git push` 두 줄이다. `git rev-parse HEAD:<DIR>` 이 monorepo 의 마지막 commit 에서 그 folder 의 tree 를 꺼내고, `git commit-tree` 는 tree 하나와 parent 목록을 받아 commit 을 만든다 [[1](#ref-1)]. Parent 를 주지 않으면 그 commit 은 orphan commit 이 되어 history 가 없다. `git push` 의 refspec 은 source 자리에 임의의 commit 식별자를 받으므로 [[2](#ref-2)], branch 를 만들지 않고 그 commit 을 remote 의 `main` 으로 올린다. B.2 는 `git fetch` 로 받은 remote 의 현재 `main` 을 `-p FETCH_HEAD` 로 parent 에 두므로, push 가 fast-forward 가 되어 force 없이 올라간다.
 
 `http.postBuffer` 는 기본값으로 둔다. 이 설정값보다 큰 전송은 chunked 로 나가고 작은 전송은 한 번의 POST 로 나가므로, 값을 전송량보다 크게 올리면 git 이 전부를 메모리에 모아 단일 POST 로 보내고 그 요청은 server 의 body 한도에 걸린다 [[3](#ref-3)].
 
@@ -100,6 +123,21 @@ git push <REMOTE_URL> "$SNAP":refs/heads/main
 - **만나는 자리** — Monorepo 의 한 folder 만 다른 git server 로 배포하는 자리이며, 받는 쪽은 그 folder 를 읽기만 한다.
 
 Remote 를 받는 쪽은 `clone` 한 뒤 필요하면 그 snapshot 의 commit hash 로 checkout 한다. Orphan snapshot 으로 올린 remote 에서 그 hash 는 다음 실행까지만 유효하므로, 받은 판을 오래 가리켜야 하면 chained snapshot 으로 올리거나 remote 에서 그 commit 에 tag 를 붙인다.
+
+실행이 실패하면 Table 3 에서 증상으로 원인과 대처를 찾는다.
+
+Table 3. Failures and fixes
+
+| Symptom                                    | Cause                                               | Fix                                                   |
+| :----------------------------------------: | :-------------------------------------------------: | :---------------------------------------------------: |
+| Push 가 인증 오류로 끝남                   | Token 이 없거나 만료되었거나 쓰기 권한이 없음       | 쓰기 권한이 있는 token 을 다시 발급해 password 에 넣음 |
+| B.1 의 force push 가 거부됨                | Remote 의 `main` 에 branch protection               | B.2 로 바꾸거나 그 branch 에 force push 를 허용       |
+| B.2 의 push 가 non-fast-forward 로 거부됨  | Fetch 가 실패했거나 fetch 뒤 remote 의 `main` 이 바뀜 | Script 를 다시 실행                                   |
+| Push 가 HTTP 413 으로 끝남                 | `http.postBuffer` 를 전송량보다 크게 올림           | `http.postBuffer` 를 기본값으로 둠                    |
+
+## 6. Further Work
+
+N/A — 이 문서의 두 방식과 절차에 남은 미확정 방향이 없다.
 
 ## References
 
@@ -114,11 +152,15 @@ Remote 를 받는 쪽은 `clone` 한 뒤 필요하면 그 snapshot 의 commit ha
 
 ## Appendix A. Terminology
 
+- **Access token**: Password 대신 git server 에 인증하는 문자열이며, 발급할 때 권한과 만료일을 정한다.
+- **Branch protection**: Git server 가 특정 branch 에 대한 push, force push, 삭제를 제한하는 설정이다.
 - **Chained snapshot**: Remote 의 현재 commit 을 parent 로 두고 만든 snapshot commit 이다.
 - **Commit hash**: Commit 하나를 가리키는 40자 식별자다.
+- **Credential helper**: Git 이 인증 정보를 저장했다가 다음 push 에 다시 쓰게 하는 기능이다.
 - **Fast-forward**: Remote 의 ref 를 그 ref 에서 이어지는 commit 으로 옮기는 갱신이며, 이어지지 않으면 non-fast-forward 로 거부된다.
 - **FETCH_HEAD**: `git fetch` 가 마지막으로 받아 온 commit 을 가리키는 ref 다.
 - **Force push**: Remote 의 ref 를 기존 commit 과 이어지지 않는 commit 으로 바꿔 쓰는 push 다.
+- **Git Bash**: Git for Windows 와 함께 설치되는 bash shell 이며, Windows 에서 bash script 를 실행한다.
 - **Gitlink**: 부모 repository 가 다른 repository 의 commit 을 가리키기 위해 저장하는 pointer 다.
 - **Monorepo**: 여러 작업과 code 를 하나의 repository 에 모아 두는 구조다.
 - **Orphan commit**: Parent 가 없는 commit 이며 그 commit 에서 닿는 history 가 없다.
@@ -191,7 +233,7 @@ B.1 에서 바뀐 곳은 세 군데다 (`git diff` 기준).
 2. 변경 — `git commit-tree "$TREE" -m …` → `git commit-tree "$TREE" "${PARENT[@]}" -m …`: snapshot 이 remote 의 그 commit 을 부모로 갖는다 [[1](#ref-1)].
 3. 변경 — `push --force "$REMOTE_URL" …` → `push "$REMOTE_URL" …`: force 를 뺐으므로 fast-forward 가 아니면 push 가 거부된다.
 
-Table 2. Orphan and chained snapshot scripts compared
+Table 4. Orphan and chained snapshot scripts compared
 
 | Item                           | B.1 Orphan snapshot              | B.2 Chained snapshot                       |
 | :----------------------------: | :------------------------------: | :----------------------------------------: |
@@ -203,4 +245,4 @@ Table 2. Orphan and chained snapshot scripts compared
 | Remote 에 직접 한 commit       | 다음 실행에서 사라짐             | Parent 로 남지만 그 file 은 다음 판에 없음 |
 | Fetch 실패 뒤 push             | 해당 없음                        | Parent 없는 commit 이 되어 거부됨          |
 
-두 script 모두 tree 는 monorepo 의 `HEAD:$DIR` 에서 가져오므로, 각 snapshot 의 내용은 같고 차이는 parent 와 push 방식뿐이다. Table 2 의 마지막 행은 안전장치이다. 비어 있지 않은 remote 에서 fetch 가 실패하면 parent 없는 commit 은 remote 의 `main` 에서 이어지지 않아, force 없는 push 가 non-fast-forward 로 거부되고 remote 는 바뀌지 않는다. 변경이 없는 실행도 B.2 에서는 내용이 같은 snapshot commit 을 하나 더 쌓는다.
+두 script 모두 tree 는 monorepo 의 `HEAD:$DIR` 에서 가져오므로, 각 snapshot 의 내용은 같고 차이는 parent 와 push 방식뿐이다. Table 4 의 마지막 행은 안전장치이다. 비어 있지 않은 remote 에서 fetch 가 실패하면 parent 없는 commit 은 remote 의 `main` 에서 이어지지 않아, force 없는 push 가 non-fast-forward 로 거부되고 remote 는 바뀌지 않는다. 변경이 없는 실행도 B.2 에서는 내용이 같은 snapshot commit 을 하나 더 쌓는다.
