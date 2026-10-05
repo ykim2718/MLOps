@@ -1,5 +1,5 @@
 # Docker Hub (Image Registry)
-Rev. 9 | Created: 2026-07-03 | Updated: 2026-09-30 09:53 CDT
+Rev. 10 | Created: 2026-07-03 | Updated: 2026-10-04 21:52 CDT
 
 - [1. Auth](#1-auth)
 - [2. Upload — commit · tag · push](#2-upload--commit--tag--push)
@@ -173,6 +173,12 @@ docker pull <host>:12357/<image>:<tag>    # download only the layers this machin
 ```
 
 > `daemon.json` 에 다른 key 가 이미 있으면 파일을 덮어쓰지 않고 `insecure-registries` 만 더합니다. Docker Desktop 은 Settings → Docker Engine 의 JSON 에 같은 key 를 넣습니다.
+
+같은 tag 를 다시 pull 하면 docker 는 registry 에 manifest digest 만 묻습니다.
+
+- **digest 가 같을 때**: 받는 machine 의 image 가 최신이므로 layer 를 받지 않습니다. LAN 안에서 이 확인은 1초 안팎이어서, run 마다 pull 해도 image 가 바뀌지 않은 동안에는 실행이 거의 느려지지 않습니다.
+- **digest 가 다를 때**: 받는 machine 에 없는 layer 만 받습니다. code 만 바뀐 image 는 수십 MB 의 code layer 만 전송됩니다.
+- **이전 image**: 새 image 를 받으면 이전 image 는 이름 없는 image (dangling image) 로 남습니다. 가끔 `docker image prune` 으로 지웁니다.
 
 ---
 
