@@ -1,5 +1,5 @@
 # Prefect Pipeline Orchestration on Docker
-Rev. 613 | Created: 2026-06-13 | Updated: 2026-10-04 21:52 CDT
+Rev. 614 | Created: 2026-06-13 | Updated: 2026-10-08 13:31 CDT
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
@@ -424,7 +424,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
   > **`properties` vs `job_configuration`** — `variables.properties` 는 **변수 선언** (타입 + `default`) 이고, `job_configuration` 은 그 변수를 `{{ }}` 로 받아 **실제 도커 job 설정에 끼워 넣는 틀** 입니다. 같은 키가 양쪽에 보이는 건 '선언 ↔ 사용' 한 쌍이기 때문이고, 값 우선순위는 **deployment 의 `job_variables` override > 템플릿 `default`** 입니다 (override 가 없으면 `default` 가 `{{ }}` 자리에 들어갑니다).
 
   - `image` — flow 컨테이너로 쓸 Pipeline Flow 이미지 ([§6.1](#61-image)). 태그 (`pipeline-flow:latest`) 가 곧 **런타임 버전** (라이브러리 + orchestrator) 입니다.
-  - `image_pull_policy` — flow 이미지를 언제 pull 할지입니다. `pipeline-flow:latest` 는 worker 호스트에서 **로컬로 빌드** 하므로 `IfNotPresent` (있으면 pull 안 함) 로 둬야 registry 로 나가지 않습니다. `Always` 면 매번 pull 을 시도해 로컬 전용 이미지에 대해 실패합니다. 반대로 registry 에 올린 이미지를 `latest` 처럼 같은 태그로 계속 갱신한다면, deployment 의 `job_variables` 에 `image_pull_policy: Always` 를 줍니다. `IfNotPresent` 는 worker 가 처음 받은 이미지를 계속 써서, 새로 올린 이미지가 반영되지 않습니다. `Always` 는 매번 registry 에 manifest digest 만 묻고 이미지가 같으면 layer 를 받지 않으므로, LAN 안에서는 run 마다 1초 안팎만 더 듭니다.
+  - `image_pull_policy` — flow 이미지를 언제 pull 할지입니다. `pipeline-flow:latest` 는 worker 호스트에서 **로컬로 빌드** 하므로 `IfNotPresent` (있으면 pull 안 함) 로 둡니다. Registry 에 올린 이미지를 쓸 때의 값과 네 값 (`IfNotPresent` · `Always` · `IfPossible` · `Never`) 의 뜻은 [prefect-registry-ko.md](prefect-registry-ko.md) 를 따릅니다.
   - `env` — flow 컨테이너가 server·Secret 을 찾는 `PREFECT_API_URL` 을 줍니다. 이 값은 템플릿에 **하드코딩하지 않습니다** — `register_pool.sh` 가 등록 시 실행 호스트의 `docker-compose.env` 에 있는 `PREFECT_API_URL` 로 `env.default` 를 덮어씁니다. 위 JSON 의 `http://prefect_server:4200/api` 는 register_pool.sh 없이 등록할 때만 쓰이는 fallback 이고, 실제 주소는 `docker-compose.env` 한 곳에서 관리합니다.
   - `mem_limit` — flow 컨테이너 메모리 상한입니다. 등급별 pool 의 핵심 차이값입니다 (high 크게·low 작게). `16g` 의 `g` 는 기가바이트 (GiB) 를 뜻합니다.
 
