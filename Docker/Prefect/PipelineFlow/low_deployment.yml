@@ -1,12 +1,11 @@
 # low_deployment.yml - low-tier deployment definition
-# __version__ = "0.0.6"    # Semantic Versioning : Major.Minor.Patch
+# __version__ = "0.0.7"    # Semantic Versioning : Major.Minor.Patch
 deployments:
   - name: low_deployment
     entrypoint: pipeline.py:pipeline       # <file>:<@flow function>
     work_pool:
       name: low_performance
-      job_variables:
-        image: pipeline-flow:latest
+      # no image override: the pool's base job template supplies <IMAGE_REGISTRY>/pipeline-flow:latest
     parameters:
       payload: my_flow.py
     pull:                                    # override Prefect's auto-injected /opt/prefect

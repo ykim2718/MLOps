@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # register_pool.sh — register (or update) one Prefect work pool via the server API.
-# __version__ = "0.1.0"  # Semantic Versioning:  Version = Major.Minor.Patch
+# __version__ = "0.1.1"  # Semantic Versioning:  Version = Major.Minor.Patch
 # Idempotent: --overwrite keeps the base job template in sync. Runs on any host that can reach the
 # server API (needs the prefect CLI + jq locally; no server container required). PREFECT_API_URL is
 # taken from docker-compose.env — it is both the API address this script calls and the address
 # injected into the template's env.default, so flow containers know where the server is.
+# IMAGE_REGISTRY (same env file) is prefixed to the template's bare image.default, so every worker
+# pulls the flow image (multi-arch) from the registry instead of needing a local build.
 # Backing addresses (MinIO / PostgreSQL / MLflow) live as prefect Variables (register_variables.sh), not here.
 #
 #   ./register_pool.sh --pool-name high_performance --template-file docker-pool-template-high.json --concurrency-limit 16
@@ -43,11 +45,24 @@ command -v prefect >/dev/null 2>&1 || { echo "the prefect CLI is required (pip i
 # below (env var beats the profile) and is injected into the template's env.default.
 set -a; . "$ENV_FILE"; set +a
 [ -n "${PREFECT_API_URL:-}" ] || { echo "PREFECT_API_URL missing in $ENV_FILE" >&2; exit 1; }
+if [ -z "${IMAGE_REGISTRY:-}" ] || [[ "$IMAGE_REGISTRY" == *"<"* ]]; then
+    echo "IMAGE_REGISTRY missing or still a placeholder in $ENV_FILE (got '${IMAGE_REGISTRY:-}')" >&2; exit 1
+fi
+
+# The template keeps the bare flow image name; the registry is prefixed here from the single env source.
+# A name that already carries a registry would be double-prefixed, so it is rejected.
+bare_image="$(jq -r '.variables.properties.image.default' "$TEMPLATE_FILE")"
+if [ -z "$bare_image" ] || [ "$bare_image" = "null" ] || [[ "$bare_image" == */* ]]; then
+    echo "$TEMPLATE_FILE: image.default must be a bare image name like pipeline-flow:latest (got '$bare_image')" >&2
+    exit 1
+fi
 
 TMP_TPL="$(mktemp)"
 trap 'rm -f "$TMP_TPL"' EXIT
-jq --arg api "$PREFECT_API_URL" \
-    '.variables.properties.env.default = { PREFECT_API_URL: $api }' "$TEMPLATE_FILE" > "$TMP_TPL"
+jq --arg api "$PREFECT_API_URL" --arg image "$IMAGE_REGISTRY/$bare_image" \
+    '.variables.properties.env.default = { PREFECT_API_URL: $api }
+     | .variables.properties.image.default = $image' "$TEMPLATE_FILE" > "$TMP_TPL"
+echo "flow image: $IMAGE_REGISTRY/$bare_image"
 
 # Register (or update) the pool through the server API. The API may need a moment after startup,
 # so retry a few times. --overwrite keeps the base job template in sync on re-runs.
