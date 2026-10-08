@@ -7,13 +7,16 @@
 # - The work pool + base job template are registered on the server (see docker-compose.server.yml),
 #   so the worker only polls the pool — no pool creation here.
 #
-# Build (once):  docker build -f Dockerfile.worker -t prefect-worker:latest .
-# Start:         ./run_worker.sh --work-pool high_performance
-# __version__ = "0.0.14"
+# Build + push (once, multi-arch, from a build host):
+#   docker buildx build --platform linux/amd64,linux/arm64 -f Dockerfile.worker \
+#       -t <IMAGE_REGISTRY>/prefect-worker:latest --push .
+# Start:         ./run_worker.sh --work-pool high_performance   (pulls the image from IMAGE_REGISTRY)
+# __version__ = "0.0.15"
 name: prefect-worker   # compose project name baked in (replaces -p); run_worker.sh relies on it
 services:
   prefect_worker:
-    image: prefect-worker:latest   # built once from Dockerfile.worker (prefect + prefect-docker)
+    # multi-arch image from the registry (prefect + prefect-docker); the pool is chosen at start, not baked in
+    image: ${IMAGE_REGISTRY:?run_worker.sh sets IMAGE_REGISTRY}/prefect-worker:latest
     env_file:
       - ../docker-compose.env_example       # PREFECT_API_URL (shared, kept at Docker/Prefect root)
     # --name <hostname>@<LAN IP> (set by run_worker.sh) tells the server which machine this worker runs on;
