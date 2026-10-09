@@ -1,5 +1,5 @@
 # Prefect Pipeline Orchestration on Docker
-Rev. 616 | Created: 2026-06-13 | Updated: 2026-10-09 10:29 CDT
+Rev. 617 | Created: 2026-06-13 | Updated: 2026-10-09 12:51 CDT
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
@@ -100,9 +100,10 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
   ══ DOCKER 2 ── PREFECT WORKER ════════════════════════════════════════
      dir    : PrefectWorker/
      files  : Dockerfile.worker · docker-compose.worker.yml · run_worker.sh
-     run    : docker build -f Dockerfile.worker -t prefect-worker:latest .   # in PrefectWorker/
-              run_worker.sh --work-pool <tier>  # compose up -d
+     run    : docker buildx build ... -t <IMAGE_REGISTRY>/prefect-worker:latest --push .   # build host, once
+              run_worker.sh --work-pool <tier>  # compose pull + up -d, on every worker machine
      config → ../docker-compose.env + shell
+              IMAGE_REGISTRY  = <host>:<port>              # registry of the worker image
               PREFECT_API_URL = http://prefect_server:4200/api
               WORK_POOL = high_performance | low_performance
               WORKER_LIMIT = 8 | 4                 # worker --limit
@@ -154,19 +155,22 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
      ./register_pool.sh --pool-name low_performance --template-file docker-pool-template-low.json  --concurrency-limit 8
      ```
 
-  2) **[PREFECT WORKER](#5-prefect-worker-container)** — 작업 머신마다 1대 · 직접 빌드
+  2) **[PREFECT WORKER](#5-prefect-worker-container)** — 작업 머신마다 1대 · image 는 registry 에서 받음
 
      ```
      PrefectWorker/
      ├─ Dockerfile.worker          image recipe (python + prefect + prefect-docker)
      ├─ docker-compose.worker.yml  container definition (mounts docker.sock)
-     └─ run_worker.sh              start: compose up
+     └─ run_worker.sh              start: compose pull + up
      ```
 
      Run (from `PrefectWorker/`):
 
      ```bash
-     docker build -f Dockerfile.worker -t prefect-worker:latest .    # build the image once
+     # on the build host, once per Dockerfile change
+     docker buildx build --platform linux/amd64,linux/arm64 -f Dockerfile.worker \
+         -t <IMAGE_REGISTRY>/prefect-worker:latest --push .
+     # on every worker machine; pulls the image from IMAGE_REGISTRY
      ./run_worker.sh --work-pool high_performance --worker-limit 8
      ./run_worker.sh --work-pool low_performance --worker-limit 4
      ```
