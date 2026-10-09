@@ -1,5 +1,5 @@
 # Prefect Docker Registry
-Rev. 1 | Created: 2026-10-08 | Updated: 2026-10-08 21:00 CDT
+Rev. 2 | Created: 2026-10-08 | Updated: 2026-10-08 21:11 CDT
 
 - [1. Purpose](#1-purpose)
 - [2. Summary](#2-summary)
@@ -15,8 +15,9 @@ Rev. 1 | Created: 2026-10-08 | Updated: 2026-10-08 21:00 CDT
   - [5.2 Pushing an Image](#52-pushing-an-image)
   - [5.3 Registering a Deployment](#53-registering-a-deployment)
   - [5.4 Worker Machine](#54-worker-machine)
-  - [5.5 Verification](#55-verification)
-  - [5.6 Failure Cases](#56-failure-cases)
+  - [5.5 Pulling the Worker Image](#55-pulling-the-worker-image)
+  - [5.6 Verification](#56-verification)
+  - [5.7 Failure Cases](#57-failure-cases)
 - [References](#references)
 - [Appendix A. Terminology](#appendix-a-terminology)
 - [Appendix B. Registry of This Stack](#appendix-b-registry-of-this-stack)
@@ -24,7 +25,7 @@ Rev. 1 | Created: 2026-10-08 | Updated: 2026-10-08 21:00 CDT
 ## 1. Purpose
 
 - **Problem Statement**: docker work pool 의 worker 는 deployment 가 적은 image (flow image) 를 자기 machine 의 docker daemon 에서 찾으므로, worker machine 이 여럿이면 image 를 machine 마다 build 하거나 복사해야 하고, 같은 tag 로 새로 build 한 image 는 이미 받아 둔 machine 에 반영되지 않는다.
-- **Goal**: 실무자의 Prefect Docker Registry Guide 로서, image 를 registry 에 한 번 push 하면 모든 worker machine 이 run 마다 그 image 를 받고, 같은 tag 로 다시 push 한 image 가 다음 run 부터 바로 반영되게 한다.
+- **Goal**: 실무자의 Prefect Docker Registry Guide 로서, image 를 registry 에 한 번 push 하면 모든 worker machine 이 run 마다 그 flow image 를 받고, 같은 tag 로 다시 push 한 image 가 다음 run 부터 바로 반영되며, worker image 도 같은 registry 에서 받게 한다.
 - **Non-Goal**: image 의 Dockerfile 과 build 내용, TLS 와 인증을 갖춘 registry, Docker Hub 계정 운용은 다루지 않는다.
 
 ## 2. Summary
@@ -38,7 +39,7 @@ Registry 를 쓰는 stack 은 아래 네 단계로 만든다.
 3. Deployment 를 `image="<REGISTRY_IP>:<PORT>/<NAME>:<TAG>"`, `job_variables={"image_pull_policy": "Always"}`, `build=False`, `push=False` 로 등록한다 ([5.3](#53-registering-a-deployment)).
 4. Worker machine 마다 docker daemon 의 `insecure-registries` 에 `<REGISTRY_IP>:<PORT>` 를 넣고 daemon 을 다시 시작한다 ([5.4](#54-worker-machine)).
 
-네 단계를 적용한 stack 의 상태는 [Appendix B](#appendix-b-registry-of-this-stack) 에 있다.
+Worker image 도 같은 registry 에서 받을 수 있고, 그 image 는 docker compose 가 worker 를 띄울 때 받는다 ([5.5](#55-pulling-the-worker-image)). 네 단계를 적용한 stack 의 상태는 [Appendix B](#appendix-b-registry-of-this-stack) 에 있다.
 
 ## 3. Taxonomy and its Hierarchy
 
@@ -198,9 +199,42 @@ docker info --format '{{json .RegistryConfig.IndexConfigs}}'    # the registry a
 docker pull <REGISTRY_IP>:<PORT>/<NAME>:<TAG>                    # a manual pull proves the path before the first run
 ```
 
-Worker image 와 그 container 에는 설정이 없다. Worker 는 host 의 docker socket 으로 host daemon 에 container 를 요청하므로, pull 은 host daemon 의 설정으로 된다.
+Worker container 에는 registry 설정을 두지 않는다. Worker 는 host 의 docker socket 으로 host daemon 에 container 를 요청하므로, pull 은 host daemon 의 설정으로 된다.
 
-### 5.5 Verification
+### 5.5 Pulling the Worker Image
+
+Worker image 도 flow image 와 같은 registry 에 두면 worker machine 마다 build 하지 않는다. 두 image 는 받는 주체와 받는 때가 갈린다.
+
+Table 3. Who pulls each image
+
+| Image        | Named in                      | Pulled by                       | Pulled when                | A new push takes effect                 |
+| :----------: | :---------------------------: | :-----------------------------: | :------------------------: | :-------------------------------------: |
+| flow image   | deployment `image`            | worker, through the host daemon | every run, policy `Always` | at the next run                         |
+| worker image | compose `image` of the worker | docker compose                  | `docker compose pull`      | after the worker container is recreated |
+
+Worker image 의 push 는 [5.2](#52-pushing-an-image) 와 같다. Worker machine 은 compose 의 `image` 에 registry 주소를 적고, pull 한 뒤 worker 를 다시 띄운다.
+
+```yaml
+# YAML
+services:
+  prefect_worker:
+    image: <REGISTRY_IP>:<PORT>/<WORKER_NAME>:<TAG>   # pulled by docker compose, not by Prefect
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock     # the worker asks the host daemon for flow containers
+```
+
+```bash
+docker compose pull                                       # fetch the worker image last pushed under <TAG>
+docker compose up -d                                      # recreate the worker container when its image changed
+docker inspect <CONTAINER> --format '{{.Config.Image}}'   # the registry name, not a local build
+```
+
+- `docker compose up -d` 는 image 가 바뀐 container 를 멈추고 새로 만든다 [[4](#ref-4)]. 다시 만들어지는 동안 그 worker 는 pool 을 polling 하지 않는다.
+- Compose 의 `pull_policy` 기본값은 `missing` 이고, `always` 로 적으면 `up` 마다 registry 에서 받는다 [[5](#ref-5)]. 이 절은 `docker compose pull` 을 따로 돌려 받는 때를 명령으로 드러낸다.
+- Worker image 도 같은 host daemon 이 받으므로, [5.4](#54-worker-machine) 의 `insecure-registries` 가 그대로 쓰인다.
+- Worker machine 의 CPU architecture 가 섞여 있으면 architecture 마다 build 한 variant 를 manifest list 로 묶어 push 한다. Docker 는 pull 할 때 host 의 architecture 에 맞는 variant 를 고른다 [[6](#ref-6)].
+
+### 5.6 Verification
 
 Registry 에 image 가 있고, deployment 가 그 이름을 가리키고, worker machine 이 pull 하는지를 차례로 본다.
 
@@ -213,9 +247,9 @@ docker images <REGISTRY_IP>:<PORT>/<NAME>                           # on a worke
 
 `Always` 로 도는 deployment 는 새로 push 한 뒤의 첫 run 이 끝나면 worker machine 의 `docker images` 가 보이는 image ID 가 새 image 의 것으로 바뀐다.
 
-### 5.6 Failure Cases
+### 5.7 Failure Cases
 
-Table 3. Symptom, cause and fix
+Table 4. Symptom, cause and fix
 
 | Symptom                                                        | Cause                                                      | Fix                                              |
 | :------------------------------------------------------------: | :--------------------------------------------------------: | :----------------------------------------------: |
@@ -225,6 +259,7 @@ Table 3. Symptom, cause and fix
 | registry 를 띄운 machine 에서만 run 이 됨                         | `image` 가 `localhost:<PORT>/...`                           | `<REGISTRY_IP>:<PORT>/...` 로 재등록, [4.1](#41-image-name) |
 | `deploy()` 가 build 를 시작하거나 push 에서 실패                  | `build=False`, `push=False` 가 없음                          | [5.3](#53-registering-a-deployment)               |
 | push 가 `connection refused`                                    | registry container 가 내려감                                 | `docker compose up -d`, [5.1](#51-running-a-registry) |
+| worker 기동이 image 를 찾지 못해 실패                              | registry 에 worker image 가 없거나 이름이 다름                | `tags/list` 로 대조, [5.5](#55-pulling-the-worker-image) |
 
 ## References
 
@@ -233,7 +268,13 @@ Table 3. Symptom, cause and fix
 <a id="ref-2"></a>
 [2] Prefect. [Run flows in Docker containers](https://docs.prefect.io/v3/how-to-guides/deployment_infra/docker). Prefect 3 documentation, How-to guides.<br>
 <a id="ref-3"></a>
-[3] CNCF Distribution. [Test an insecure registry](https://distribution.github.io/distribution/about/insecure/). Distribution documentation.
+[3] CNCF Distribution. [Test an insecure registry](https://distribution.github.io/distribution/about/insecure/). Distribution documentation.<br>
+<a id="ref-4"></a>
+[4] Docker. [docker compose up](https://docs.docker.com/reference/cli/docker/compose/up/). Docker documentation, CLI reference.<br>
+<a id="ref-5"></a>
+[5] Docker. [Define services in Docker Compose](https://docs.docker.com/reference/compose-file/services/). Docker documentation, Compose file reference.<br>
+<a id="ref-6"></a>
+[6] Docker. [Multi-platform builds](https://docs.docker.com/build/building/multi-platform/). Docker documentation, Build.
 
 ---
 
@@ -249,7 +290,7 @@ Table 3. Symptom, cause and fix
 - **repository**: registry 안에서 한 image 이름이 갖는 tag 들의 집합.
 - **work pool**: Prefect server 에 등록된, run 을 모아 두고 실행 방식을 정하는 단위. Docker type pool 의 run 은 worker 가 container 로 실행한다.
 - **worker**: work pool 을 polling 하다가 run 을 가져가 host 의 docker daemon 에 container 를 요청하는 process.
-- **worker image**: worker process 가 도는 container 의 image. Prefect 와 docker worker package 를 담고 flow code 는 실행하지 않으며, deployment 가 아니라 worker 를 띄우는 compose 설정이 정한다.
+- **worker image**: worker process 가 도는 container 의 image. Prefect 와 docker worker package 를 담고 flow code 는 실행하지 않으며, worker 를 띄우는 compose 설정이 정한다.
 
 ## Appendix B. Registry of This Stack
 
@@ -260,3 +301,5 @@ Table 3. Symptom, cause and fix
 - Deployment 를 등록하는 serve container 는 환경 변수 `POOL_IMAGE=<REGISTRY_IP>:12357/yrocket-finance:latest` 를 받아, pool deployment 를 `image=POOL_IMAGE`, `build=False`, `push=False`, `job_variables` 의 `image_pull_policy="Always"` 로 등록한다.
 - Worker machine 의 docker daemon 은 `insecure-registries` 에 `<REGISTRY_IP>:12357` 을 갖는다. 그 machine 의 `docker images` 에 남은 `<REGISTRY_IP>:12357/yrocket-finance:latest` 는 지난 pull 의 cache 이며, `Always` 이므로 다음 run 이 registry 의 최신 digest 로 바꾼다.
 - Pool template 의 `image_pull_policy` 기본값은 `IfNotPresent` 이고, deployment 의 `job_variables` 가 `Always` 로 덮는다 ([4.3](#43-where-image-and-policy-are-set)).
+- Worker 의 compose 설정은 worker image 를 `<IMAGE_REGISTRY>/prefect-worker:latest` 로 받고, worker 를 띄우는 script 가 기동 전에 `docker compose pull` 을 돈다. Worker image 는 amd64 와 arm64 variant 를 한 tag 로 push 하는 것이 이 stack 의 절차이다.
+- Registry 에는 아직 `prefect-worker` repository 가 없고, 도는 worker 는 그 전에 local 에서 build 한 `prefect-worker:latest` 로 떠 있다. Worker 를 다시 띄우려면 `IMAGE_REGISTRY` 를 registry 주소로 설정하고 worker image 를 먼저 push 해야 한다 ([5.5](#55-pulling-the-worker-image)).
