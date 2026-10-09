@@ -1,5 +1,5 @@
 # Prefect Docker Registry
-Rev. 0 | Created: 2026-10-08 | Updated: 2026-10-08 13:12 CDT
+Rev. 1 | Created: 2026-10-08 | Updated: 2026-10-08 21:00 CDT
 
 - [1. Purpose](#1-purpose)
 - [2. Summary](#2-summary)
@@ -23,7 +23,7 @@ Rev. 0 | Created: 2026-10-08 | Updated: 2026-10-08 13:12 CDT
 
 ## 1. Purpose
 
-- **Problem Statement**: docker work pool 의 worker 는 deployment 가 적은 image 를 자기 machine 의 docker daemon 에서 찾으므로, worker machine 이 여럿이면 image 를 machine 마다 build 하거나 복사해야 하고, 같은 tag 로 새로 build 한 image 는 이미 받아 둔 machine 에 반영되지 않는다.
+- **Problem Statement**: docker work pool 의 worker 는 deployment 가 적은 image (flow image) 를 자기 machine 의 docker daemon 에서 찾으므로, worker machine 이 여럿이면 image 를 machine 마다 build 하거나 복사해야 하고, 같은 tag 로 새로 build 한 image 는 이미 받아 둔 machine 에 반영되지 않는다.
 - **Goal**: 실무자의 Prefect Docker Registry Guide 로서, image 를 registry 에 한 번 push 하면 모든 worker machine 이 run 마다 그 image 를 받고, 같은 tag 로 다시 push 한 image 가 다음 run 부터 바로 반영되게 한다.
 - **Non-Goal**: image 의 Dockerfile 과 build 내용, TLS 와 인증을 갖춘 registry, Docker Hub 계정 운용은 다루지 않는다.
 
@@ -198,7 +198,7 @@ docker info --format '{{json .RegistryConfig.IndexConfigs}}'    # the registry a
 docker pull <REGISTRY_IP>:<PORT>/<NAME>:<TAG>                    # a manual pull proves the path before the first run
 ```
 
-Worker container 자체는 설정이 없다. Worker 는 host 의 docker socket 으로 host daemon 에 container 를 요청하므로, pull 은 host daemon 의 설정으로 된다.
+Worker image 와 그 container 에는 설정이 없다. Worker 는 host 의 docker socket 으로 host daemon 에 container 를 요청하므로, pull 은 host daemon 의 설정으로 된다.
 
 ### 5.5 Verification
 
@@ -241,6 +241,7 @@ Table 3. Symptom, cause and fix
 
 - **base job template**: work pool 이 띄우는 모든 run container 의 공통 설정. `image` 와 `image_pull_policy` 의 기본값이 여기에 있다.
 - **digest**: image manifest 의 내용 hash. 같은 tag 라도 다시 push 하면 digest 가 바뀐다.
+- **flow image**: deployment 의 `image` 가 가리키는 image. Worker 가 run 마다 이 image 로 run container 를 띄우고, 그 안에서 flow code 가 돈다.
 - **image_pull_policy**: run container 를 만들기 전에 image 를 받을지 정하는 값. `IfNotPresent`, `Always`, `IfPossible`, `Never`.
 - **insecure registry**: TLS 없이 HTTP 로 서는 registry. Pull 하는 daemon 마다 `insecure-registries` 에 등록해야 한다.
 - **job_variables**: deployment 가 base job template 의 기본값을 덮어쓰는 값들.
@@ -248,6 +249,7 @@ Table 3. Symptom, cause and fix
 - **repository**: registry 안에서 한 image 이름이 갖는 tag 들의 집합.
 - **work pool**: Prefect server 에 등록된, run 을 모아 두고 실행 방식을 정하는 단위. Docker type pool 의 run 은 worker 가 container 로 실행한다.
 - **worker**: work pool 을 polling 하다가 run 을 가져가 host 의 docker daemon 에 container 를 요청하는 process.
+- **worker image**: worker process 가 도는 container 의 image. Prefect 와 docker worker package 를 담고 flow code 는 실행하지 않으며, deployment 가 아니라 worker 를 띄우는 compose 설정이 정한다.
 
 ## Appendix B. Registry of This Stack
 
