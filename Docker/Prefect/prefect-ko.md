@@ -1,5 +1,5 @@
 # Prefect Pipeline Orchestration on Docker
-Rev. 615 | Created: 2026-06-13 | Updated: 2026-10-08 21:30 CDT
+Rev. 616 | Created: 2026-06-13 | Updated: 2026-10-09 10:29 CDT
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
@@ -514,12 +514,15 @@ worker 는 **`docker` work pool** 을 polling 해 job 마다 `pipeline_flow` 컨
 
 ### 5.1 Image
 
-  docker worker 는 `prefect`·`prefect-docker` 가 필요한데, 부팅 때 설치하지 않고 **전용 이미지를 1회 빌드** 해 씁니다.
+  docker worker 는 `prefect`·`prefect-docker` 가 필요한데, 부팅 때 설치하지 않고 **전용 이미지를 build 해 registry 에 push** 해 둡니다. Worker machine 은 이 이미지를 build 하지 않고 registry 에서 받습니다 ([§5.2](#52-container)).
 
   #### Dockerfile
 
   ```dockerfile
   # Dockerfile.worker
+  # __version__ = "0.0.1"  # Semantic Versioning:  Version = Major.Minor.Patch
+  # Worker image — a Prefect docker worker (prefect + prefect-docker only, no team libraries).
+  # Built once; the worker container then runs `prefect worker start` with no per-boot install.
   FROM python:3.11.15-slim
   RUN pip install --no-cache-dir "prefect>=3,<4" prefect-docker
   ```
@@ -529,15 +532,20 @@ worker 는 **`docker` work pool** 을 polling 해 job 마다 `pipeline_flow` 컨
 
   #### Execution Command
 
-  `PrefectWorker/` 에서 `docker build` 를 1회 합니다.
+  build 하는 machine 의 `PrefectWorker/` 에서 1회 실행합니다. Dockerfile 을 바꿀 때마다 다시 실행합니다.
 
   ```bash
-  docker build -f Dockerfile.worker -t prefect-worker:latest .
+  docker buildx build --platform linux/amd64,linux/arm64 -f Dockerfile.worker \
+      -t <IMAGE_REGISTRY>/prefect-worker:latest --push .
   ```
 
-  - `docker build CLI -f` — 빌드할 Dockerfile.
-  - `docker build CLI -t` — image tag. 이미지에 붙이는 이름:태그 (`prefect-worker:latest`) 로, worker compose (`run_worker.sh`) 가 이 이름으로 컨테이너를 띄웁니다.
-  - `docker build CLI .` — build context. 빌드 시 Docker 데몬에 보내는 파일 루트입니다 (`.` 는 현재 폴더; 이 Dockerfile 은 `COPY` 가 없어 보낼 파일은 없지만 인자는 필요).
+  - `--platform linux/amd64,linux/arm64` — 두 CPU architecture 의 이미지를 한 tag 로 묶어 만듭니다. Worker machine 은 pull 할 때 자기 architecture 의 것을 받습니다.
+  - `-f Dockerfile.worker` — build 할 Dockerfile 입니다.
+  - `-t <IMAGE_REGISTRY>/prefect-worker:latest` — registry 주소가 든 image 이름입니다. `<IMAGE_REGISTRY>` 는 `docker-compose.env` 의 `IMAGE_REGISTRY` 와 같은 `<host>:<port>` 입니다.
+  - `--push` — build 한 이미지를 그 registry 에 바로 올립니다.
+  - `.` — build context 입니다 (이 Dockerfile 은 `COPY` 가 없어 보낼 파일은 없지만 인자는 필요합니다).
+
+  > registry 를 띄우는 방법과 worker machine 의 `insecure-registries` 설정은 [prefect-registry-ko.md](prefect-registry-ko.md) 를 따릅니다.
 
 ### 5.2 Container
 
@@ -555,13 +563,16 @@ worker 는 **`docker` work pool** 을 polling 해 job 마다 `pipeline_flow` 컨
   # - The work pool + base job template are registered on the server (see docker-compose.server.yml),
   #   so the worker only polls the pool — no pool creation here.
   #
-  # Build (once):  docker build -f Dockerfile.worker -t prefect-worker:latest .
-  # Start:         ./run_worker.sh --work-pool high_performance
-  # __version__ = "0.0.14"
+  # Build + push (once, multi-arch, from a build host):
+  #   docker buildx build --platform linux/amd64,linux/arm64 -f Dockerfile.worker \
+  #       -t <IMAGE_REGISTRY>/prefect-worker:latest --push .
+  # Start:         ./run_worker.sh --work-pool high_performance   (pulls the image from IMAGE_REGISTRY)
+  # __version__ = "0.0.15"
   name: prefect-worker   # compose project name baked in (replaces -p); run_worker.sh relies on it
   services:
     prefect_worker:
-      image: prefect-worker:latest   # built once from Dockerfile.worker (prefect + prefect-docker)
+      # multi-arch image from the registry (prefect + prefect-docker); the pool is chosen at start, not baked in
+      image: ${IMAGE_REGISTRY:?run_worker.sh sets IMAGE_REGISTRY}/prefect-worker:latest
       env_file:
         - ../docker-compose.env_example       # PREFECT_API_URL (shared, kept at Docker/Prefect root)
       # --name <hostname>@<LAN IP> (set by run_worker.sh) tells the server which machine this worker runs on;
@@ -582,7 +593,8 @@ worker 는 **`docker` work pool** 을 polling 해 job 마다 `pipeline_flow` 컨
   ```
 
   - `volumes: /var/run/docker.sock` — worker 가 호스트 도커로 `pipeline_flow` 컨테이너를 띄우는 통로입니다. Windows 도 같은 줄로 됩니다 — Docker Desktop 이 Linux 컨테이너용으로 이 경로에 도커 소켓을 노출하기 때문입니다 (호스트의 named pipe `\\.\pipe\docker_engine` 을 컨테이너 안 `/var/run/docker.sock` 로 연결).
-  - `command` — `prefect worker start` 만 합니다. prefect·prefect-docker 는 **이미지에 구워져** 있고 `PREFECT_API_URL` 은 env_file 이 주므로, 부팅 때 설치·export 가 없습니다 (`bash -c` 도 불필요). `--type docker` 로 docker worker 임을 고정하고, `--no-create-pool-if-not-found` 로 **없는 pool 을 자동 생성하지 않습니다** (오타 이름이 들어와도 process pool 이 몰래 생기지 않고 오류로 멈춤; pool 은 server [§4](#4-prefect-server-container) 가 이미 등록). `WORK_POOL`·`WORKER_LIMIT`·`WORK_QUEUE_OPTION` 은 `docker compose up` 시 셸에서 읽는 변수입니다.
+  - `image` — worker image 를 `<IMAGE_REGISTRY>/prefect-worker:latest` 로 registry 에서 받습니다 ([§5.1](#51-image)). `IMAGE_REGISTRY` 는 `run_worker.sh` 가 `docker-compose.env` 에서 읽어 export 하며, 값이 없으면 compose 가 기동 전에 멈춥니다.
+  - `command` — `prefect worker start` 만 합니다. prefect·prefect-docker 는 **이미지에 구워져** 있고 `PREFECT_API_URL` 은 env_file 이 주므로, 부팅 때 설치·export 가 없습니다 (`bash -c` 도 불필요). `--type docker` 로 docker worker 임을 고정하고, `--no-create-pool-if-not-found` 로 **없는 pool 을 자동 생성하지 않습니다** (오타 이름이 들어와도 process pool 이 몰래 생기지 않고 오류로 멈춤; pool 은 server [§4](#4-prefect-server-container) 가 이미 등록). `IMAGE_REGISTRY`·`WORK_POOL`·`WORKER_LIMIT`·`WORK_QUEUE_OPTION` 은 `docker compose up` 시 셸에서 읽는 변수입니다.
   - `--limit` 은 이 worker 가 **동시에 띄우는 컨테이너 수의 상한** 입니다 (동시성 세 층은 [§4 Work Pool Registration](#work-pool-registration) 의 여러 pool 표 참고).
 
   #### Execution Command
@@ -598,7 +610,7 @@ worker 는 **`docker` work pool** 을 polling 해 job 마다 `pipeline_flow` 컨
   - `--worker-limit <limit-count>` — 이 머신이 동시에 띄울 pipeline_flow 컨테이너 수 한도입니다 (기본 8).
   - `--work-queue <queue>` — 생략하면 pool 의 모든 work queue 를 polling 합니다. 주면 그 queue 만 polling 하는 worker 를 `<hostname>-<queue>@<LAN IP>` 이름과 compose project `prefect-worker-<queue>` 로 따로 띄워, pool 전체를 맡는 worker 와 나란히 돌립니다 ([§5.3](#53-scaling)). server 에 없는 queue 이름이면 기동 전에 멈춥니다.
   - **pool 검증** — 기동 전에 server 에 등록된 **docker 타입** work pool 목록과 대조해, 없는 이름이면 목록을 번호로 보여주고 그중에서 고르게 합니다 (오타·미등록 pool, 그리고 자동 생성된 process pool 까지 걸러 헛도는 것을 막습니다). 조회는 host 의 `prefect` CLI (`work-pool ls --output json`) 로 합니다.
-  - `docker compose up` (스크립트 내부) — 컨테이너가 뜨면 그 `command` 인 `prefect worker start` 가 컨테이너 안에서 실행됩니다.
+  - `docker compose pull` 뒤 `up` (스크립트 내부) — registry 에서 최신 worker image 를 받은 뒤 컨테이너를 띄우고, 그 `command` 인 `prefect worker start` 가 컨테이너 안에서 실행됩니다.
 
   **머신마다 실행** — 같은 compose 를 각 컴퓨터에서 자기 등급 `WORK_POOL` 로 띄웁니다. pool 이 server 에 이미 있으니 (§4) worker 는 polling 만 하며, 등급별 첫 머신/추가 머신 구분이 없습니다.
 
