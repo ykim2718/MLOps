@@ -1,5 +1,5 @@
 # Prefect Pipeline Orchestration on Docker
-Rev. 614 | Created: 2026-06-13 | Updated: 2026-10-08 13:31 CDT
+Rev. 615 | Created: 2026-06-13 | Updated: 2026-10-08 21:30 CDT
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
@@ -1342,7 +1342,7 @@ echo "[register_variables] set: minio_endpoint, postgresql_host_port, mlflow_tra
 ```bash
 #!/usr/bin/env bash
 # run_worker.sh — start the Prefect worker compose stack on a worker machine.
-# __version__ = "0.0.25"  # Semantic Versioning:  Version = Major.Minor.Patch
+# __version__ = "0.0.26"  # Semantic Versioning:  Version = Major.Minor.Patch
 #
 # Brings up prefect_worker, which polls the given work pool. WORK_POOL/WORKER_LIMIT are read from
 # this shell at "docker compose up" (compose interpolation), so they are exported below.
@@ -1360,6 +1360,9 @@ echo "[register_variables] set: minio_endpoint, postgresql_host_port, mlflow_tra
 # which machine each worker runs on; the Prefect API records no host for a worker otherwise.
 # With --work-queue the worker polls that queue of the pool only, is named '<hostname>-<queue>@<LAN IP>', and runs
 # as its own compose project (prefect-worker-<queue>), so it starts and stops beside the pool-wide worker.
+#
+# The worker image is pulled from IMAGE_REGISTRY (read from ../docker-compose.env, else the _example), so a new
+# machine needs no local build; re-running this script pulls the latest pushed image.
 #
 set -euo pipefail
 
@@ -1379,6 +1382,18 @@ while [ $# -gt 0 ]; do
 done
 
 COMPOSE="docker-compose.worker.yml"
+ENV_FILE="../docker-compose.env"   # shared address source; falls back to the committed _example
+
+# --- Registry of the worker image: read only IMAGE_REGISTRY (sourcing the whole file would override the
+# host's PREFECT_API_URL with a possible placeholder) ------------------------------------------------
+[ -f "$ENV_FILE" ] || ENV_FILE="../docker-compose.env_example"
+[ -f "$ENV_FILE" ] || { echo "env file not found: $ENV_FILE" >&2; exit 1; }
+IMAGE_REGISTRY="$(sed -n 's/^IMAGE_REGISTRY=//p' "$ENV_FILE" | tail -n 1 | tr -d '\r')"
+if [ -z "$IMAGE_REGISTRY" ] || [[ "$IMAGE_REGISTRY" == *"<"* ]]; then
+    echo "IMAGE_REGISTRY missing or still a placeholder in $ENV_FILE (got '$IMAGE_REGISTRY')." >&2
+    echo "Set it to the registry <host>:<port>; an HTTP registry also needs 'insecure-registries' in the docker daemon." >&2
+    exit 1
+fi
 
 command -v jq >/dev/null 2>&1 || { echo "jq is required to parse 'prefect work-pool ls --output json'. Install jq and retry." >&2; exit 1; }
 
@@ -1477,6 +1492,10 @@ export WORK_POOL
 export WORKER_LIMIT
 export WORKER_NAME
 export WORK_QUEUE_OPTION
+export IMAGE_REGISTRY
+
+# Pull the latest worker image (the arch of this machine) before restarting, so a re-run picks up a new push.
+docker compose -p "$PROJECT" -f "$COMPOSE" pull
 
 # Bring the worker stack down (keeping volumes) and back up in the background.
 # -p names the project, so down only ever touches this stack (the pool-wide worker or one queue's worker).

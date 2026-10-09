@@ -1,11 +1,11 @@
 # run_worker.sh
-Rev. 2 | Created: 2026-09-30 | Updated: 2026-09-30 13:06 CDT
+Rev. 3 | Created: 2026-09-30 | Updated: 2026-10-08 21:30 CDT
 
 > **Goal** — 한 machine 에서 Prefect worker container 를 띄워, 지정한 docker work pool 또는 그 pool 의 work queue 하나에 들어온 run 을 그 machine 이 실행하게 한다. 잘못된 pool·queue 이름으로 worker 가 run 을 하나도 받지 못하는 일은 기동 전에 막는다.
 >
-> **Non-Goals** — work pool 과 work queue 를 만들거나 concurrency limit 을 바꾸지 않는다. Prefect server 를 띄우지 않는다. worker image `prefect-worker:latest` 를 build 하지 않는다.
+> **Non-Goals** — work pool 과 work queue 를 만들거나 concurrency limit 을 바꾸지 않는다. Prefect server 를 띄우지 않는다. worker image `prefect-worker:latest` 를 build 하거나 registry 에 push 하지 않는다.
 >
-> **Background** — worker compose 파일은 pool 이름과 한도를 `docker compose up` 때 셸 변수로 읽으므로, 그 값을 정해 export 하는 script 가 필요하다. Prefect API 는 worker 가 어느 machine 에서 도는지 기록하지 않아, worker 이름에 `<hostname>@<LAN IP>` 를 넣는다. 오타 난 pool·queue 이름으로 뜬 worker 는 run 을 하나도 받지 못한 채 돌기 때문에, 이름을 server 의 목록과 먼저 대조한다.
+> **Background** — worker compose 파일은 pool 이름과 한도, worker image 의 registry 를 `docker compose up` 때 셸 변수로 읽으므로, 그 값을 정해 export 하는 script 가 필요하다. Prefect API 는 worker 가 어느 machine 에서 도는지 기록하지 않아, worker 이름에 `<hostname>@<LAN IP>` 를 넣는다. 오타 난 pool·queue 이름으로 뜬 worker 는 run 을 하나도 받지 못한 채 돌기 때문에, 이름을 server 의 목록과 먼저 대조한다.
 
 - [1. Pipeline](#1-pipeline)
 - [2. Method](#2-method)
@@ -24,13 +24,14 @@ Rev. 2 | Created: 2026-09-30 | Updated: 2026-09-30 13:06 CDT
 `run_worker.sh` 는 아래 차례로 worker container 를 띄운다. 코드 전체는 [Appendix D](#appendix-d-script) 에 있다.
 
 1. 옵션 읽기 — `--work-pool`, `--worker-limit`, `--worker-ip`, `--work-queue`.
-2. 도구 확인 — `jq` 와 host 의 `prefect` CLI 가 없으면 설치 방법을 출력하고 멈춘다.
-3. Network 준비 — docker network `mlops` 가 없으면 만든다.
-4. Pool 검증 — `prefect work-pool ls --output json` 으로 server 의 docker type pool 목록을 읽어 `--work-pool` 과 대조한다. 목록에 없으면 번호를 붙여 보여 주고 하나를 고르게 한다.
-5. Queue 검증 — `--work-queue` 를 주었으면 `prefect work-queue inspect` 로 그 queue 가 pool 에 있는지 확인한다. 없으면 만드는 명령을 출력하고 멈춘다.
-6. LAN IP 결정 — `--worker-ip` 가 없으면 Windows 의 default route interface (`powershell.exe`) 또는 Linux 의 default route source 주소 (`ip route`) 에서 읽는다.
-7. 이름 결정 — compose project, worker 이름, queue 옵션을 정한다 ([2. Method](#2-method)).
-8. 기동 — 변수를 export 하고 `docker compose -p <project> down` 뒤 `up -d` 한다.
+2. Registry 읽기 — `../docker-compose.env` 에서 `IMAGE_REGISTRY` 한 줄만 읽고, 파일이 없으면 `../docker-compose.env_example` 을 읽는다. 값이 비었거나 `<` 가 든 자리표시자면 멈춘다.
+3. 도구 확인 — `jq` 와 host 의 `prefect` CLI 가 없으면 설치 방법을 출력하고 멈춘다.
+4. Network 준비 — docker network `mlops` 가 없으면 만든다.
+5. Pool 검증 — `prefect work-pool ls --output json` 으로 server 의 docker type pool 목록을 읽어 `--work-pool` 과 대조한다. 목록에 없으면 번호를 붙여 보여 주고 하나를 고르게 한다.
+6. Queue 검증 — `--work-queue` 를 주었으면 `prefect work-queue inspect` 로 그 queue 가 pool 에 있는지 확인한다. 없으면 만드는 명령을 출력하고 멈춘다.
+7. LAN IP 결정 — `--worker-ip` 가 없으면 Windows 의 default route interface (`powershell.exe`) 또는 Linux 의 default route source 주소 (`ip route`) 에서 읽는다.
+8. 이름 결정 — compose project, worker 이름, queue 옵션을 정한다 ([2. Method](#2-method)).
+9. 기동 — 변수를 export 하고, `docker compose -p <project> pull` 로 이 machine 의 architecture 에 맞는 worker image 를 받은 뒤 `down` 하고 `up -d` 한다.
 
 ## 2. Method
 
@@ -54,7 +55,8 @@ Table 1. Names by queue option
 - `jq` — `prefect work-pool ls --output json` 의 출력을 읽는다.
 - `docker compose` — 같은 folder 의 `docker-compose.worker.yml` 을 띄운다.
 - `../docker-compose.env_example` — worker container 가 읽는 `PREFECT_API_URL` 을 담는다.
-- Image `prefect-worker:latest` — `Dockerfile.worker` 로 미리 build 해 둔다.
+- `../docker-compose.env` — script 가 읽는 `IMAGE_REGISTRY` (registry 의 `<host>:<port>`) 를 담는다.
+- Registry 의 `prefect-worker:latest` — worker image 를 `IMAGE_REGISTRY` 에 미리 push 해 둔다. HTTP registry 면 이 machine 의 docker daemon 에 `insecure-registries` 도 있어야 pull 이 된다.
 - Server 에 등록된 docker type work pool 과, `--work-queue` 를 쓸 때는 그 pool 의 work queue.
 
 ---
@@ -64,9 +66,10 @@ Table 1. Names by queue option
 - **compose project**: `docker compose` 가 container·network 이름 앞에 붙이는 묶음 이름. `-p` 로 정하며, `down` 은 같은 project 의 container 만 내린다.
 - **concurrency limit**: 동시에 실행할 수 있는 run 수의 상한. Work pool 과 work queue 에 각각 둘 수 있고, pool 의 상한은 그 pool 의 모든 queue 에 함께 걸린다.
 - **LAN IP**: machine 이 내부망에서 쓰는 IPv4 주소.
+- **registry**: image 를 보관하고 push 와 pull 을 받는 service. 여기서는 worker image 를 담는다.
 - **work pool**: Prefect server 에 등록된, run 을 모아 두는 단위. Docker type pool 의 run 은 worker 가 docker container 로 실행한다.
 - **work queue**: work pool 안의 대기열. Deployment 는 `work_queue_name` 으로 queue 를 정하고, 정하지 않으면 `default` queue 에 들어간다.
-- **worker**: work pool 을 polling 하다가 run 을 가져가 실행하는 process. 여기서는 `prefect-worker:latest` container 안에서 돈다.
+- **worker**: work pool 을 polling 하다가 run 을 가져가 실행하는 process. 여기서는 registry 에서 받은 `prefect-worker:latest` container 안에서 돈다.
 
 ## Appendix B. CLI (Command Line Options)
 
@@ -122,7 +125,7 @@ LAN IP 를 자동으로 읽지 못하는 machine 에서 worker 이름에 넣을 
 ```bash
 #!/usr/bin/env bash
 # run_worker.sh — start the Prefect worker compose stack on a worker machine.
-# __version__ = "0.0.25"  # Semantic Versioning:  Version = Major.Minor.Patch
+# __version__ = "0.0.26"  # Semantic Versioning:  Version = Major.Minor.Patch
 #
 # Brings up prefect_worker, which polls the given work pool. WORK_POOL/WORKER_LIMIT are read from
 # this shell at "docker compose up" (compose interpolation), so they are exported below.
@@ -140,6 +143,9 @@ LAN IP 를 자동으로 읽지 못하는 machine 에서 worker 이름에 넣을 
 # which machine each worker runs on; the Prefect API records no host for a worker otherwise.
 # With --work-queue the worker polls that queue of the pool only, is named '<hostname>-<queue>@<LAN IP>', and runs
 # as its own compose project (prefect-worker-<queue>), so it starts and stops beside the pool-wide worker.
+#
+# The worker image is pulled from IMAGE_REGISTRY (read from ../docker-compose.env, else the _example), so a new
+# machine needs no local build; re-running this script pulls the latest pushed image.
 #
 set -euo pipefail
 
@@ -159,6 +165,18 @@ while [ $# -gt 0 ]; do
 done
 
 COMPOSE="docker-compose.worker.yml"
+ENV_FILE="../docker-compose.env"   # shared address source; falls back to the committed _example
+
+# --- Registry of the worker image: read only IMAGE_REGISTRY (sourcing the whole file would override the
+# host's PREFECT_API_URL with a possible placeholder) ------------------------------------------------
+[ -f "$ENV_FILE" ] || ENV_FILE="../docker-compose.env_example"
+[ -f "$ENV_FILE" ] || { echo "env file not found: $ENV_FILE" >&2; exit 1; }
+IMAGE_REGISTRY="$(sed -n 's/^IMAGE_REGISTRY=//p' "$ENV_FILE" | tail -n 1 | tr -d '\r')"
+if [ -z "$IMAGE_REGISTRY" ] || [[ "$IMAGE_REGISTRY" == *"<"* ]]; then
+    echo "IMAGE_REGISTRY missing or still a placeholder in $ENV_FILE (got '$IMAGE_REGISTRY')." >&2
+    echo "Set it to the registry <host>:<port>; an HTTP registry also needs 'insecure-registries' in the docker daemon." >&2
+    exit 1
+fi
 
 command -v jq >/dev/null 2>&1 || { echo "jq is required to parse 'prefect work-pool ls --output json'. Install jq and retry." >&2; exit 1; }
 
@@ -257,6 +275,10 @@ export WORK_POOL
 export WORKER_LIMIT
 export WORKER_NAME
 export WORK_QUEUE_OPTION
+export IMAGE_REGISTRY
+
+# Pull the latest worker image (the arch of this machine) before restarting, so a re-run picks up a new push.
+docker compose -p "$PROJECT" -f "$COMPOSE" pull
 
 # Bring the worker stack down (keeping volumes) and back up in the background.
 # -p names the project, so down only ever touches this stack (the pool-wide worker or one queue's worker).
