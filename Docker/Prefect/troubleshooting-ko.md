@@ -1,6 +1,6 @@
 # Troubleshooting
 
-Rev. 25 | Created: 2026-06-28 | Updated: 2026-09-30 13:12 CDT
+Rev. 26 | Created: 2026-06-28 | Updated: 2026-10-10 08:54 CDT
 
 운영 중 마주친 문제를 증상·원인·진단·해결 순으로 모읍니다. 새 이슈는 H2 항목으로 덧붙입니다.
 
@@ -51,7 +51,7 @@ Rev. 25 | Created: 2026-06-28 | Updated: 2026-09-30 13:12 CDT
 - **해결** — 잘못된 이름을 지우고 규칙대로 재배포합니다 (`--name` 은 `<tier>_deployment`).
 
   ```bash
-  cd ~/prefect/PipelineFlow
+  cd ~/prefect/PrefectFlow
   prefect deployment delete 'pipeline/pipeline-low'
   prefect deployment delete 'pipeline/pipeline-flow'
   prefect deploy --prefect-file low_deployment.yml  --name low_deployment  --no-prompt

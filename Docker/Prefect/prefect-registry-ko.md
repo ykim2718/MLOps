@@ -1,5 +1,5 @@
 # Prefect Docker Registry
-Rev. 4 | Created: 2026-10-08 | Updated: 2026-10-10 08:47 CDT
+Rev. 5 | Created: 2026-10-08 | Updated: 2026-10-10 08:54 CDT
 
 - [1. Purpose](#1-purpose)
 - [2. Summary](#2-summary)
@@ -308,7 +308,7 @@ Table 4. Symptom, cause and fix
 
   ```bash
   ./push_worker_image.sh --registry localhost:12357   # in PrefectWorker/
-  ./push_flow_image.sh   --registry localhost:12357   # in PipelineFlow/
+  ./push_flow_image.sh   --registry localhost:12357   # in PrefectFlow/
   ```
 
   `--registry` 를 빼면 `../docker-compose.env` 의 `IMAGE_REGISTRY` 를 쓰고, 값이 비었거나 자리표시자면 build 전에 멈춘다. `--platform` 은 build 할 CPU architecture (기본 `linux/amd64,linux/arm64`), `--tag` 는 image tag (기본 `latest`) 를 정한다. 두 architecture 를 한 번에 build 하려면 그 machine 의 Docker 가 containerd image store 를 써야 한다.

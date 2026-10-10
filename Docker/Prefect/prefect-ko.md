@@ -1,5 +1,5 @@
 # Prefect Pipeline Orchestration on Docker
-Rev. 626 | Created: 2026-06-13 | Updated: 2026-10-10 08:44 CDT
+Rev. 627 | Created: 2026-06-13 | Updated: 2026-10-10 08:54 CDT
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
@@ -109,7 +109,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
               WORKER_LIMIT = 8 | 4                 # worker --limit
        ▼
   ══ DOCKER 3 ── PIPELINE FLOW ═════════════════════════════════════════════
-     dir    : PipelineFlow/
+     dir    : PrefectFlow/
      files  : Dockerfile.pipeline_flow · requirements.txt · pipeline.py · push_flow_image.sh
               high_deployment.yml · low_deployment.yml
      run    : push_flow_image.sh                    # multi-arch build + push, on the build host
@@ -180,7 +180,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
   3) **[PIPELINE FLOW](#6-pipeline-flow-container)** — job 마다 떴다 사라지는 컨테이너 · image 는 registry 에서 받음
 
      ```
-     PipelineFlow/
+     PrefectFlow/
      ├─ Dockerfile.pipeline_flow       flow image recipe (FROM python:3.11.15)
      ├─ .dockerignore                  build context = requirements.txt + pipeline.py only
      ├─ requirements.txt               team libraries (torch · mlflow · optuna …)
@@ -189,7 +189,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
      └─ {high,low}-deployment.yml    deployment definitions (admin registers once)
      ```
 
-     Run (from `PipelineFlow/`):
+     Run (from `PrefectFlow/`):
 
      ```bash
      ./push_flow_image.sh   # on the build host, after a change to the Dockerfile, requirements.txt or pipeline.py
@@ -731,7 +731,7 @@ Pipeline Flow 는 worker 가 job 마다 띄우는 per-flow 컨테이너입니다
 
   #### Execution Command
 
-  build 하는 machine 의 `PipelineFlow/` 에서 `push_flow_image.sh` 를 실행합니다. `Dockerfile.pipeline_flow`, `requirements.txt`, `pipeline.py` 를 바꿀 때마다 다시 실행합니다 (코드는 [Appendix O](#appendix-o-push_flow_imagesh)).
+  build 하는 machine 의 `PrefectFlow/` 에서 `push_flow_image.sh` 를 실행합니다. `Dockerfile.pipeline_flow`, `requirements.txt`, `pipeline.py` 를 바꿀 때마다 다시 실행합니다 (코드는 [Appendix O](#appendix-o-push_flow_imagesh)).
 
   ```bash
   ./push_flow_image.sh                              # registry = IMAGE_REGISTRY of ../docker-compose.env
@@ -796,7 +796,7 @@ Pipeline Flow 는 worker 가 job 마다 띄우는 per-flow 컨테이너입니다
   `prefect deploy` 는 yaml 정의를 server 에 등록합니다. 실행 폴더에는 `pipeline.py` 와 `high_deployment.yml` 가 있어야 합니다.
 
   ```bash
-  cd PipelineFlow                                      # the folder with pipeline.py and high_deployment.yml
+  cd PrefectFlow                                      # the folder with pipeline.py and high_deployment.yml
   prefect deploy --prefect-file high_deployment.yml --name high_deployment --no-prompt
   ```
 
