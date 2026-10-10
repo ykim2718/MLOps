@@ -1,5 +1,5 @@
 # Prefect Pipeline Orchestration on Docker
-Rev. 621 | Created: 2026-06-13 | Updated: 2026-10-09 23:56 CDT
+Rev. 622 | Created: 2026-06-13 | Updated: 2026-10-09 23:58 CDT
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
@@ -661,21 +661,48 @@ Pipeline Flow 는 worker 가 job 마다 띄우는 per-flow 컨테이너입니다
 
   ```dockerfile
   # Dockerfile.pipeline_flow — shared team Pipeline Flow image (libraries + orchestrator)
+  # Dependency install runs once at build time and stays in the layer cache, so later container starts are fast.
   FROM python:3.11.15
-  RUN apt-get update && apt-get install -y --no-install-recommends git \
+
+  # System packages.
+  #   git             : pipeline.py shallow-fetches the team repo into a per-run worktree at runtime
+  #   build-essential : compiles C extensions (ucrdtw / dtaidistance / TA-Lib Python wrappers)
+  #   wget            : downloads the TA-Lib C library source
+  RUN apt-get update && apt-get install -y --no-install-recommends \
+          git build-essential wget \
       && rm -rf /var/lib/apt/lists/*
 
+  # The TA-Lib Python package needs the C library of the same name, so build and install it from source.
+  RUN wget -q http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz \
+      && tar -xzf ta-lib-0.4.0-src.tar.gz \
+      && cd ta-lib \
+      && ./configure --prefix=/usr \
+      && make \
+      && make install \
+      && cd .. \
+      && rm -rf ta-lib ta-lib-0.4.0-src.tar.gz
+
   WORKDIR /work
-  # requirements.txt — required: prefect, boto3
+
+  # Copy requirements first so this layer is cached when only code changes.
   COPY requirements.txt .
+
+  # ucrdtw / TA-Lib import numpy at build time, but pip's build isolation has no numpy, so a plain -r install fails.
+  # Install numpy first, then those two with build isolation disabled, then the rest.
+  RUN pip install --no-cache-dir numpy==1.26.4
+  # SETUPTOOLS_USE_DISTUTILS=stdlib: the setuptools distutils shim lacks the msvccompiler that numpy.distutils looks for.
+  RUN SETUPTOOLS_USE_DISTUTILS=stdlib pip install --no-cache-dir --no-build-isolation ucrdtw==0.201
+  # TA-Lib 0.4.29's bundled C source uses the numpy 1.x C API; disable isolation so it compiles against the numpy 1.26 above.
+  RUN pip install --no-cache-dir --no-build-isolation TA-Lib==0.4.29
   RUN pip install --no-cache-dir -r requirements.txt
 
-  # pipeline.py — orchestrator (deployment entrypoint); team repo is shallow-fetched at runtime into a per-run script/
+  # pipeline.py — orchestrator (deployment entrypoint). Prefect's docker worker injects the run command; no CMD needed.
   COPY pipeline.py .
   ```
 
-  - `FROM python:3.11.15` + `apt-get install git` — 베이스 이미지에 런타임 `git fetch`·`worktree` 용 git 을 더합니다.
-  - `COPY requirements.txt` → `pip install` — 팀 라이브러리를 설치합니다 (코드보다 먼저 복사해 레이어 캐시를 살립니다). required: `prefect`·`boto3` · payload: `mlflow`·`optuna`·`scikit-learn`·`numpy`·`pyarrow` · optional: `pandas`·`torch`·`psycopg2-binary`.
+  - `FROM python:3.11.15` + `apt-get install git build-essential wget` — `git` 은 런타임 `git fetch`·`worktree` 용, `build-essential` 은 C 확장 (ucrdtw·dtaidistance·TA-Lib) 을 compile 하는 용도, `wget` 은 TA-Lib C library source 를 내려받는 용도입니다.
+  - TA-Lib C library — Python `TA-Lib` package 는 같은 이름의 C library 를 필요로 하므로, `ta-lib-0.4.0` source 를 build 해 `/usr` 에 설치합니다.
+  - `COPY requirements.txt` → `pip install` — 팀 라이브러리를 설치합니다 (코드보다 먼저 복사해 레이어 캐시를 살립니다). `ucrdtw` 와 `TA-Lib` 은 build 할 때 numpy 를 import 하므로, `numpy==1.26.4` 를 먼저 설치하고 두 package 를 build isolation 없이 설치한 뒤 나머지를 설치합니다. required: `prefect`·`boto3` · payload: `mlflow`·`optuna`·`scikit-learn`·`numpy`·`pyarrow` · optional: `pandas`·`torch`·`psycopg2-binary`.
   - `COPY pipeline.py` — orchestrator 만 이미지에 굽습니다. 팀 코드는 런타임에 shallow `git fetch` 로 받습니다.
 
   #### Execution Command
