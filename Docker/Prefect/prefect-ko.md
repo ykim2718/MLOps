@@ -1,11 +1,11 @@
 # Prefect Pipeline Orchestration on Docker
-Rev. 617 | Created: 2026-06-13 | Updated: 2026-10-09 12:51 CDT
+Rev. 618 | Created: 2026-06-13 | Updated: 2026-10-09 23:27 CDT
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
 > 공식 사이트: [https://www.prefect.io/](https://www.prefect.io/)
 
-Prefect stack 을 한 호스트에서 **세 구성요소 (Prefect Server · Prefect Worker · Pipeline Flow)** 로 나눠 도커로 실행합니다. Prefect stack 의 backing service 는 PostgreSQL · MinIO · MLflow 가 있습니다. **AI/ML flow 의 실행은 하나의 python docker 이미지** (`pipeline-flow:latest`) **로만 하고, 그 flow 이미지는 worker 이미지와 분리** 합니다. job 마다 그 이미지로 **일시적 컨테이너 (ephemeral)** 를 띄웠다 파괴하며, **여러 팀원이 동시에 다수 job 을 trigger** 하는 환경을 전제로 Prefect 의 **Docker work pool** 로 구현합니다.
+Prefect stack 을 한 호스트에서 **세 구성요소 (Prefect Server · Prefect Worker · Pipeline Flow)** 로 나눠 도커로 실행합니다. Prefect stack 의 backing service 는 PostgreSQL · MinIO · MLflow 가 있습니다. **AI/ML flow 의 실행은 하나의 python docker 이미지** (`pipeline-flow:latest`) **로만 하고, 그 flow image 는 worker 이미지와 분리** 합니다. job 마다 그 이미지로 **일시적 컨테이너 (ephemeral)** 를 띄웠다 파괴하며, **여러 팀원이 동시에 다수 job 을 trigger** 하는 환경을 전제로 Prefect 의 **Docker work pool** 로 구현합니다.
 
 Prefect work pool 의 type 은 `process` · `docker` · `kubernetes` 가 있는데 ([Appendix C](#appendix-c-execution-architecture)), 이 스택은 **`docker`** 를 씁니다 — flow 를 worker 와 **분리된 별도 컨테이너** 에서 실행하기 위함입니다.
 
@@ -427,8 +427,8 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
 
   > **`properties` vs `job_configuration`** — `variables.properties` 는 **변수 선언** (타입 + `default`) 이고, `job_configuration` 은 그 변수를 `{{ }}` 로 받아 **실제 도커 job 설정에 끼워 넣는 틀** 입니다. 같은 키가 양쪽에 보이는 건 '선언 ↔ 사용' 한 쌍이기 때문이고, 값 우선순위는 **deployment 의 `job_variables` override > 템플릿 `default`** 입니다 (override 가 없으면 `default` 가 `{{ }}` 자리에 들어갑니다).
 
-  - `image` — flow 컨테이너로 쓸 Pipeline Flow 이미지 ([§6.1](#61-image)). 태그 (`pipeline-flow:latest`) 가 곧 **런타임 버전** (라이브러리 + orchestrator) 입니다.
-  - `image_pull_policy` — flow 이미지를 언제 pull 할지입니다. `pipeline-flow:latest` 는 worker 호스트에서 **로컬로 빌드** 하므로 `IfNotPresent` (있으면 pull 안 함) 로 둡니다. Registry 에 올린 이미지를 쓸 때의 값과 네 값 (`IfNotPresent` · `Always` · `IfPossible` · `Never`) 의 뜻은 [prefect-registry-ko.md](prefect-registry-ko.md) 를 따릅니다.
+  - `image` — flow 컨테이너로 쓸 flow image ([§6.1](#61-image)). 태그 (`pipeline-flow:latest`) 가 곧 **런타임 버전** (라이브러리 + orchestrator) 입니다.
+  - `image_pull_policy` — flow image 를 언제 pull 할지입니다. `pipeline-flow:latest` 는 worker 호스트에서 **로컬로 빌드** 하므로 `IfNotPresent` (있으면 pull 안 함) 로 둡니다. Registry 에 올린 이미지를 쓸 때의 값과 네 값 (`IfNotPresent` · `Always` · `IfPossible` · `Never`) 의 뜻은 [prefect-registry-ko.md](prefect-registry-ko.md) 를 따릅니다.
   - `env` — flow 컨테이너가 server·Secret 을 찾는 `PREFECT_API_URL` 을 줍니다. 이 값은 템플릿에 **하드코딩하지 않습니다** — `register_pool.sh` 가 등록 시 실행 호스트의 `docker-compose.env` 에 있는 `PREFECT_API_URL` 로 `env.default` 를 덮어씁니다. 위 JSON 의 `http://prefect_server:4200/api` 는 register_pool.sh 없이 등록할 때만 쓰이는 fallback 이고, 실제 주소는 `docker-compose.env` 한 곳에서 관리합니다.
   - `mem_limit` — flow 컨테이너 메모리 상한입니다. 등급별 pool 의 핵심 차이값입니다 (high 크게·low 작게). `16g` 의 `g` 는 기가바이트 (GiB) 를 뜻합니다.
 
@@ -514,7 +514,7 @@ worker (`prefect_worker`) 는 **네 가지 일**을 합니다.
 
 worker 는 **`docker` work pool** 을 polling 해 job 마다 `pipeline_flow` 컨테이너를 띄웠다 정리합니다 — flow 코드는 **그 컨테이너가** 실행하고 worker 자신은 실행하지 않습니다. 이 스택의 `high_performance`·`low_performance` 는 [§4](#work-pool-registration) 에서 `--type docker` 로 등록합니다.
 
-준비물은 **worker compose** 하나입니다 — base job template 등록은 server [§4](#4-prefect-server-container), Pipeline Flow 이미지는 [§6](#6-pipeline-flow-container) 입니다.
+준비물은 **worker compose** 하나입니다 — base job template 등록은 server [§4](#4-prefect-server-container), flow image 는 [§6](#6-pipeline-flow-container) 입니다.
 
 ### 5.1 Image
 
@@ -640,7 +640,7 @@ worker 는 **`docker` work pool** 을 polling 해 job 마다 `pipeline_flow` 컨
 
 ## 6. Pipeline Flow Container
 
-Pipeline Flow 는 worker 가 job 마다 띄우는 per-flow 컨테이너입니다. worker 하나가 동시 job 수만큼 **여러 개 (n 개)** 를 띄우며 (상한 `--limit`, 현재 8), 각 컨테이너는 독립입니다. 세 가지를 다룹니다 — 컨테이너가 쓰는 **이미지** ([§6.1](#61-image)), 그 이미지로 무엇을 실행할지 server 에 등록하는 **deployment** ([§6.2](#62-deployment)), 컨테이너 안에서 generic flow orchestrator 역할을 하는 `pipeline.py` ([§6.3](#63-pipelinepy)). worker 자신은 flow 를 실행하지 않으므로 flow 는 **별도 이미지** 를 쓰며 ([§5.1](#51-image)), 팀 라이브러리는 이 flow 이미지에만 둡니다. 실행이 server UI 에 어떻게 보이는지는 [§9](#9-prefect-ui) 입니다.
+Pipeline Flow 는 worker 가 job 마다 띄우는 per-flow 컨테이너입니다. worker 하나가 동시 job 수만큼 **여러 개 (n 개)** 를 띄우며 (상한 `--limit`, 현재 8), 각 컨테이너는 독립입니다. 세 가지를 다룹니다 — 컨테이너가 쓰는 **이미지** ([§6.1](#61-image)), 그 이미지로 무엇을 실행할지 server 에 등록하는 **deployment** ([§6.2](#62-deployment)), 컨테이너 안에서 generic flow orchestrator 역할을 하는 `pipeline.py` ([§6.3](#63-pipelinepy)). worker 자신은 flow 를 실행하지 않으므로 flow 는 **별도 이미지** 를 쓰며 ([§5.1](#51-image)), 팀 라이브러리는 이 flow image 에만 둡니다. 실행이 server UI 에 어떻게 보이는지는 [§9](#9-prefect-ui) 입니다.
 
 ### 6.1 Image
 
@@ -685,7 +685,7 @@ Pipeline Flow 는 worker 가 job 마다 띄우는 per-flow 컨테이너입니다
 
   work pool 등록은 **실행 방식** (routing lane 을 만드는 인프라) 이고, deployment 는 **실행 내용의 정의** 입니다.
 
-  server 에 deployment 를 관리자가 container 밖에서 1회 등록합니다. Deployment 는 yaml 로 entrypoint, work pool, pipeline flow image 를 정의합니다. 팀원이 작성하는 학습 스크립트 (`my_flow.py`) 와는 무관합니다.
+  server 에 deployment 를 관리자가 container 밖에서 1회 등록합니다. Deployment 는 yaml 로 entrypoint, work pool, flow image 를 정의합니다. 팀원이 작성하는 학습 스크립트 (`my_flow.py`) 와는 무관합니다.
 
   #### Yaml
 
@@ -891,7 +891,7 @@ Pipeline Flow 는 worker 가 job 마다 띄우는 per-flow 컨테이너입니다
   ```
 
   - **팀원별 repo** — `git_repo` 가 **flow 파라미터** 라 deployment 마다 다른 repo 를 기본값으로 등록할 수 있습니다. 팀원은 각자 repo·커밋을 쓰고, run 마다 사설 `script/` 에 펼쳐져 서로 간섭하지 않습니다. Prefect 가 `git_repo`·`git_commit_hash` 을 run 파라미터로 자동 기록해 재현·lineage 가 남습니다.
-  - **데이터 준비** — `pipeline.py` 가 MinIO 에서 `minio_bucket`/`minio_key` 객체를 `data/` 로 미리 내려받고 `--data-folder` 로 경로를 넘깁니다. 접속 자격증명 (그 블록의 `minio` 섹션) 은 [§7](#7-credentials) 의 Credential Blocks 로 받습니다. 팀원 코드는 자격증명·다운로드를 각자 짤 필요 없이 `--data-folder` 폴더의 파일을 읽기만 하면 됩니다 (`pipeline.py` 가 `boto3` 로 받으므로 flow 이미지에 `boto3` 가 있어야 합니다 — [§6.1](#61-image)).
+  - **데이터 준비** — `pipeline.py` 가 MinIO 에서 `minio_bucket`/`minio_key` 객체를 `data/` 로 미리 내려받고 `--data-folder` 로 경로를 넘깁니다. 접속 자격증명 (그 블록의 `minio` 섹션) 은 [§7](#7-credentials) 의 Credential Blocks 로 받습니다. 팀원 코드는 자격증명·다운로드를 각자 짤 필요 없이 `--data-folder` 폴더의 파일을 읽기만 하면 됩니다 (`pipeline.py` 가 `boto3` 로 받으므로 flow image 에 `boto3` 가 있어야 합니다 — [§6.1](#61-image)).
 
 ## 7. Credentials
 
@@ -1078,6 +1078,7 @@ Flow Runs
 - **`prefect_server`** — API·UI·스케줄러·work pool 대기열을 제공하는 중앙 진입점입니다. 메타데이터 (`prefect` DB) 만 관리하고 코드는 실행하지 않습니다.
 - **`prefect_worker`** — work pool 을 polling 해 job 마다 `pipeline_flow` 컨테이너를 띄우고 정리하는 worker 입니다 (Prefect 공식 용어로는 worker). 코드는 실행하지 않습니다.
 - **Pipeline Flow** — worker 가 job 마다 띄우는 일시적 실행 컨테이너입니다. 받은 repo·커밋을 shallow `git fetch` 로 펼친 뒤 코드를 실행하고 끝나면 파괴됩니다.
+- **flow image** — Pipeline Flow 컨테이너를 띄우는 image 입니다. deployment 의 `image` (없으면 base job template 의 `image` 기본값) 가 가리키며, 이 스택에서는 `pipeline-flow:latest` 입니다 ([§6.1](#61-image)).
 - **ephemeral container** — `docker` work pool 이 job 마다 띄웠다 파괴하는 일시적 컨테이너입니다. 이 문서의 Pipeline Flow 가 여기 해당합니다.
 - **work pool** — job 이 대기하는 큐이자 실행 방식 (type) 의 정의입니다. server 안의 메타데이터이며 컨테이너가 아닙니다.
 - **work pool type** — Prefect 가 정한 실행 방식 이름입니다 (`process` · `docker` · `kubernetes` · `ecs` 등). 이 스택은 `docker` (job 마다 컨테이너) 를 씁니다.
@@ -1619,7 +1620,7 @@ if __name__ == "__main__":
 
 ## Appendix J. requirements.txt
 
-Pipeline Flow 이미지에 설치하는 파이썬 의존성 목록입니다 ([§6.1](#61-image)). 팀 소스는 이미지에 굽지 않고 런타임에 git worktree 로 받으므로 여기에는 라이브러리만 고정합니다 (base: `python:3.11.15`). 카테고리로 나눠 두고 버전은 `numpy` 기준에 맞춥니다.
+flow image 에 설치하는 파이썬 의존성 목록입니다 ([§6.1](#61-image)). 팀 소스는 이미지에 굽지 않고 런타임에 git worktree 로 받으므로 여기에는 라이브러리만 고정합니다 (base: `python:3.11.15`). 카테고리로 나눠 두고 버전은 `numpy` 기준에 맞춥니다.
 
 ```text
 # rev. 12
