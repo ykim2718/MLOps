@@ -1,5 +1,5 @@
 # Prefect Pipeline Orchestration on Docker
-Rev. 622 | Created: 2026-06-13 | Updated: 2026-10-09 23:58 CDT
+Rev. 623 | Created: 2026-06-13 | Updated: 2026-10-10 00:28 CDT
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
@@ -668,14 +668,18 @@ Pipeline Flow 는 worker 가 job 마다 띄우는 per-flow 컨테이너입니다
   #   git             : pipeline.py shallow-fetches the team repo into a per-run worktree at runtime
   #   build-essential : compiles C extensions (ucrdtw / dtaidistance / TA-Lib Python wrappers)
   #   wget            : downloads the TA-Lib C library source
+  #   autotools-dev   : current config.guess / config.sub, which know aarch64 (see the TA-Lib step)
   RUN apt-get update && apt-get install -y --no-install-recommends \
-          git build-essential wget \
+          git build-essential wget autotools-dev \
       && rm -rf /var/lib/apt/lists/*
 
   # The TA-Lib Python package needs the C library of the same name, so build and install it from source.
+  # ta-lib-0.4.0 ships config.guess / config.sub from 2007, whose configure stops on arm64 (aarch64) with
+  # "cannot guess build type"; the copies from autotools-dev replace them so one Dockerfile builds amd64 and arm64.
   RUN wget -q http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz \
       && tar -xzf ta-lib-0.4.0-src.tar.gz \
       && cd ta-lib \
+      && cp /usr/share/misc/config.guess /usr/share/misc/config.sub . \
       && ./configure --prefix=/usr \
       && make \
       && make install \
@@ -700,8 +704,8 @@ Pipeline Flow 는 worker 가 job 마다 띄우는 per-flow 컨테이너입니다
   COPY pipeline.py .
   ```
 
-  - `FROM python:3.11.15` + `apt-get install git build-essential wget` — `git` 은 런타임 `git fetch`·`worktree` 용, `build-essential` 은 C 확장 (ucrdtw·dtaidistance·TA-Lib) 을 compile 하는 용도, `wget` 은 TA-Lib C library source 를 내려받는 용도입니다.
-  - TA-Lib C library — Python `TA-Lib` package 는 같은 이름의 C library 를 필요로 하므로, `ta-lib-0.4.0` source 를 build 해 `/usr` 에 설치합니다.
+  - `FROM python:3.11.15` + `apt-get install git build-essential wget autotools-dev` — `git` 은 런타임 `git fetch`·`worktree` 용, `build-essential` 은 C 확장 (ucrdtw·dtaidistance·TA-Lib) 을 compile 하는 용도, `wget` 은 TA-Lib C library source 를 내려받는 용도, `autotools-dev` 는 arm64 를 아는 최신 `config.guess`·`config.sub` 를 주는 용도입니다.
+  - TA-Lib C library — Python `TA-Lib` package 는 같은 이름의 C library 를 필요로 하므로, `ta-lib-0.4.0` source 를 build 해 `/usr` 에 설치합니다. 이 source 에 든 2007 년판 `config.guess`·`config.sub` 로는 arm64 에서 `configure` 가 "cannot guess build type" 으로 멈추므로, `configure` 전에 `autotools-dev` 의 최신판으로 바꿉니다.
   - `COPY requirements.txt` → `pip install` — 팀 라이브러리를 설치합니다 (코드보다 먼저 복사해 레이어 캐시를 살립니다). `ucrdtw` 와 `TA-Lib` 은 build 할 때 numpy 를 import 하므로, `numpy==1.26.4` 를 먼저 설치하고 두 package 를 build isolation 없이 설치한 뒤 나머지를 설치합니다. required: `prefect`·`boto3` · payload: `mlflow`·`optuna`·`scikit-learn`·`numpy`·`pyarrow` · optional: `pandas`·`torch`·`psycopg2-binary`.
   - `COPY pipeline.py` — orchestrator 만 이미지에 굽습니다. 팀 코드는 런타임에 shallow `git fetch` 로 받습니다.
 
