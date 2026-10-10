@@ -1,17 +1,73 @@
 # Prefect Pipeline Orchestration on Docker
-Rev. 627 | Created: 2026-06-13 | Updated: 2026-10-10 08:54 CDT
+Rev. 628 | Created: 2026-06-13 | Updated: 2026-10-10 09:28 CDT
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
 > 공식 사이트: [https://www.prefect.io/](https://www.prefect.io/)
+
+- [1. Purpose](#1-purpose)
+- [2. Summary](#2-summary)
+- [3. Architecture](#3-architecture)
+- [4. Installation](#4-installation)
+  - [4.1 Installation Sequence](#41-installation-sequence)
+  - [4.2 Setup Files](#42-setup-files)
+- [5. Network](#5-network)
+  - [5.1 Reachability to Backing Service](#51-reachability-to-backing-service)
+  - [5.2 Docker Network](#52-docker-network)
+  - [5.3 Server Connection](#53-server-connection)
+- [6. Docker Registry](#6-docker-registry)
+- [7. Credentials](#7-credentials)
+  - [7.1 docker-compose.env_example](#71-docker-composeenv_example)
+  - [7.2 Credential Blocks](#72-credential-blocks)
+- [8. Job Triggering](#8-job-triggering)
+  - [8.1 Prefect CLI](#81-prefect-cli)
+  - [8.2 Python SDK](#82-python-sdk)
+  - [8.3 Serve Mode](#83-serve-mode)
+- [9. Prefect UI](#9-prefect-ui)
+- [Appendix A. Terminology](#appendix-a-terminology)
+- [Appendix B. Prefect CLI](#appendix-b-prefect-cli)
+- [Appendix C. Execution Architecture](#appendix-c-execution-architecture)
+- [Appendix D. backing_ports.sh](#appendix-d-backing_portssh)
+- [Appendix E. credentials.py](#appendix-e-credentialspy)
+- [Appendix F. Orchestrator Benchmarking](#appendix-f-orchestrator-benchmarking)
+  - [F.1 Prefect vs Dagster vs Airflow](#f1-prefect-vs-dagster-vs-airflow)
+  - [F.2 Execution Pattern Across Systems](#f2-execution-pattern-across-systems)
+  - [F.3 What a Pod Is](#f3-what-a-pod-is)
+  - [F.4 job · task · step Compared](#f4-job--task--step-compared)
+- [Appendix G. Prefect @task](#appendix-g-prefect-task)
+  - [G.1 Reproducing without @task](#g1-reproducing-without-task)
+  - [G.2 Why Use @task Then](#g2-why-use-task-then)
+  - [G.3 Summary](#g3-summary)
+
+## 1. Purpose
+
+- **Problem Statement**: Prefect stack 을 server · worker · flow 세 구성요소로 나눠 docker 로 운영하므로, 구성요소마다 설정과 script 가 다른 folder 에 있어 전체 순서와 공통 설정을 한곳에서 보기 어렵습니다.
+- **Goal**: 실무자가 이 문서로 stack 의 전체 구성, 설치 순서, 공통 설정 (network · registry · credentials · job trigger) 을 파악하고, 구성요소 문서로 바로 이동할 수 있게 합니다.
+- **Non-Goal**: 구성요소별 설정과 script 의 세부는 각 구성요소 문서에 두고 여기서 다루지 않습니다. Backing service (PostgreSQL · MinIO · MLflow) 의 설치는 다루지 않습니다.
+
+## 2. Summary
+
+이 stack 은 server · worker · flow 세 구성요소로 나뉘고, 구성요소마다 자기 folder 의 문서가 그 파일과 절차를 담습니다. 이 문서는 전체 구성 ([§3](#3-architecture)), 설치 순서 ([§4](#4-installation)), 공통 설정인 network ([§5](#5-network)) · registry ([§6](#6-docker-registry)) · credentials ([§7](#7-credentials)) 와 job trigger ([§8](#8-job-triggering)) 를 다룹니다.
+
+Table 1. Documents of the stack
+
+| Document                                                        | Folder           | Covers                                                        |
+| :-------------------------------------------------------------: | :--------------: | :-----------------------------------------------------------: |
+| [prefect-server-ko.md](PrefectServer/prefect-server-ko.md)       | `PrefectServer/` | server 기동, work pool 등록, 서비스 주소 Variable              |
+| [prefect-worker-ko.md](PrefectWorker/prefect-worker-ko.md)       | `PrefectWorker/` | worker image push, `run_worker.sh`, scaling                    |
+| [prefect-flow-ko.md](PrefectFlow/prefect-flow-ko.md)             | `PrefectFlow/`   | flow image push, deployment 등록, `pipeline.py`                |
+| [prefect-registry-ko.md](prefect-registry-ko.md)                 | `./`             | docker registry 와 pull policy                                 |
+| [prefect-work-queue-ko.md](prefect-work-queue-ko.md)             | `./`             | work queue, priority, 전용 worker                              |
+| [prefect-secret-ko.md](prefect-secret-ko.md)                     | `./`             | Prefect Secret block                                           |
+| [troubleshooting-ko.md](troubleshooting-ko.md)                   | `./`             | 증상별 원인과 해결                                             |
+
+## 3. Architecture
 
 Prefect stack 을 한 호스트에서 **세 구성요소 (Prefect Server · Prefect Worker · Pipeline Flow)** 로 나눠 도커로 실행합니다. Prefect stack 의 backing service 는 PostgreSQL · MinIO · MLflow 가 있습니다. **AI/ML flow 의 실행은 하나의 python docker 이미지** (`pipeline-flow:latest`) **로만 하고, 그 flow image 는 worker 이미지와 분리** 합니다. job 마다 그 이미지로 **일시적 컨테이너 (ephemeral)** 를 띄웠다 파괴하며, **여러 팀원이 동시에 다수 job 을 trigger** 하는 환경을 전제로 Prefect 의 **Docker work pool** 로 구현합니다.
 
 Prefect work pool 의 type 은 `process` · `docker` · `kubernetes` 가 있는데 ([Appendix C](#appendix-c-execution-architecture)), 이 스택은 **`docker`** 를 씁니다 — flow 를 worker 와 **분리된 별도 컨테이너** 에서 실행하기 위함입니다.
 
 Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단일 진입점** 입니다. 단 **코드는 실행하지 않습니다** — 실행은 항상 Pipeline Flow 컨테이너 안에서 일어납니다.
-
-## 1. Architecture
 
 기본 구성은 한 호스트에서 공유 네트워크 `mlops` 로 묶입니다. `prefect_server` 와 `prefect_worker` 가 상시 떠 있고, job 마다 **`pipeline_flow` 컨테이너** 가 일시적으로 실행됩니다. Work pool 은 server 에 등록된 메타데이터입니다 (컨테이너가 아닙니다).
 
@@ -54,7 +110,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
 - **pool = 라우팅 라벨** — server 가 run 을 `work_pool_name` 으로 해당 등급 pool 에 보냅니다 (pool 은 큐일 뿐 컨테이너가 아닙니다).
 - **worker = 머신마다 1개** — 각 컴퓨터가 자기 등급 pool 의 worker 를 띄웁니다. 한 등급에 머신이 여럿이면 그 pool 에 worker 가 여럿 붙어 큐를 나눕니다 (위 그림: high 는 2대 → worker 2개).
 - **worker 마다 flow 여럿** — 각 worker 가 `--limit` 까지 pipeline_flow 컨테이너를 동시에 띄웁니다 (그림은 2개씩).
-- **deployment = 등급별 등록** — **deployment** (flow 를 어떤 pool·파라미터로 실행할지 server 에 등록한 실행 정의) 은 pool 하나에 바인딩되므로, 같은 flow 를 등급마다 등록해 (`pipeline/high_deployment`·`pipeline/low_deployment`) job 을 보낼 등급을 고릅니다 (등록 방법은 [§6.2](#62-deployment)).
+- **deployment = 등급별 등록** — **deployment** (flow 를 어떤 pool·파라미터로 실행할지 server 에 등록한 실행 정의) 은 pool 하나에 바인딩되므로, 같은 flow 를 등급마다 등록해 (`pipeline/high_deployment`·`pipeline/low_deployment`) job 을 보낼 등급을 고릅니다 (등록 방법은 [prefect-flow-ko.md §4](PrefectFlow/prefect-flow-ko.md#4-deployment)).
 
 각 서비스의 역할입니다.
 
@@ -68,13 +124,13 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
 
 > `postgres`·`minio`·`mlflow` 는 각자 폴더의 compose 로 띄웁니다. 이 문서는 **Prefect server·worker 와 `pipeline_flow` 이미지** 에 집중합니다.
 
-## 2. Installation
+## 4. Installation
 
-설치는 **2 routings** (docker · pool) + **3 dockers** (server → worker → pipeline_flow) 입니다. [Installation Sequence](#installation-sequence) 가 설치 순서와 단계별 configuration 을, [Setup Files](#setup-files) 가 구성요소별 파일과 실행 명령을 정리합니다.
+설치는 **2 routings** (docker · pool) + **3 dockers** (server → worker → pipeline_flow) 입니다. [Installation Sequence](#41-installation-sequence) 가 설치 순서와 단계별 configuration 을, [Setup Files](#42-setup-files) 가 구성요소별 파일과 실행 명령을 정리합니다.
 
-### Installation Sequence
+### 4.1 Installation Sequence
 
-  2 routings (docker · pool) + 3 dockers 의 설치 순서와, 각 단계가 요구하는 configuration 입니다 (파일 전체와 실행 명령은 아래 [Setup Files](#setup-files)).
+  2 routings (docker · pool) + 3 dockers 의 설치 순서와, 각 단계가 요구하는 configuration 입니다 (파일 전체와 실행 명령은 아래 [Setup Files](#42-setup-files)).
 
   ```text
   NETWORK ── docker network create mlops          # routing 1 — docker routing: container ↔ container
@@ -130,11 +186,11 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
 
   > 전제 — 이 3 docker 앞에 **PostgreSQL → (MinIO/MLflow)** 가 먼저 떠 있어야 합니다. `docker-compose.env` 의 DB URL 과 Secret 의 MinIO 키가 그 스택을 가리키므로, 각 폴더 compose 로 먼저 띄웁니다 (이 문서 범위 밖).
 
-### Setup Files
+### 4.2 Setup Files
 
   설치 파일은 세 구성요소 + 자격증명 + 공유 env 로 나뉩니다. 각 묶음의 파일과 실행 명령을 함께 적습니다.
 
-  1) **[PREFECT SERVER](#4-prefect-server-container)** — 제어 노드 1대 · 공식 이미지라 빌드 없음
+  1) **[PREFECT SERVER](PrefectServer/prefect-server-ko.md)** — 제어 노드 1대 · 공식 이미지라 빌드 없음
 
      ```
      PrefectServer/
@@ -157,7 +213,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
      ./register_pool.sh --pool-name low_performance --template-file docker-pool-template-low.json  --concurrency-limit 8
      ```
 
-  2) **[PREFECT WORKER](#5-prefect-worker-container)** — 작업 머신마다 1대 · image 는 registry 에서 받음
+  2) **[PREFECT WORKER](PrefectWorker/prefect-worker-ko.md#2-role)** — 작업 머신마다 1대 · image 는 registry 에서 받음
 
      ```
      PrefectWorker/
@@ -177,7 +233,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
      ./run_worker.sh --work-pool low_performance --worker-limit 4
      ```
 
-  3) **[PIPELINE FLOW](#6-pipeline-flow-container)** — job 마다 떴다 사라지는 컨테이너 · image 는 registry 에서 받음
+  3) **[PIPELINE FLOW](PrefectFlow/prefect-flow-ko.md#2-role)** — job 마다 떴다 사라지는 컨테이너 · image 는 registry 에서 받음
 
      ```
      PrefectFlow/
@@ -199,7 +255,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
   4) **[Credentials](#7-credentials)** — 자격증명 블록 (admin · 블록마다 1회) · `Docker/Prefect/` 루트
 
      ```
-     credentials.py                    Credentials block class + JSON register CLI ([Appendix I](#appendix-i-credentialspy))
+     credentials.py                    Credentials block class + JSON register CLI (Appendix E)
      <name>.json                       credential JSON (e.g. yrocket.json)
      ```
 
@@ -215,11 +271,11 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
      docker-compose.env             credentials · PREFECT_API_URL   (Docker/Prefect/ root)
      ```
 
-## 3. Network
+## 5. Network
 
 이 스택은 여러 머신에 걸쳐 있어, 통신이 되려면 두 가지가 갖춰져야 합니다 — ① 원격 backing service 포트가 방화벽 너머로 **도달 가능**해야 하고, ② 컨테이너를 띄우는 **각 호스트**에 로컬 docker network `mlops` 가 있어야 합니다. stack 을 올리기 전에 이 순서로 확인합니다.
 
-### Reachability to backing service
+### 5.1 Reachability to Backing Service
 
   **LAN IP 모델** 에서는 원격 backing service (PostgreSQL·MinIO·MLflow) 를 호스트의 LAN IP와 port로 부릅니다. 이때 **호스트 방화벽**을 점검해야 합니다. 특히 Docker 가 `0.0.0.0:<port>` 로 게시해도 backing 호스트 (특히 **Windows + Docker Desktop**) 는 LAN 인바운드를 기본 차단하는 경우가 많습니다. 막혀 있으면 예컨대 prefect_server 는 DB 에 못 붙어 migration `TimeoutError` 로 crash-loop 합니다.
 
@@ -247,7 +303,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
 
   모든 포트가 `OPEN` 이면 다음으로 넘어갑니다 (backing service 자체의 설치·포트 게시는 각 서비스 문서를 따릅니다).
 
-### Docker Network
+### 5.2 Docker Network
 
   Prefect stack 의 컨테이너들은 docker network `mlops` 로 통신합니다. 접근 방식은 컨테이너가 **같은 머신**인지 **다른 머신**인지에 따라 갈립니다 (**LAN IP 모델**):
 
@@ -269,7 +325,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
 
   이후 절의 모든 compose 는 이 `mlops` 를 external network 로 참조합니다. 같은 호스트의 컨테이너는 **서비스 이름**으로, 다른 호스트의 서비스는 **LAN IP** 로 접근합니다 (`PREFECT_API_URL`·credential endpoint 등에서 지정).
 
-### Server Connection
+### 5.3 Server Connection
 
   어느 Prefect server 에 연결할지 (`PREFECT_API_URL`) 를 최초 1회 설정하면 이후 모든 client 명령이 이 server 를 향합니다. 설정 방법은 두 가지이며, 환경변수가 프로필보다 우선합니다 (환경변수 > 프로필 > 기본값). 같은 컴퓨터면 `<Host IP>` 는 `localhost`.
 
@@ -288,694 +344,23 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
 
   이 주소는 job 을 trigger 할 때 (`prefect deployment run ...`), deployment 를 등록할 때, Prefect Secret 블록을 등록/조회할 때 등 server 와 통신하는 client 작업 전반에 쓰입니다. 단 이 값은 접속 주소일 뿐이라, 그 URL 에 Prefect server 가 실제로 떠 있어야 합니다.
 
-## 4. Prefect Server Container
-
-### Server Setup
-
-  server 는 backend 인 `postgres` 가 먼저 떠 있어야 하므로 **PostgreSQL → (MinIO/MLflow) → Prefect server** 순으로 띄웁니다.
-
-  #### Yaml
-
-  ```yaml
-  # docker-compose.server.yml
-  # __version__ = "0.0.14"
-  name: prefect-server   # compose project name baked in (replaces -p); run_server.sh relies on it
-  services:
-    prefect_server:
-      image: prefecthq/prefect:3-latest
-      command: prefect server start --host 0.0.0.0
-      env_file:
-        # PREFECT_SERVER_DATABASE_CONNECTION_URL + PREFECT_API_URL (host LAN IP); the UI inherits PREFECT_API_URL, so no PREFECT_UI_API_URL is needed.
-        - ../docker-compose.env_example       # shared, kept at Docker/Prefect root
-      ports:
-        - "4200:4200"                 # dashboard/API. Clients connect on this port.
-      networks:
-        - mlops
-      restart: unless-stopped
-
-    worker_pruner:
-      build:
-        context: .
-        dockerfile: Dockerfile.pruner     # bakes prune_loop.sh + curl + jq into the image (no bind mount)
-      image: prefect-pruner:latest
-      depends_on:
-        - prefect_server
-      environment:
-        - PREFECT_API_URL=http://prefect_server:4200/api   # internal server API the sidecar prunes via
-        - PRUNE_INTERVAL_SECONDS=3600                       # prune cadence (hourly)
-      networks:
-        - mlops
-      restart: unless-stopped
-
-  networks:
-    mlops:
-      external: true
-  ```
-
-  - `command: prefect server start --host 0.0.0.0` 은 컨테이너 밖에서도 접속하도록 모든 인터페이스에 바인딩합니다.
-  - `networks: mlops` 로 `postgres` 와 서비스명으로 통신합니다. `postgres` 는 별도 compose 라 `depends_on` 대신 `restart: unless-stopped` 로 준비될 때까지 재시도합니다.
-  - **UI API 주소** — UI 가 **브라우저에게** 넘길 API 주소는 `PREFECT_UI_API_URL` 인데, 따로 지정하지 않으면 `PREFECT_API_URL` 을 그대로 상속합니다. 그래서 env_file 의 `PREFECT_API_URL` 을 브라우저가 닿는 **호스트 LAN IP** (`http://<server IP>:4200/api`) 로 두면 remote 머신에서 대시보드를 열어도 정상 동작하므로, `PREFECT_UI_API_URL` 을 따로 두지 않습니다. (도커 내부 이름 `prefect_server` 나 `localhost` 로 두면 각각 브라우저가 못 풀거나 자기 자신을 가리켜 remote 에서 빈 화면이 됩니다.)
-  - `worker_pruner` 는 server 와 함께 뜨는 작은 사이드카 (alpine + curl + jq) 로, `PRUNE_INTERVAL_SECONDS` (기본 1시간) 마다 server 의 **OFFLINE (stale) worker 레코드** 를 API 로 지웁니다 (`prune_loop.sh`). Prefect 는 죽은 worker 를 OFFLINE 로 표시만 하고 지우지 않으므로, ONLINE worker 는 두고 나머지만 삭제해 목록을 깨끗이 유지합니다. `Dockerfile.pruner` 가 script 와 curl + jq 를 image 에 구워 두므로 (build 시 CR 제거 포함), container 는 (재)기동 때 host 파일 없이 뜹니다.
-  - **Rebooting과 source** — server stack 은 필요한 파일을 모두 image 안에 담고 있으므로 (`prefect_server` 는 공식 image, `worker_pruner` 는 `Dockerfile.pruner` 로 bake), container/machine rebooting 시 host 의 source 파일이나 mount 가 필요 없습니다. source 는 image 를 build 할 때만 필요합니다.
-
-  #### Dockerfile.pruner
-
-  `worker_pruner` 사이드카의 image 정의입니다. alpine 에 curl + jq 를 설치하고 `prune_loop.sh` 를 COPY 하며, Windows 줄끝 (CR) 제거까지 build 시점에 끝냅니다. compose 의 `build:` 가 이 파일을 사용하므로 별도 build 명령은 필요 없습니다.
-
-  ```dockerfile
-  # __version__ = "0.0.1"  # Semantic Versioning:  Version = Major.Minor.Patch
-  # Pruner image — alpine + curl + jq with prune_loop.sh baked in at build time.
-  # No bind mount at runtime, so the container (re)starts without any host files present.
-  FROM alpine:3
-  RUN apk add --no-cache curl jq
-  COPY prune_loop.sh /prune_loop.sh
-  # Strip CR (Windows EOL) once at build time instead of on every container start.
-  RUN sed -i 's/\r$//' /prune_loop.sh
-  CMD ["sh", "/prune_loop.sh"]
-  ```
-
-  #### Execution Command
-
-  `PrefectServer/` 에서 실행합니다.
-
-  ```bash
-  ./run_server.sh --yaml docker-compose.server.yml --network mlops
-  ```
-
-  - `run_server.sh` (코드는 [Appendix E](#appendix-e-run_serversh)) — 네트워크 생성과 `docker compose up` 을 한 번에 처리합니다.
-  - `--yaml` — 띄울 compose 파일. 프로젝트명은 이 파일의 top-level `name:` (`prefect-server`) 이 정합니다.
-  - `--network` — 붙을 공유 네트워크.
-
-  실행 후 대시보드는 **`http://<Host IP>:4200`** 에서 열립니다 (같은 컴퓨터는 `localhost`).
-
-### Work Pool Registration
-
-  work pool 은 **server 에 저장되는 메타데이터 (컨테이너 아님)** 라, server 가 뜨면 한 번 등록합니다. 등록된 pool 은 server DB 에 남아 이후 worker 들이 polling 으로 접근하므로 ([§5](#5-prefect-worker-container)), worker 쪽엔 pool 생성 단계가 없습니다.
-
-  **등록에는 worker 정보가 필요 없습니다** — 등록값은 pool 이름·`--type`·base job template 뿐이고, pool 은 worker 와 독립이라 worker 가 0개여도 등록됩니다 (그동안 trigger 된 run 은 `Late` 로 대기). worker 는 나중에 `prefect worker start` 로 그 pool 에 붙습니다 ([§5.2 Container](#52-container)).
-
-  **Base job template** — pool 이 띄우는 모든 `pipeline_flow` 컨테이너의 공통 설정입니다. flow 컨테이너는 worker 의 마운트·네트워크를 상속하지 않으므로 **`PREFECT_API_URL` 과 네트워크를 여기서 명시** 합니다. 등급별로 `docker-pool-template-high.json`·`docker-pool-template-low.json` 두 벌을 두며 (`job_configuration` 은 같고 `variables` 의 `mem_limit` default 만 등급별로 다릅니다 — 아래는 high 예시, low 는 표 참고), 위 server compose 가 이를 server 컨테이너에 마운트해 둡니다.
-
-  다음은 `docker-pool-template-high.json` 입니다.
-
-  ```json
-  // PrefectServer/docker-pool-template-high.json
-  {
-    "variables": {
-      "type": "object",
-      "properties": {
-        "name": { "title": "Name", "type": "string" },
-        "image": {
-          "title": "Image",
-          "type": "string",
-          "default": "pipeline-flow:latest"
-        },
-        "image_pull_policy": {
-          "title": "Image Pull Policy",
-          "type": "string",
-          "enum": ["IfNotPresent", "Always", "Never"],
-          "default": "Always"
-        },
-        "env": {
-          "title": "Environment Variables",
-          "type": "object",
-          "additionalProperties": { "type": "string" },
-          "default": {
-            "PREFECT_API_URL": "http://prefect_server:4200/api"
-          }
-        },
-        "networks": {
-          "title": "Networks",
-          "type": "array",
-          "items": { "type": "string" },
-          "default": ["mlops"]
-        },
-        "network_mode": { "title": "Network Mode", "type": "string" },
-        "auto_remove": { "title": "Auto Remove", "type": "boolean", "default": true },
-        "mem_limit": { "title": "Memory Limit", "type": "string", "default": "16g" },
-        "stream_output": { "title": "Stream Output", "type": "boolean", "default": true },
-        "volumes": {
-          "title": "Volumes",
-          "type": "array",
-          "items": { "type": "string" },
-          "default": []
-        },
-        "container_create_kwargs": {
-          "title": "Container Create Kwargs",
-          "type": "object",
-          "default": {}
-        }
-      }
-    },
-    "job_configuration": {
-      "name": "{{ name }}",
-      "image": "{{ image }}",
-      "image_pull_policy": "{{ image_pull_policy }}",
-      "env": "{{ env }}",
-      "networks": "{{ networks }}",
-      "network_mode": "{{ network_mode }}",
-      "auto_remove": "{{ auto_remove }}",
-      "mem_limit": "{{ mem_limit }}",
-      "stream_output": "{{ stream_output }}",
-      "volumes": "{{ volumes }}",
-      "container_create_kwargs": "{{ container_create_kwargs }}"
-    }
-  }
-  ```
-
-  > **`properties` vs `job_configuration`** — `variables.properties` 는 **변수 선언** (타입 + `default`) 이고, `job_configuration` 은 그 변수를 `{{ }}` 로 받아 **실제 도커 job 설정에 끼워 넣는 틀** 입니다. 같은 키가 양쪽에 보이는 건 '선언 ↔ 사용' 한 쌍이기 때문이고, 값 우선순위는 **deployment 의 `job_variables` override > 템플릿 `default`** 입니다 (override 가 없으면 `default` 가 `{{ }}` 자리에 들어갑니다).
-
-  - `image` — flow 컨테이너로 쓸 flow image ([§6.1](#61-image)). 태그 (`pipeline-flow:latest`) 가 곧 **런타임 버전** (라이브러리 + orchestrator) 입니다.
-  - `image_pull_policy` — flow image 를 언제 pull 할지입니다. Worker 는 flow image 를 registry 에서 받고, 같은 `latest` tag 를 다시 push 해 갱신하므로 `Always` 로 둡니다. `IfNotPresent` 면 worker machine 이 처음 받은 image 를 계속 써서 새로 push 한 image 가 반영되지 않습니다. 네 값 (`IfNotPresent` · `Always` · `IfPossible` · `Never`) 의 뜻은 [prefect-registry-ko.md](prefect-registry-ko.md) 를 따릅니다.
-  - `env` — flow 컨테이너가 server·Secret 을 찾는 `PREFECT_API_URL` 을 줍니다. 이 값은 템플릿에 **하드코딩하지 않습니다** — `register_pool.sh` 가 등록 시 실행 호스트의 `docker-compose.env` 에 있는 `PREFECT_API_URL` 로 `env.default` 를 덮어씁니다. 위 JSON 의 `http://prefect_server:4200/api` 는 register_pool.sh 없이 등록할 때만 쓰이는 fallback 이고, 실제 주소는 `docker-compose.env` 한 곳에서 관리합니다.
-  - `mem_limit` — flow 컨테이너 메모리 상한입니다. 등급별 pool 의 핵심 차이값입니다 (high 크게·low 작게). `16g` 의 `g` 는 기가바이트 (GiB) 를 뜻합니다.
-  - `volumes` — flow 컨테이너에 mount 할 `<host path>:<container path>` 목록입니다. 기본값은 비어 있고, 필요한 deployment 가 `job_variables` 로 채웁니다.
-  - `container_create_kwargs` — docker 가 flow 컨테이너를 만들 때 넘기는 추가 인자 (예: `extra_hosts`) 입니다. 기본값은 비어 있고, 필요한 deployment 가 `job_variables` 로 채웁니다.
-
-  `networks` 는 flow 컨테이너가 붙을 네트워크로, `mlops` 면 `minio`·`prefect_server` 를 서비스명으로 찾습니다. `auto_remove: true` 면 run 이 끝날 때 컨테이너가 자동으로 삭제됩니다.
-
-  > **`PREFECT_API_URL` 은 `docker-compose.env` 한 곳에서** — flow 컨테이너의 이 값은 register_pool.sh 가 실행 호스트의 `docker-compose.env` 에서 읽어 template 에 주입하므로, 주소를 template JSON 이나 여러 곳에 직접 넣지 않습니다. flow 컨테이너가 **server 와 같은 호스트**면 서비스명 `http://prefect_server:4200/api`, worker 가 **다른 호스트**면 서버 LAN IP (`http://<server IP>:4200/api`) 를 `docker-compose.env` 에 두고 register_pool.sh 를 (재)실행하면 됩니다. 서비스명은 server 와 같은 호스트에서만 풀리므로, 여러 호스트에 worker 가 걸치면 LAN IP 로 둡니다.
-
-  > base job template 필드는 Prefect 버전마다 다를 수 있으니, `prefect work-pool get-default-base-job-template --type docker` 로 최신 템플릿을 받아 `image`·`env`·`networks` 의 `default` 만 채우길 권장합니다.
-
-  > **여러 pool** — pool 마다 이 템플릿을 하나씩 등록합니다 (`docker-pool-template-high.json`·`docker-pool-template-low.json`). 등급 차이는 worker 의 `--limit` (머신당 동시 컨테이너 수) 과 템플릿의 `mem_limit` 로 주고, 이미지·repo 는 같습니다.
-  >
-  > | Field | Target | High | Low | Source |
-  > |---|---|---|---|---|
-  > | `mem_limit` | memory | `16g` | `4g` | base job template (`docker-pool-template-high.json`·`docker-pool-template-low.json`) |
-  > | `--limit` | worker | `8` | `4` | `prefect worker start` (`WORKER_LIMIT`) |
-  > | `--concurrency-limit` | pool | `16` | `8` | `work-pool set-concurrency-limit` (`register_pool.sh`) |
-
-  #### Registration
-
-  server API 를 호출해 pool 마다 등록합니다 (`PrefectServer/` 에서 실행; host 에 prefect CLI + jq 필요, server API 가 닿는 호스트면 어디서든 가능; `<Pool Name>`·`<Template File>` 변수화; 코드는 [Appendix F](#appendix-f-register_poolsh)).
-
-  ```bash
-  # Register each tier (run once, after the server is up; from PrefectServer/).
-  ./register_pool.sh --pool-name high_performance --template-file docker-pool-template-high.json --concurrency-limit 16
-  ./register_pool.sh --pool-name low_performance --template-file docker-pool-template-low.json  --concurrency-limit 8
-  ```
-
-  #### Verification
-
-  등록 직후 pool 이 server 에 올라갔는지 (`docker` 타입·동시성 한도) 확인합니다.
-
-  ```bash
-  prefect work-pool ls
-  ```
-
-  `work-pool ls` 결과물 예시 — `low_performance` 가 `docker` 타입·동시성 한도 4 로 등록된 모습:
-
-  ```text
-                                        Work Pools
-  ┌─────────────────┬────────┬──────────────────────────────────────┬───────────────────┐
-  │ Name            │ Type   │                                   ID │ Concurrency Limit │
-  ├─────────────────┼────────┼──────────────────────────────────────┼───────────────────┤
-  │ low_performance │ docker │ 95e189a9-0d8d-4f74-b17c-375a01f6e70f │ 4                 │
-  └─────────────────┴────────┴──────────────────────────────────────┴───────────────────┘
-                                (**) denotes a paused pool
-  ```
-
-### Service Address Variables
-
-  backing service 주소 (MinIO·PostgreSQL·MLflow endpoint, 비밀 아님) 는 서버의 **Prefect Variable** 한 곳에 둡니다. flow 코드와 host 툴 (`catalog.py`) 이 모두 **서버에서** 읽으므로 (`Variable.get(...)`), docker-compose.env 를 컨테이너 밖에서 볼 필요가 없습니다. server 기동 후 `register_variables.sh` 로 한 번 등록합니다 (server 호스트에서 `docker compose exec prefect_server` — Work Pool Registration 과 같은 서버 부트스트랩 단계).
-
-  ```bash
-  ./register_variables.sh --minio http://<MINIO_IP>:9000 --postgresql <POSTGRESQL_IP>:5432 \
-                          --mlflow http://<MLFLOW_IP>:5000
-  ```
-
-  각 Variable 이 **어떤 값으로** 등록됐는지 stdout 에 그대로 찍힙니다 (세 옵션은 모두 필수입니다):
-
-  ```text
-  Set variable 'minio_endpoint' to "http://<MINIO_IP>:9000"
-  Set variable 'postgresql_host_port' to "<POSTGRESQL_IP>:5432"
-  Set variable 'mlflow_tracking_uri' to "http://<MLFLOW_IP>:5000"
-  [register_variables] set: minio_endpoint, postgresql_host_port, mlflow_tracking_uri
-  ```
-
-  | Variable | Value (LAN IP) | Used by |
-  |----------|----------------|---------|
-  | `minio_endpoint` | `http://<MinIO IP>:9000` | pipeline.py·catalog.py (S3) |
-  | `postgresql_host_port` | `<PostgreSQL IP>:5432` | catalog·optuna DSN (host:port, 소비 코드가 분리) |
-  | `mlflow_tracking_uri` | `http://<MLflow IP>:5000` | payload MLflow 로깅 |
-
-  - 주소가 바뀌면 `register_variables.sh` 를 **다시 한 번** 돌리면 server·flow·host 툴 전부 반영됩니다.
-  - `Variable.get` 은 서버가 있어야 하므로, flow 는 base job template 의 `PREFECT_API_URL` 로, host 툴은 프로필로 서버에 붙습니다 (한 곳으로 몰린 주소를 모두가 서버에서 가져감).
-
-## 5. Prefect Worker Container
-
-worker (`prefect_worker`) 는 **네 가지 일**을 합니다.
-
-- **job polling** — **server 에 있는 work pool** (큐) 을 polling 해 job 을 가져옵니다.
-- **job dispatch** — 가져온 job 을 실행 환경으로 보내 실행합니다.
-- **reporting** — 실행 중 상태·로그를 server 에 보고합니다.
-- **cleanup** — 실행이 끝나면 정리합니다.
-
-worker 는 **`docker` work pool** 을 polling 해 job 마다 `pipeline_flow` 컨테이너를 띄웠다 정리합니다 — flow 코드는 **그 컨테이너가** 실행하고 worker 자신은 실행하지 않습니다. 이 스택의 `high_performance`·`low_performance` 는 [§4](#work-pool-registration) 에서 `--type docker` 로 등록합니다.
-
-준비물은 **worker compose** 하나입니다 — base job template 등록은 server [§4](#4-prefect-server-container), flow image 는 [§6](#6-pipeline-flow-container) 입니다.
-
-### 5.1 Image
-
-  docker worker 는 `prefect`·`prefect-docker` 가 필요한데, 부팅 때 설치하지 않고 **전용 이미지를 build 해 registry 에 push** 해 둡니다. Worker machine 은 이 이미지를 build 하지 않고 registry 에서 받습니다 ([§5.2](#52-container)).
-
-  #### Dockerfile
-
-  ```dockerfile
-  # Dockerfile.worker
-  # __version__ = "0.0.1"  # Semantic Versioning:  Version = Major.Minor.Patch
-  # Worker image — a Prefect docker worker (prefect + prefect-docker only, no team libraries).
-  # Built once; the worker container then runs `prefect worker start` with no per-boot install.
-  FROM python:3.11.15-slim
-  RUN pip install --no-cache-dir "prefect>=3,<4" prefect-docker
-  ```
-
-  - `FROM python:3.11.15-slim` — slim 베이스입니다 (`prefect`·`prefect-docker` 는 순수 python wheel 이라 slim 으로 충분하고 이미지가 가볍습니다).
-  - `RUN pip install --no-cache-dir "prefect>=3,<4" prefect-docker` — worker 에 필요한 prefect·prefect-docker 를 이미지에 굽습니다 (부팅 때 설치하지 않습니다).
-
-  #### Execution Command
-
-  build 하는 machine 의 `PrefectWorker/` 에서 `push_worker_image.sh` 를 1회 실행합니다. Dockerfile 을 바꿀 때마다 다시 실행합니다 (코드는 [Appendix N](#appendix-n-push_worker_imagesh)).
-
-  ```bash
-  ./push_worker_image.sh                              # registry = IMAGE_REGISTRY of ../docker-compose.env
-  ./push_worker_image.sh --registry localhost:12357   # on the registry machine itself
-  ```
-
-  - `--registry <host:port>` — image 를 올릴 registry 입니다. 생략하면 `../docker-compose.env` (없으면 `_example`) 의 `IMAGE_REGISTRY` 를 쓰고, 값이 비었거나 자리표시자면 build 전에 멈춥니다.
-  - `--platform <list>` — build 할 CPU architecture 입니다. 기본값 `linux/amd64,linux/arm64` 는 두 architecture 의 이미지를 한 tag 로 묶고, worker machine 은 pull 할 때 자기 architecture 의 것을 받습니다.
-  - `--tag <tag>` — image tag 입니다 (기본 `latest`). Worker compose 는 `latest` 를 받습니다.
-
-  script 는 아래 `docker buildx build` 를 실행한 뒤, registry 의 tag 목록에 그 tag 가 올라갔는지 확인합니다.
-
-  ```bash
-  docker buildx build --platform <PLATFORM> -f Dockerfile.worker -t <REGISTRY>/prefect-worker:<TAG> --push .
-  ```
-
-  - `-f Dockerfile.worker` — build 할 Dockerfile 입니다.
-  - `--push` — build 한 이미지를 그 registry 에 바로 올립니다.
-  - `.` — build context 입니다 (이 Dockerfile 은 `COPY` 가 없어 보낼 파일은 없지만 인자는 필요합니다).
-
-  > 두 architecture 를 한 번에 build 하려면 build 하는 machine 의 Docker 가 containerd image store 를 써야 합니다 (Docker Desktop: Settings > General > "Use containerd for pulling and storing images").
-
-  > registry 를 띄우는 방법과 worker machine 의 `insecure-registries` 설정은 [prefect-registry-ko.md](prefect-registry-ko.md) 를 따릅니다.
-
-### 5.2 Container
-
-  worker 는 호스트 도커 소켓을 마운트해 `pipeline_flow` 컨테이너를 띄웁니다.
-
-  #### Yaml
-
-  ```yaml
-  # Prefect Worker — polls a docker-type work pool and, per job, spawns a pipeline_flow container
-  # to run the code, then cleans it up. This container never runs code itself.
-  #
-  # - Mounts the host docker socket to spawn sibling containers.
-  #   (Docker Desktop on Windows and macOS also exposes /var/run/docker.sock to Linux containers.)
-  # - prefect + prefect-docker are baked into the image (Dockerfile.worker), so there is no per-boot install.
-  # - The work pool + base job template are registered on the server (see docker-compose.server.yml),
-  #   so the worker only polls the pool — no pool creation here.
-  #
-  # Build + push (once, multi-arch, from a build host):
-  #   docker buildx build --platform linux/amd64,linux/arm64 -f Dockerfile.worker \
-  #       -t <IMAGE_REGISTRY>/prefect-worker:latest --push .
-  # Start:         ./run_worker.sh --work-pool high_performance   (pulls the image from IMAGE_REGISTRY)
-  # __version__ = "0.0.16"
-  name: prefect-worker   # compose project name baked in (replaces -p); run_worker.sh relies on it
-  services:
-    prefect_worker:
-      # multi-arch image from the registry (prefect + prefect-docker); the pool is chosen at start, not baked in
-      image: ${IMAGE_REGISTRY:?run_worker.sh sets IMAGE_REGISTRY}/prefect-worker:latest
-      env_file:
-        # PREFECT_API_URL: ../docker-compose.env, else the _example; run_worker.sh rejects a placeholder value
-        - ${WORKER_ENV_FILE:?run_worker.sh sets WORKER_ENV_FILE}
-      # --name <hostname>@<LAN IP> (set by run_worker.sh) tells the server which machine this worker runs on;
-      # WORK_QUEUE_OPTION (run_worker.sh --work-queue) is "--work-queue <queue>" for a one-queue worker, else empty
-      command: prefect worker start --type docker --pool ${WORK_POOL:-high_performance} ${WORK_QUEUE_OPTION:-} --limit ${WORKER_LIMIT:-8} --no-create-pool-if-not-found --name ${WORKER_NAME:?run_worker.sh sets WORKER_NAME}
-      volumes:
-        - /var/run/docker.sock:/var/run/docker.sock   # host docker socket, to spawn sibling containers
-      networks:
-        - mlops                        # same host: reach prefect_server/minio by service name
-      # If the control node (API) starts late and the connection fails, restart and reconnect automatically.
-      restart: unless-stopped
-
-  # On the same host this shares the Control Node services' network. run_server.sh creates it beforehand (run_worker.sh also creates it if missing).
-  # (For a worker on another machine, remove the networks block and set PREFECT_API_URL to http://<host IP>:4200/api.)
-  networks:
-    mlops:
-      external: true
-  ```
-
-  - `volumes: /var/run/docker.sock` — worker 가 호스트 도커로 `pipeline_flow` 컨테이너를 띄우는 통로입니다. Windows 도 같은 줄로 됩니다 — Docker Desktop 이 Linux 컨테이너용으로 이 경로에 도커 소켓을 노출하기 때문입니다 (호스트의 named pipe `\\.\pipe\docker_engine` 을 컨테이너 안 `/var/run/docker.sock` 로 연결).
-  - `image` — worker image 를 `<IMAGE_REGISTRY>/prefect-worker:latest` 로 registry 에서 받습니다 ([§5.1](#51-image)). `IMAGE_REGISTRY` 는 `run_worker.sh` 가 `docker-compose.env` 에서 읽어 export 하며, 값이 없으면 compose 가 기동 전에 멈춥니다.
-  - `command` — `prefect worker start` 만 합니다. prefect·prefect-docker 는 **이미지에 구워져** 있고 `PREFECT_API_URL` 은 env_file 이 주므로, 부팅 때 설치·export 가 없습니다 (`bash -c` 도 불필요). `--type docker` 로 docker worker 임을 고정하고, `--no-create-pool-if-not-found` 로 **없는 pool 을 자동 생성하지 않습니다** (오타 이름이 들어와도 process pool 이 몰래 생기지 않고 오류로 멈춤; pool 은 server [§4](#4-prefect-server-container) 가 이미 등록). `IMAGE_REGISTRY`·`WORKER_ENV_FILE`·`WORK_POOL`·`WORKER_LIMIT`·`WORK_QUEUE_OPTION` 은 `docker compose up` 시 셸에서 읽는 변수입니다. `WORKER_ENV_FILE` 은 `run_worker.sh` 가 고른 env 파일 (`../docker-compose.env`, 없으면 `_example`) 이고, container 는 그 파일에서 `PREFECT_API_URL` 을 받습니다.
-  - `--limit` 은 이 worker 가 **동시에 띄우는 컨테이너 수의 상한** 입니다 (동시성 세 층은 [§4 Work Pool Registration](#work-pool-registration) 의 여러 pool 표 참고).
-
-  #### Execution Command
-
-  `PrefectWorker/` 에서 실행합니다.
-
-  ```bash
-  ./run_worker.sh --work-pool <pool-name> --worker-limit <limit-count>
-  ```
-
-  - `run_worker.sh` (코드는 [Appendix H](#appendix-h-run_workersh)) — yaml 을 띄웁니다 (머신마다 1회).
-  - `--work-pool <pool-name>` — 이 worker 가 붙을 work pool 이름입니다 (예: `high_performance`).
-  - `--worker-limit <limit-count>` — 이 머신이 동시에 띄울 pipeline_flow 컨테이너 수 한도입니다 (기본 8).
-  - `--work-queue <queue>` — 생략하면 pool 의 모든 work queue 를 polling 합니다. 주면 그 queue 만 polling 하는 worker 를 `<hostname>-<queue>@<LAN IP>` 이름과 compose project `prefect-worker-<queue>` 로 따로 띄워, pool 전체를 맡는 worker 와 나란히 돌립니다 ([§5.3](#53-scaling)). server 에 없는 queue 이름이면 기동 전에 멈춥니다.
-  - **pool 검증** — 기동 전에 server 에 등록된 **docker 타입** work pool 목록과 대조해, 없는 이름이면 목록을 번호로 보여주고 그중에서 고르게 합니다 (오타·미등록 pool, 그리고 자동 생성된 process pool 까지 걸러 헛도는 것을 막습니다). 조회는 host 의 `prefect` CLI (`work-pool ls --output json`) 로 합니다.
-  - `docker compose pull` 뒤 `up` (스크립트 내부) — registry 에서 최신 worker image 를 받은 뒤 컨테이너를 띄우고, 그 `command` 인 `prefect worker start` 가 컨테이너 안에서 실행됩니다.
-
-  **머신마다 실행** — 같은 compose 를 각 컴퓨터에서 자기 등급 `WORK_POOL` 로 띄웁니다. pool 이 server 에 이미 있으니 (§4) worker 는 polling 만 하며, 등급별 첫 머신/추가 머신 구분이 없습니다.
-
-  worker 가 뜨는 **그 순간** server 에 자기를 알리며 (heartbeat 시작) 해당 work pool 에 **자동 등록**됩니다 — **polling 시작 = 등록** 이라 별도 절차가 없습니다. heartbeat 가 끊기면 잠시 뒤 **OFFLINE** 으로 바뀝니다 (worker 등록은 deployment 등록과 별개).
-
-  > **보안 주의** — 도커 소켓 마운트는 worker 에 호스트 도커 전체 제어권 (사실상 root) 을 줍니다. 신뢰된 내부망·스터디 용도로 한정하고, 더 강한 격리는 Kubernetes work pool 을 고려합니다 ([Appendix L](#appendix-l-orchestrator-benchmarking)).
-
-### 5.3 Scaling
-
-  **처리량·확장** — `--limit` 을 키우거나, **다른 머신에서 worker 를 더 띄워 같은 pool 에 붙입니다** (그 머신은 `docker-compose.env` 의 `PREFECT_API_URL`=`http://<server IP>:4200/api`, `docker-compose.worker.yml` 의 `networks:` 블록 제거). 여러 worker 는 같은 prefect server 에 있는 pool 의 큐를 나눠 가집니다.
-
-  **Queue 전용 worker** — 다른 run 이 한도를 채워도 곧바로 시작해야 하는 deployment 는 전용 work queue 에 넣고, 그 queue 만 polling 하는 worker 를 `./run_worker.sh --work-pool <pool> --work-queue <queue> --worker-limit <N>` 으로 pool 전체를 맡는 worker 옆에 띄웁니다. Work queue 의 원리 (default queue · priority · concurrency limit · status) 와 만들기 · deployment 배정 · 전용 worker · 검증 · 운영 절차는 [prefect-work-queue-ko.md](prefect-work-queue-ko.md) 를 따릅니다.
-
-### 5.4 Verification
-
-  worker 가 ONLINE 인지 확인합니다 (pool 등록 확인은 [§4 Work Pool Registration](#work-pool-registration)).
-
-  ```bash
-  prefect work-pool inspect high_performance
-  ```
-
-  `inspect` 의 `status` 가 `READY` 면 그 pool 을 polling 하는 worker 가 1개 이상 떠 있다는 뜻입니다 — pool 단위 간접 확인입니다. **어느 worker 가 ONLINE 인지**·마지막 heartbeat 는 UI 의 Work Pools → 해당 pool → **Workers 탭** 에서 봅니다 ([§9](#9-prefect-ui)).
-
-## 6. Pipeline Flow Container
-
-Pipeline Flow 는 worker 가 job 마다 띄우는 per-flow 컨테이너입니다. worker 하나가 동시 job 수만큼 **여러 개 (n 개)** 를 띄우며 (상한 `--limit`, 현재 8), 각 컨테이너는 독립입니다. 세 가지를 다룹니다 — 컨테이너가 쓰는 **이미지** ([§6.1](#61-image)), 그 이미지로 무엇을 실행할지 server 에 등록하는 **deployment** ([§6.2](#62-deployment)), 컨테이너 안에서 generic flow orchestrator 역할을 하는 `pipeline.py` ([§6.3](#63-pipelinepy)). worker 자신은 flow 를 실행하지 않으므로 flow 는 **별도 이미지** 를 쓰며 ([§5.1](#51-image)), 팀 라이브러리는 이 flow image 에만 둡니다. 실행이 server UI 에 어떻게 보이는지는 [§9](#9-prefect-ui) 입니다.
-
-### 6.1 Image
-
-  job 마다 뜨는 컨테이너의 python 환경입니다. **라이브러리와 orchestrator (`pipeline.py`) 만** 굽습니다. 팀 코드는 런타임에 그 커밋만 받는 **shallow `git fetch`** + `worktree` 로 (`git_commit_hash` 으로 특정 커밋에 고정) 컨테이너의 사설 `script/` 에 펼칩니다. 이미지가 한 번 빌드로 고정되어 모두 같은 런타임을 씁니다.
-
-  #### Dockerfile
-
-  ```dockerfile
-  # Dockerfile.pipeline_flow — shared team Pipeline Flow image (libraries + orchestrator)
-  # Dependency install runs once at build time and stays in the layer cache, so later container starts are fast.
-  FROM python:3.11.15
-
-  # System packages.
-  #   git             : pipeline.py shallow-fetches the team repo into a per-run worktree at runtime
-  #   build-essential : compiles C extensions (ucrdtw / dtaidistance / TA-Lib Python wrappers)
-  #   wget            : downloads the TA-Lib C library source
-  #   autotools-dev   : current config.guess / config.sub, which know aarch64 (see the TA-Lib step)
-  RUN apt-get update && apt-get install -y --no-install-recommends \
-          git build-essential wget autotools-dev \
-      && rm -rf /var/lib/apt/lists/*
-
-  # The TA-Lib Python package needs the C library of the same name, so build and install it from source.
-  # ta-lib-0.4.0 ships config.guess / config.sub from 2007, whose configure stops on arm64 (aarch64) with
-  # "cannot guess build type"; the copies from autotools-dev replace them so one Dockerfile builds amd64 and arm64.
-  RUN wget -q http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz \
-      && tar -xzf ta-lib-0.4.0-src.tar.gz \
-      && cd ta-lib \
-      && cp /usr/share/misc/config.guess /usr/share/misc/config.sub . \
-      && ./configure --prefix=/usr \
-      && make \
-      && make install \
-      && cd .. \
-      && rm -rf ta-lib ta-lib-0.4.0-src.tar.gz
-
-  WORKDIR /work
-
-  # Copy requirements first so this layer is cached when only code changes.
-  COPY requirements.txt .
-
-  # ucrdtw / TA-Lib import numpy at build time, but pip's build isolation has no numpy, so a plain -r install fails.
-  # Install numpy first, then those two with build isolation disabled, then the rest.
-  RUN pip install --no-cache-dir numpy==1.26.4
-  # SETUPTOOLS_USE_DISTUTILS=stdlib: the setuptools distutils shim lacks the msvccompiler that numpy.distutils looks for.
-  RUN SETUPTOOLS_USE_DISTUTILS=stdlib pip install --no-cache-dir --no-build-isolation ucrdtw==0.201
-  # TA-Lib 0.4.29's bundled C source uses the numpy 1.x C API; disable isolation so it compiles against the numpy 1.26 above.
-  RUN pip install --no-cache-dir --no-build-isolation TA-Lib==0.4.29
-  RUN pip install --no-cache-dir -r requirements.txt
-
-  # pipeline.py — orchestrator (deployment entrypoint). Prefect's docker worker injects the run command; no CMD needed.
-  COPY pipeline.py .
-  ```
-
-  - `FROM python:3.11.15` + `apt-get install git build-essential wget autotools-dev` — `git` 은 런타임 `git fetch`·`worktree` 용, `build-essential` 은 C 확장 (ucrdtw·dtaidistance·TA-Lib) 을 compile 하는 용도, `wget` 은 TA-Lib C library source 를 내려받는 용도, `autotools-dev` 는 arm64 를 아는 최신 `config.guess`·`config.sub` 를 주는 용도입니다.
-  - TA-Lib C library — Python `TA-Lib` package 는 같은 이름의 C library 를 필요로 하므로, `ta-lib-0.4.0` source 를 build 해 `/usr` 에 설치합니다. 이 source 에 든 2007 년판 `config.guess`·`config.sub` 로는 arm64 에서 `configure` 가 "cannot guess build type" 으로 멈추므로, `configure` 전에 `autotools-dev` 의 최신판으로 바꿉니다.
-  - `COPY requirements.txt` → `pip install` — 팀 라이브러리를 설치합니다 (코드보다 먼저 복사해 레이어 캐시를 살립니다). `ucrdtw` 와 `TA-Lib` 은 build 할 때 numpy 를 import 하므로, `numpy==1.26.4` 를 먼저 설치하고 두 package 를 build isolation 없이 설치한 뒤 나머지를 설치합니다. required: `prefect`·`boto3` · payload: `mlflow`·`optuna`·`scikit-learn`·`numpy`·`pyarrow` · optional: `pandas`·`torch`·`psycopg2-binary`.
-  - `COPY pipeline.py` — orchestrator 만 이미지에 굽습니다. 팀 코드는 런타임에 shallow `git fetch` 로 받습니다.
-
-  #### Execution Command
-
-  build 하는 machine 의 `PrefectFlow/` 에서 `push_flow_image.sh` 를 실행합니다. `Dockerfile.pipeline_flow`, `requirements.txt`, `pipeline.py` 를 바꿀 때마다 다시 실행합니다 (코드는 [Appendix O](#appendix-o-push_flow_imagesh)).
-
-  ```bash
-  ./push_flow_image.sh                              # registry = IMAGE_REGISTRY of ../docker-compose.env
-  ./push_flow_image.sh --registry localhost:12357   # on the registry machine itself
-  ```
-
-  - `--registry <host:port>` — image 를 올릴 registry 입니다. 생략하면 `../docker-compose.env` (없으면 `_example`) 의 `IMAGE_REGISTRY` 를 쓰고, 값이 비었거나 자리표시자면 build 전에 멈춥니다.
-  - `--platform <list>` — build 할 CPU architecture 입니다. 기본값 `linux/amd64,linux/arm64` 는 두 architecture 의 이미지를 한 tag 로 묶고, worker machine 은 run 마다 자기 architecture 의 것을 받습니다. Build 하는 machine 과 다른 architecture 는 emulation 으로 build 되어 훨씬 오래 걸립니다.
-  - `--tag <tag>` — image tag 입니다 (기본 `latest`). Base job template 의 기본값이 `pipeline-flow:latest` 이므로, 다른 tag 는 그 tag 를 지정한 deployment 에서만 쓰입니다.
-
-  script 는 build 전에 `requirements.txt` 와 `pipeline.py` 가 있는지 확인하고, 아래 `docker buildx build` 를 실행한 뒤, registry 의 tag 목록에 그 tag 가 올라갔는지 확인합니다.
-
-  ```bash
-  docker buildx build --platform <PLATFORM> -f Dockerfile.pipeline_flow -t <REGISTRY>/pipeline-flow:<TAG> --push .
-  ```
-
-  - `-f Dockerfile.pipeline_flow` — build 할 Dockerfile 입니다.
-  - `-t <REGISTRY>/pipeline-flow:<TAG>` — registry 주소가 든 image 이름입니다. `register_pool.sh` 가 base job template 의 `pipeline-flow:latest` 앞에 같은 `IMAGE_REGISTRY` 를 붙이므로, worker 는 이 이름으로 flow 컨테이너를 띄웁니다 ([§4 Work Pool Registration](#work-pool-registration)).
-  - `--push` — build 한 이미지를 그 registry 에 바로 올립니다.
-  - `.` — build context 입니다. `COPY` 소스가 이 안에서 해석되며, 같은 folder 의 `.dockerignore` 가 `requirements.txt` 와 `pipeline.py` 만 보냅니다.
-
-  > 두 architecture 를 한 번에 build 하려면 build 하는 machine 의 Docker 가 containerd image store 를 써야 합니다 (Docker Desktop: Settings > General > "Use containerd for pulling and storing images").
-
-  **GPU** — 이 이미지로 GPU 를 쓰려면 `requirements.txt` 의 torch 를 CUDA 휠로 설치합니다 (CUDA 런타임이 휠에 번들되어 호스트 드라이버만 맞으면 동작). 더해 호스트에 NVIDIA 드라이버·nvidia-container-toolkit 을 두고, base job template 에서 GPU 를 요청합니다 ([§4 Work Pool Registration](#work-pool-registration)). 드라이버와 CUDA 버전이 안 맞으면 베이스 이미지를 `nvidia/cuda` 계열로 바꿉니다. GPU job 은 무거우므로 그 등급 worker 의 `--limit` 을 1–2 로 낮춰 동시 실행을 제한합니다.
-
-### 6.2 Deployment
-
-  work pool 등록은 **실행 방식** (routing lane 을 만드는 인프라) 이고, deployment 는 **실행 내용의 정의** 입니다.
-
-  server 에 deployment 를 관리자가 container 밖에서 1회 등록합니다. Deployment 는 yaml 로 entrypoint, work pool, flow image 를 정의합니다. 팀원이 작성하는 학습 스크립트 (`my_flow.py`) 와는 무관합니다.
-
-  #### Yaml
-
-  ```yaml
-  # high_deployment.yml - high-tier deployment definition
-  # __version__ = "0.0.6"    # Semantic Versioning : Major.Minor.Patch
-  deployments:
-    - name: high_deployment
-      entrypoint: pipeline.py:pipeline       # <file>:<@flow function>
-      work_pool:
-        name: high_performance
-        job_variables:
-          image: pipeline-flow:latest
-      parameters:
-        payload: my_flow.py
-      pull:                                    # override Prefect's auto-injected /opt/prefect
-        - prefect.deployments.steps.set_working_directory:
-            directory: /work                   # pipeline.py lives at /work in pipeline-flow:latest (WORKDIR)
-  ```
-
-  - `name: high_deployment` — deployment 이름입니다 (등급별로 `high_deployment`·`low_deployment`).
-  - `entrypoint: pipeline.py:pipeline` — 실행할 flow 를 `<파일>:<@flow 함수>` 로 가리킵니다 (어떻게 `pipeline.py` 가 되는지는 [§6.3](#63-pipelinepy)).
-  - `work_pool.name: high_performance` — 이 deployment 가 제출될 work pool 입니다.
-  - `job_variables.image: pipeline-flow:latest` — flow 를 띄울 이미지입니다 ([§6.1](#61-image)). 이 `job_variables` 블록은 `work_pool.name` 으로 등록된 work pool 의 **base job template 을 override** 합니다. `job_variables.image` 는 `job_configuration.image` 를 override 합니다 ([§4](#work-pool-registration)).
-  - `parameters.payload: my_flow.py` — flow 파라미터 기본값입니다 (`git_repo`·`git_commit_hash`·`minio_key`·`submitter`·`prefect_block` 은 trigger 때 줍니다).
-  - `pull` — flow 컨테이너가 시작할 때 실행하는 스텝입니다. Prefect 는 기본으로 작업 디렉터리를 `/opt/prefect` 로 잡는데, `pipeline.py` 는 이미지의 `WORKDIR` 인 `/work` 에 있으므로 `set_working_directory: /work` 로 덮어써 entrypoint (`pipeline.py:pipeline`) 를 찾게 합니다 (run log 의 `set_working_directory` 스텝이 이것).
-
-  `job_variables.image` 가 base job template 을 덮어쓰는 흐름 — template 은 `image` 변수 (기본값 `pipeline-flow:latest`) 를 선언하고 `job_configuration` 에서 `"image": "{{ image }}"` 로 받습니다. job 제출 때 Prefect 가 그 `{{ image }}` 자리를 채우는데, deployment 에 `job_variables.image` 가 있으면 **템플릿 `default` 대신 이 값** 이 들어가 컨테이너가 그 이미지로 뜹니다 (`cpu`·`mem_limit`·`env` 등 다른 변수도 같은 방식; 우선순위 `job_variables` > `default` 는 [§4](#work-pool-registration)).
-
-  #### Execution Command
-
-  `prefect deploy` 는 yaml 정의를 server 에 등록합니다. 실행 폴더에는 `pipeline.py` 와 `high_deployment.yml` 가 있어야 합니다.
-
-  ```bash
-  cd PrefectFlow                                      # the folder with pipeline.py and high_deployment.yml
-  prefect deploy --prefect-file high_deployment.yml --name high_deployment --no-prompt
-  ```
-
-  - `prefect CLI --prefect-file` — 정의 파일.
-  - `prefect CLI --name` — 등록할 deployment.
-  - `prefect CLI --no-prompt` — 대화형 질문을 끄고 yaml 정의대로 등록합니다 (이미지 빌드·스케줄 프롬프트 안 뜸).
-
-  `prefect deploy` 는 DB 에 직접 쓰지 않고 server API 로 등록을 보냅니다 (server 가 Postgres `prefect` DB 에 저장). 등급마다 `high`·`low` yaml 로 두 벌 등록합니다.
-
-  > **중요** — `prefect deploy` 는 entrypoint 인 `pipeline.py` 의 `pipeline` 함수 **시그니처를 introspect** 해 파라미터 스키마를 server DB (`prefect`) 에 저장합니다. 따라서 `prefect deploy` 는 `pipeline.py` 가 있는 폴더에서 실행하여야 하며, `pipeline` 함수가 바뀌면 이미지 `docker build` 와 함께 **`prefect deploy` 도 반드시** 다시 해야 합니다 (그래야 server 의 파라미터 스키마·UI Run 폼·trigger 검증이 새 시그니처와 맞습니다).
-
-  #### Verification
-
-  deployment 이 server 에 등록됐는지 확인합니다.
-
-  ```bash
-  prefect deployment ls
-  prefect deployment inspect "pipeline/low_deployment"
-  ```
-
-  `deployment ls` 결과물 예시 — `pipeline/low_deployment` 가 `low_performance` pool 로 등록된 모습:
-
-  ```text
-                                       Deployments
-  ┌───────────────────────────┬──────────────────────────────────────┬─────────────────┐
-  │ Name                      │ ID                                   │ Work Pool       │
-  ├───────────────────────────┼──────────────────────────────────────┼─────────────────┤
-  │ pipeline/low_deployment │ a1b2c3d4-5e6f-7081-92a3-b4c5d6e7f809 │ low_performance │
-  └───────────────────────────┴──────────────────────────────────────┴─────────────────┘
-  ```
-
-### 6.3 pipeline.py
-
-  orchestrator (`pipeline.py`) 는 **"커밋 받아 → 팀원 코드 실행"** 만 하는 얇은 python 골격 (`@flow` 함수) 으로, [§6.1](#61-image) 이미지에 구워집니다. 관리자가 관리하는 스크립트이며 팀원이 작성하지 않습니다 — 팀원은 자기 학습 스크립트 (`my_flow.py` 등) 만 작성해 `payload` 파라미터로 지정합니다.
-
-  ```python
-  # pipeline.py — orchestrator; Prefect runs this as the deployment entrypoint.
-  import collections
-  import os
-  import shutil
-  import subprocess
-  import tempfile
-  from pathlib import Path
-  from typing import Dict
-
-  import boto3
-  from prefect import flow, get_run_logger
-  from prefect.blocks.core import Block
-  from prefect.blocks.fields import SecretDict
-  from prefect.variables import Variable
-
-  __version__ = "0.0.36"  # Semantic Versioning:  Version = Major.Minor.Patch
-
-
-  class Credentials(Block):              # ONE block holds a credential set as nested dicts (values hidden);
-      minio: SecretDict                  # access_key, secret_key        (endpoint is a prefect Variable)
-      postgresql_catalog: SecretDict     # username, password, database  (host:port is the prefect Variable 'postgresql_host_port')
-      postgresql_optuna: SecretDict      # username, password, database  (host:port is the prefect Variable 'postgresql_host_port')
-
-
-  def run_payload(*, payload: str, submitter: str, data: Path, script: Path, env: Dict[str, str]) -> None:
-      """Run the team's payload in script/, streaming its output to this run's logs line-by-line and
-      keeping the tail so the crash reason is visible even when the payload never created a flow run.
-
-      A payload that dies BEFORE entering its @flow (import error, __main__ exception, bad CLI args)
-      registers no Prefect flow run: in the dashboard Runs there is NO payload flow error to see - only
-      this pipeline flow error. Raises RuntimeError on a non-zero exit; the tail carries the traceback."""
-      log = get_run_logger()
-      tail = collections.deque(maxlen=50)              # last N output lines -> attached to the error
-      # -u: unbuffered so lines arrive live; stderr -> stdout so the traceback streams inline, in order.
-      proc = subprocess.Popen(
-          ["python", "-u", payload, "--submitter", submitter, "--data-folder", str(data)],
-          cwd=script, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-      for line in proc.stdout:                          # stream each line to this run's UI logs as it arrives
-          line = line.rstrip()
-          log.info(line)
-          tail.append(line)
-      returncode = proc.wait()
-      if returncode != 0:
-          raise RuntimeError(
-              f"payload {payload} exited {returncode} for {submitter}; last {len(tail)} output line(s):\n"
-              + "\n".join(tail)
-              + "\n-- if the payload died before entering its @flow (import error, __main__ exception, "
-                "bad CLI args), no payload flow run is created: the Prefect dashboard Runs shows NO "
-                "payload flow error, only this pipeline flow error.")
-
-
-  # flow_run_name shows who submitted the run (e.g. alice@a1b2c3d).
-  @flow(name="pipeline", flow_run_name="{submitter}#{git_commit_hash}")
-  def pipeline(*, submitter: str = "", payload: str = "my_flow.py", prefect_block: str = "",
-               git_repo: str, git_commit_hash: str, minio_key: str, minio_bucket: str = "datasets") -> None:
-      log = get_run_logger()                         # writes to this run's UI logs
-      log.info(f"pipeline v{__version__}")
-      base = Path(tempfile.mkdtemp(prefix="run-"))   # per-run temp dir (removed in finally)
-      repo = base / "repo"                           # git database (.git + the fetched commit)
-      script = base / "script"                       # worktree: team repo snapshot at the commit
-      data = base / "data"                           # MinIO download target
-      try:
-          # repo/: git database - init, add remote, shallow-fetch the one commit
-          subprocess.run(["git", "init", repo], check=True)
-          subprocess.run(["git", "-C", repo, "remote", "add", "origin", git_repo], check=True)
-          subprocess.run(["git", "-C", repo, "fetch", "--depth", "1", "origin", git_commit_hash], check=True)
-
-          # script/: expand the fetched commit into a clean detached worktree
-          subprocess.run(["git", "-C", repo, "worktree", "add", "--detach", script, git_commit_hash], check=True)
-
-          # data/: MinIO download target (git didn't create it)
-          data.mkdir(parents=True, exist_ok=True)
-          # this run's prefect_block -> its SECRETS (§7); service addresses are prefect Variables (§3).
-          creds = Credentials.load(prefect_block)
-          minio = creds.minio.get_secret_value()
-          s3 = boto3.client("s3", endpoint_url=Variable.get("minio_endpoint"),
-                            aws_access_key_id=minio["access_key"],
-                            aws_secret_access_key=minio["secret_key"])
-          # minio_key -> data/: download every object under the key (works for a single file or a whole prefix).
-          paginator = s3.get_paginator("list_objects_v2")
-          n = 0
-          for page in paginator.paginate(Bucket=minio_bucket, Prefix=minio_key):
-              for obj in page.get("Contents", []):
-                  key = obj["Key"]
-                  rel = key[len(minio_key):].lstrip("/") or Path(key).name  # path under the prefix
-                  dest = data / rel
-                  dest.parent.mkdir(parents=True, exist_ok=True)
-                  s3.download_file(minio_bucket, key, str(dest))
-                  n += 1
-          if n == 0:
-              raise FileNotFoundError(f"no objects under s3://{minio_bucket}/{minio_key}")
-          log.info(f"downloaded {n} object(s) from s3://{minio_bucket}/{minio_key} to {data}")
-
-          # bridge addresses (prefect Variables) to the payload via env: the MLflow tracking URI so
-          # my_flow.py logs to the MLflow server (not a local ./mlruns), and the optuna study DSN
-          # (Variable host/port + block creds) so a payload using Optuna hits the shared study DB.
-          env = os.environ.copy()
-          mlflow_uri = Variable.get("mlflow_tracking_uri")
-          if mlflow_uri:
-              env["MLFLOW_TRACKING_URI"] = mlflow_uri
-          opt = creds.postgresql_optuna.get_secret_value()
-          opt_host, _, opt_port = (Variable.get("postgresql_host_port") or "").partition(":")   # single Variable -> host, port
-          opt_port = opt_port or "5432"                                               # tolerate a bare host with no ':port'
-          env["POSTGRESQL_OPTUNA_DSN"] = (f"postgresql://{opt['username']}:{opt['password']}"
-                                          f"@{opt_host}:{opt_port}/{opt['database']}")
-          # run the team's payload in script/; run identity passed as CLI args. run_payload streams the
-          # output to this run's logs and raises on a non-zero exit so the failure can't pass silently.
-          run_payload(payload=payload, submitter=submitter, data=data, script=script, env=env)
-      finally:
-          shutil.rmtree(base, ignore_errors=True)    # one cleanup removes repo/ + script/ + data/
-  ```
-
-  - **자유로운 코드** — `payload` 로 팀원이 자기 스크립트를 지정하므로 코드를 정해진 틀에 맞출 필요가 없습니다. 입력은 CLI 인자 (`--submitter`·`--data-folder`) 로 받으므로, 팀원 스크립트는 `argparse` 로 그 값만 읽으면 됩니다. (payload 는 이미 체크아웃된 `script/` 안에서 돌므로 git 정보는 넘기지 않고, MLflow 서버 주소만 Variable `mlflow_tracking_uri` 를 `MLFLOW_TRACKING_URI` 환경변수로 넘깁니다.)
-  - **데이터 이력** — `minio_bucket`·`minio_key` 가 **flow 파라미터** 라서 Prefect 가 run 마다 입력값을 `prefect` DB 에 자동 저장합니다 (어느 버킷·객체를 썼는지 lineage 로 남습니다).
-  - **crash 확인** — payload 가 0 이 아닌 코드로 끝나면 `run_payload` 이 `RuntimeError` 를 raise 해 **pipeline run 이 `Failed` 로 표시됩니다**. payload 가 도는 동안 그 출력은 한 줄씩 pipeline run 의 **Logs** 로 스트리밍되고, 실패하면 마지막 출력 (stdout·stderr, traceback 포함) 이 예외 메시지에도 함께 담깁니다. payload 가 `@flow` 로 감싸여 자기 `my_flow` run 을 만든 경우엔 그 run 도 **Failed** 로 남아 [§9](#9-prefect-ui) 에서 **어느 단계** 가 깨졌는지 함께 보입니다. 반면 payload 가 **`@flow` 에 진입하기 전에** 죽으면 (import error·`__main__` 예외·잘못된 CLI 인자) payload flow run 자체가 만들어지지 않으므로, dashboard 의 **Runs** 에는 payload flow error 가 **안 보이고 pipeline flow error 만** 보입니다 — 이때 crash 원인은 pipeline run 의 Logs·예외 메시지에서 확인합니다. git·MinIO 등 orchestrator **자신의** 오류도 그대로 raise 되어 pipeline run 이 **Failed** 로 표시됩니다.
-  - **이력 자동 저장** — `@flow` 진입 시 Prefect 가 run 의 상태·로그·파라미터를 자동 기록합니다. 지표·모델은 팀원 코드가 MLflow 로 로깅하면 함께 남습니다 — pipeline.py 가 Variable `mlflow_tracking_uri` 를 `MLFLOW_TRACKING_URI` env 로 넘기므로 payload 는 그 tracking 서버로 로깅합니다 (없으면 로컬 `./mlruns` 로 빠지니 `mlflow_tracking_uri` Variable 을 등록해야 대시보드에 뜹니다). 마찬가지로 블록의 `postgresql_optuna` 비밀 + Variable `postgresql_host_port` 로 DSN 을 조립해 `POSTGRESQL_OPTUNA_DSN` env 로 넘기므로, Optuna 를 쓰는 payload 는 공유 postgres study 에 연결합니다 ([Appendix M](#appendix-m-prefect-task)).
-
-  [§6.2](#62-deployment) 의 deployment 가 entrypoint 를 **`pipeline.py:pipeline`** 로 가리킵니다. 이 문자열은 server 의 deployment 레코드 (`prefect` DB) 에 저장되고, worker 가 띄운 컨테이너 안에서 Prefect 런타임이 이미지 작업 디렉터리 (`/work`, `Dockerfile.pipeline_flow` 가 `pipeline.py` 를 COPY 한 곳) 기준으로 `pipeline.py` 를 import 해 콜론 뒤 **`@flow` 함수 `pipeline`** 을 run 파라미터 (`git_repo`·`git_commit_hash`·`minio_key`·`minio_bucket`·`submitter`·`prefect_block`·`payload`) 와 함께 호출합니다. 그래서 deployment entrypoint 가 곧 이 `pipeline.py` 입니다.
-
-  `pipeline` 함수에 전달한 run 파라미터 **값** 은 **trigger 할 때** 지정합니다 — trigger 주체는 보통 **팀원** (또는 스케줄·automation) 입니다. 팀원이 자기 머신·CI 에서 CLI `prefect deployment run "pipeline/high_deployment" -p git_repo=… -p git_commit_hash=… -p minio_key=… -p submitter=… -p prefect_block=…` 을 실행하거나 (CLI 는 [Appendix B](#appendix-b-prefect-cli)), server UI 의 Run 폼, 스케줄·automation, 또는 `run_deployment(name, parameters={…})` 로 ([§8.2](#82-python-sdk)) trigger 합니다.
-
-  `pipeline.py` 가 **`pipeline_flow` 컨테이너 안에서** run 마다 만드는 폴더 구조입니다 (끝나면 통째로 삭제 — 컨테이너 자체가 일시적이라 함께 사라집니다).
-
-  ```text
-  /tmp/run-<rand>/                 # per-run temp dir (base; removed after the run)
-  ├─ repo/                         # git init + fetch --depth 1 origin <git_commit_hash> (shallow git db)
-  ├─ script/                       # git worktree add --detach script <git_commit_hash> (clean worktree at the commit)
-  │  ├─ my_flow.py                 # payload — my entry (run: python my_flow.py --data-folder ../data ...)
-  │  └─ ...                        # the rest of my repo at <git_commit_hash>
-  └─ data/                         # MinIO download target (bucket/key → here)
-     └─ <object>                   # files or folders/files
-  ```
-
-  - **팀원별 repo** — `git_repo` 가 **flow 파라미터** 라 deployment 마다 다른 repo 를 기본값으로 등록할 수 있습니다. 팀원은 각자 repo·커밋을 쓰고, run 마다 사설 `script/` 에 펼쳐져 서로 간섭하지 않습니다. Prefect 가 `git_repo`·`git_commit_hash` 을 run 파라미터로 자동 기록해 재현·lineage 가 남습니다.
-  - **데이터 준비** — `pipeline.py` 가 MinIO 에서 `minio_bucket`/`minio_key` 객체를 `data/` 로 미리 내려받고 `--data-folder` 로 경로를 넘깁니다. 접속 자격증명 (그 블록의 `minio` 섹션) 은 [§7](#7-credentials) 의 Credential Blocks 로 받습니다. 팀원 코드는 자격증명·다운로드를 각자 짤 필요 없이 `--data-folder` 폴더의 파일을 읽기만 하면 됩니다 (`pipeline.py` 가 `boto3` 로 받으므로 flow image 에 `boto3` 가 있어야 합니다 — [§6.1](#61-image)).
+## 6. Docker Registry
+
+Worker image 와 flow image 는 같은 docker registry 에서 받습니다. 두 image 를 올리는 방법은 [prefect-worker-ko.md §3](PrefectWorker/prefect-worker-ko.md#3-image) 와 [prefect-flow-ko.md §3](PrefectFlow/prefect-flow-ko.md#3-image) 에 있고, registry 와 pull policy 의 원리는 [prefect-registry-ko.md](prefect-registry-ko.md) 를 따릅니다.
+
+- Registry 는 `registry:2` container 로 host port `12357` 에 있습니다. 5000 은 같은 machine 의 MLflow 가 쓰므로 12357 을 골랐습니다.
+- Worker image 는 `<IMAGE_REGISTRY>/prefect-worker:latest`, flow image 는 `<IMAGE_REGISTRY>/pipeline-flow:latest` 입니다. `IMAGE_REGISTRY` 는 `docker-compose.env` 에 `<host>:<port>` 로 적습니다.
+- Worker machine 의 docker daemon 은 `insecure-registries` 에 `<REGISTRY_IP>:12357` 을 가져야 HTTP registry 에서 pull 할 수 있습니다.
+- 같은 registry 를 다른 stack 도 씁니다. 그 stack 의 build script 는 `localhost:12357/yrocket-finance:latest` 를 push 하고, serve container 는 `POOL_IMAGE=<REGISTRY_IP>:12357/yrocket-finance:latest` 로 pool deployment 를 `image_pull_policy="Always"` 로 등록합니다.
+- Registry 에는 아직 `prefect-worker` 와 `pipeline-flow` repository 가 없고, 도는 worker 는 그 전에 local 에서 build 한 `prefect-worker:latest` 로 떠 있습니다.
 
 ## 7. Credentials
 
-설정 값은 **네 곳** 으로 나뉘고 서로 겹치지 않습니다 — ① server·worker **부트스트랩** (backend DB URL·server 주소) 은 `docker-compose.env_example`, ② `pipeline_flow` 컨테이너의 **기동 설정** (`PREFECT_API_URL`·`mem_limit` 등, 비밀 아님) 은 **base job template** (§4), ③ **backing service 주소** (MinIO·PostgreSQL·MLflow endpoint, 비밀 아님) 은 서버의 **Prefect Variable** (`register_variables`, [§4](#service-address-variables)), ④ **run 코드용 비밀** (MinIO 키·DB 비번) 만 **Credential 블록** (Prefect Secret) 입니다. **주소(③)와 비밀(④)을 분리** — 주소는 한 곳(Variable)에서 관리하고 비밀만 블록에 둡니다. worker 는 자격증명을 들지 않습니다.
+설정 값은 **네 곳** 으로 나뉘고 서로 겹치지 않습니다 — ① server·worker **부트스트랩** (backend DB URL·server 주소) 은 `docker-compose.env_example`, ② `pipeline_flow` 컨테이너의 **기동 설정** (`PREFECT_API_URL`·`mem_limit` 등, 비밀 아님) 은 **base job template** ([prefect-server-ko.md](PrefectServer/prefect-server-ko.md)), ③ **backing service 주소** (MinIO·PostgreSQL·MLflow endpoint, 비밀 아님) 은 서버의 **Prefect Variable** (`register_variables`, [prefect-server-ko.md §4](PrefectServer/prefect-server-ko.md#4-service-address-variables)), ④ **run 코드용 비밀** (MinIO 키·DB 비번) 만 **Credential 블록** (Prefect Secret) 입니다. **주소(③)와 비밀(④)을 분리** — 주소는 한 곳(Variable)에서 관리하고 비밀만 블록에 둡니다. worker 는 자격증명을 들지 않습니다.
 
-### docker-compose.env_example
+### 7.1 docker-compose.env_example
 
-  **server·worker 부트스트랩 값** (server 주소·backend DB URL) 만 `docker-compose.env_example` 에 모읍니다 (컨테이너가 `env_file` 로 읽음). backing 주소는 여기 없고 서버 Variable 에 있습니다 ([§4 Service Address Variables](#service-address-variables)).
+  **server·worker 부트스트랩 값** (server 주소·backend DB URL) 만 `docker-compose.env_example` 에 모읍니다 (컨테이너가 `env_file` 로 읽음). backing 주소는 여기 없고 서버 Variable 에 있습니다 ([prefect-server-ko.md §4 Service Address Variables](PrefectServer/prefect-server-ko.md#4-service-address-variables)).
 
   ```dotenv
   # docker-compose.env_example  (Prefect stack — server/worker bootstrap config)
@@ -999,9 +384,9 @@ Pipeline Flow 는 worker 가 job 마다 띄우는 per-flow 컨테이너입니다
 
   - **메타 DB 호스트** 는 PostgreSQL 이 있는 머신의 **LAN IP** (`<POSTGRESQL_IP>`) — IP 로 두면 server 와 같은 머신이든 다른 머신이든 동작합니다 (같은 머신·같은 `mlops` 망이면 서비스 이름 `postgres` 도 가능).
   - `PREFECT_UI_API_URL` — 브라우저는 docker network 밖이라 `prefect_server` 대신 **LAN IP**.
-  - **backing 주소 (MinIO·PostgreSQL·MLflow) 는 여기 없습니다** — 서버 Variable 로 관리합니다 ([§4 Service Address Variables](#service-address-variables)). worker 는 자격증명·주소를 들지 않습니다.
+  - **backing 주소 (MinIO·PostgreSQL·MLflow) 는 여기 없습니다** — 서버 Variable 로 관리합니다 ([prefect-server-ko.md §4 Service Address Variables](PrefectServer/prefect-server-ko.md#4-service-address-variables)). worker 는 자격증명·주소를 들지 않습니다.
 
-### Credential Blocks
+### 7.2 Credential Blocks
 
   코드가 **MinIO** 와 PostgreSQL 의 `catalog`·`optuna` DB 에 접속할 **비밀** 을 **한 블록** 에 모읍니다 — `minio`·`postgresql_catalog`·`postgresql_optuna` 세 묶음의 **비밀만** (주소·endpoint 는 위 Variable). 비밀 값은 `SecretDict` 로 가립니다. server 에 한 번 저장하면 컨테이너·머신마다 따로 넣지 않아도 됩니다.
 
@@ -1014,7 +399,7 @@ Pipeline Flow 는 worker 가 job 마다 띄우는 per-flow 컨테이너입니다
   └─ postgresql_optuna  : username, password, database
   ```
 
-  자격증명을 **JSON 파일** 로 적고 `credentials.py` 로 등록합니다 — 블록 이름은 Prefect 규칙상 **소문자·숫자·하이픈만** 가능하므로 `--block-name` 으로 소문자 이름을 지정합니다 (예: 파일 `yrocket.json` → 블록 이름 `yrocket`). `credentials.py` 코드는 [Appendix I](#appendix-i-credentialspy).
+  자격증명을 **JSON 파일** 로 적고 `credentials.py` 로 등록합니다 — 블록 이름은 Prefect 규칙상 **소문자·숫자·하이픈만** 가능하므로 `--block-name` 으로 소문자 이름을 지정합니다 (예: 파일 `yrocket.json` → 블록 이름 `yrocket`). `credentials.py` 코드는 [Appendix E](#appendix-e-credentialspy).
 
   `yrocket.json`:
 
@@ -1055,13 +440,13 @@ Pipeline Flow 는 worker 가 job 마다 띄우는 per-flow 컨테이너입니다
 
   UI 로는 `http://<Host IP>:4200` → **Blocks** 에서도 같은 블록이 보입니다.
 
-  `pipeline.py` 는 블록의 `minio` **비밀** + Variable **주소** 로 다운로드하고, `catalog.py` 는 `minio`·`postgresql_catalog`·`postgresql_optuna` **비밀** + Variable **주소** 를 씁니다 (실제 load 예시는 [§6.3](#63-pipelinepy) 의 `pipeline.py`).
+  `pipeline.py` 는 블록의 `minio` **비밀** + Variable **주소** 로 다운로드하고, `catalog.py` 는 `minio`·`postgresql_catalog`·`postgresql_optuna` **비밀** + Variable **주소** 를 씁니다 (실제 load 예시는 [prefect-flow-ko.md §5](PrefectFlow/prefect-flow-ko.md#5-pipelinepy) 의 `pipeline.py`).
 
-  > flow 컨테이너는 base job template 의 `PREFECT_API_URL` 로 server 에 연결돼야 블록을 받습니다 ([§4 Work Pool Registration](#work-pool-registration)). `mlflow`·`prefect` DB 는 사용자 코드가 직접 접속하지 않으므로, 사용자 role 에는 `catalog`·`optuna` 권한만 있으면 됩니다.
+  > flow 컨테이너는 base job template 의 `PREFECT_API_URL` 로 server 에 연결돼야 블록을 받습니다 ([prefect-server-ko.md §3 Work Pool Registration](PrefectServer/prefect-server-ko.md#3-work-pool-registration)). `mlflow`·`prefect` DB 는 사용자 코드가 직접 접속하지 않으므로, 사용자 role 에는 `catalog`·`optuna` 권한만 있으면 됩니다.
 
 ## 8. Job Triggering
 
-등록된 deployment 를 실제로 돌리는 (trigger) 방법은 여러 가지지만, 결국 모두 **server 의 Prefect API 에 "flow run 생성" 요청을 보내는 것**입니다 — 코드가 아니라 **deployment 이름 + 파라미터 값** 만 보냅니다. **trigger 인터페이스 (CLI·SDK) 는 실행 모드와 무관하게 같고**, 실제 실행 주체는 **실행 모드** 가 정합니다 — 이 스택의 **work pool mode** (server 가 run 을 work pool 에 얹고 worker 가 `pipeline_flow` 컨테이너를 띄워 그 안에서 `pipeline(**parameters)` 실행, [§6.3](#63-pipelinepy)) 와 단일 머신 대안인 **serve mode** ([§8.3](#83-serve-mode) · [Appendix C](#appendix-c-execution-architecture)) 입니다. 그래서 아래 §8.1·§8.2 는 두 모드 공통의 trigger 인터페이스이고, §8.3 이 serve mode 의 차이를 다룹니다.
+등록된 deployment 를 실제로 돌리는 (trigger) 방법은 여러 가지지만, 결국 모두 **server 의 Prefect API 에 "flow run 생성" 요청을 보내는 것**입니다 — 코드가 아니라 **deployment 이름 + 파라미터 값** 만 보냅니다. **trigger 인터페이스 (CLI·SDK) 는 실행 모드와 무관하게 같고**, 실제 실행 주체는 **실행 모드** 가 정합니다 — 이 스택의 **work pool mode** (server 가 run 을 work pool 에 얹고 worker 가 `pipeline_flow` 컨테이너를 띄워 그 안에서 `pipeline(**parameters)` 실행, [prefect-flow-ko.md §5](PrefectFlow/prefect-flow-ko.md#5-pipelinepy)) 와 단일 머신 대안인 **serve mode** ([§8.3](#83-serve-mode) · [Appendix C](#appendix-c-execution-architecture)) 입니다. 그래서 아래 §8.1·§8.2 는 두 모드 공통의 trigger 인터페이스이고, §8.3 이 serve mode 의 차이를 다룹니다.
 
 > ⚠️ `pipeline(...)` 함수를 파이썬에서 직접 호출하는 것은 trigger 가 **아닙니다** — server·work pool 을 거치지 않고 그 자리에서 로컬 실행되어 컨테이너 격리·lineage 가 없습니다. 아래 [§8.2](#82-python-sdk) 는 반드시 `run_deployment` 를 말합니다.
 
@@ -1126,15 +511,15 @@ Pipeline Flow 는 worker 가 job 마다 띄우는 per-flow 컨테이너입니다
 server 대시보드 (`http://<Host IP>:4200`) 에서 deployment·run·task 가 어떻게 보이는지입니다.
 
 - **Deployments** — `<flow_name>/<deployment_name>` 로 나열됩니다 (예: `pipeline/high_deployment`·`pipeline/low_deployment`). flow 이름은 `@flow(name="pipeline")`, deployment 이름은 yaml 의 `name` 입니다.
-- **Flow Runs** — trigger 된 run 이 `flow_run_name` 으로 나열됩니다. `submitter` 가 들어가 같은 deployment 아래에서 `alice@a1b2c3d` 처럼 **누구의 run 인지** 구분됩니다 ([§6.3](#63-pipelinepy) 의 `flow_run_name`). `pipeline.py` 는 payload 에 실행자 이름 (`submitter`) 만 넘기고 git 정보는 넘기지 않으므로, 팀 payload 의 flow run 은 실행자 이름 (예: `alice`) 으로 나열됩니다 (orchestrator run 은 `alice@a1b2c3d`).
-- **Tasks** — 팀 payload 가 단계 (dp·fe·train·test) 를 **`@task`** 로 감싸고 `@flow` 로 묶으면, 컨테이너 env 의 `PREFECT_API_URL` 덕분에 그 subprocess 가 **자기 flow run 과 task** 를 보고해 단계가 보입니다 (orchestrator run 과 **별개 flow run**, subprocess 라 격리 유지 — [Appendix M](#appendix-m-prefect-task)).
+- **Flow Runs** — trigger 된 run 이 `flow_run_name` 으로 나열됩니다. `submitter` 가 들어가 같은 deployment 아래에서 `alice@a1b2c3d` 처럼 **누구의 run 인지** 구분됩니다 ([prefect-flow-ko.md §5](PrefectFlow/prefect-flow-ko.md#5-pipelinepy) 의 `flow_run_name`). `pipeline.py` 는 payload 에 실행자 이름 (`submitter`) 만 넘기고 git 정보는 넘기지 않으므로, 팀 payload 의 flow run 은 실행자 이름 (예: `alice`) 으로 나열됩니다 (orchestrator run 은 `alice@a1b2c3d`).
+- **Tasks** — 팀 payload 가 단계 (dp·fe·train·test) 를 **`@task`** 로 감싸고 `@flow` 로 묶으면, 컨테이너 env 의 `PREFECT_API_URL` 덕분에 그 subprocess 가 **자기 flow run 과 task** 를 보고해 단계가 보입니다 (orchestrator run 과 **별개 flow run**, subprocess 라 격리 유지 — [Appendix G](#appendix-g-prefect-task)).
 - **Parameters · State · Logs** — run 마다 입력 파라미터 (`git_repo`·`git_commit_hash`·`minio_key`·`submitter`)·상태·로그가 자동 기록되어 (UI 의 Flow Run → Parameters), 같은 파라미터로 재실행 (재현) 할 수 있습니다.
 
 job 하나가 trigger 되면 대시보드에 다음처럼 보입니다.
 
 ```text
 Deployments
-  pipeline/high_deployment     high_performance     # per-tier registration (§6.2)
+  pipeline/high_deployment     high_performance     # per-tier registration (prefect-flow-ko.md §4)
   pipeline/low_deployment      low_performance
 
 Flow Runs
@@ -1148,20 +533,22 @@ Flow Runs
 
 같은 job 이 **flow run 두 개** 로 보입니다 — orchestrator (`pipeline`) 와 팀 payload (`my_flow`). orchestrator 는 `flow_run_name` 이 `submitter@commit`, 팀 payload 는 `submitter` (pipeline.py 가 payload 엔 실행자 이름만 넘김) 이라 누구의 run 인지 묶어 보기 좋고, 팀 run 아래에 네 단계 task 가 달립니다. 팀 payload 가 plain 스크립트면 `my_flow` run·task 없이 orchestrator run 만 보입니다.
 
+---
+
 ## Appendix A. Terminology
 
 - **Host** — 모든 컨테이너 (server·worker·pipeline_flow·postgres·minio·mlflow) 가 올라가는 한 대의 컴퓨터입니다.
 - **`prefect_server`** — API·UI·스케줄러·work pool 대기열을 제공하는 중앙 진입점입니다. 메타데이터 (`prefect` DB) 만 관리하고 코드는 실행하지 않습니다.
 - **`prefect_worker`** — work pool 을 polling 해 job 마다 `pipeline_flow` 컨테이너를 띄우고 정리하는 worker 입니다 (Prefect 공식 용어로는 worker). 코드는 실행하지 않습니다.
 - **Pipeline Flow** — worker 가 job 마다 띄우는 일시적 실행 컨테이너입니다. 받은 repo·커밋을 shallow `git fetch` 로 펼친 뒤 코드를 실행하고 끝나면 파괴됩니다.
-- **flow image** — Pipeline Flow 컨테이너를 띄우는 image 입니다. deployment 의 `image` (없으면 base job template 의 `image` 기본값) 가 가리키며, 이 스택에서는 `pipeline-flow:latest` 입니다 ([§6.1](#61-image)).
+- **flow image** — Pipeline Flow 컨테이너를 띄우는 image 입니다. deployment 의 `image` (없으면 base job template 의 `image` 기본값) 가 가리키며, 이 스택에서는 `pipeline-flow:latest` 입니다 ([prefect-flow-ko.md §3](PrefectFlow/prefect-flow-ko.md#3-image)).
 - **ephemeral container** — `docker` work pool 이 job 마다 띄웠다 파괴하는 일시적 컨테이너입니다. 이 문서의 Pipeline Flow 가 여기 해당합니다.
 - **work pool** — job 이 대기하는 큐이자 실행 방식 (type) 의 정의입니다. server 안의 메타데이터이며 컨테이너가 아닙니다.
 - **work pool type** — Prefect 가 정한 실행 방식 이름입니다 (`process` · `docker` · `kubernetes` · `ecs` 등). 이 스택은 `docker` (job 마다 컨테이너) 를 씁니다.
 - **serve mode** — `flow.serve()` 프로세스가 상시 떠서 flow run 요청을 받아 처리하는 모습이, 웹 서버가 요청을 처리하듯 flow 를 계속 **제공 (serve)** 하기 때문에 붙은 이름입니다.
 - **deployment** — flow 를 어떻게 실행할지 묶어 **server DB (`prefect`) 에 저장한 레코드** 입니다. 파일·dict 가 아니라 server 안의 영구 레코드이고, API·UI·`prefect deployment inspect` 에서 **JSON 으로** 보입니다.
   - **누가** — 플랫폼·관리자가 등급마다 1회 (팀원 아님).
-  - **어떻게** — `prefect deploy --prefect-file <yaml> --name <name> --no-prompt` (CLI) 가 yaml 정의를 server API 로 보내 DB 에 등록합니다 ([§6.2](#62-deployment)).
+  - **어떻게** — `prefect deploy --prefect-file <yaml> --name <name> --no-prompt` (CLI) 가 yaml 정의를 server API 로 보내 DB 에 등록합니다 ([prefect-flow-ko.md §4](PrefectFlow/prefect-flow-ko.md#4-deployment)).
   - **사용** — 코드를 다시 안 봐도 이름 `<flow>/<deployment>` 로 run 을 trigger 합니다 (`prefect deployment run "pipeline/high_deployment" -p payload=my_flow.py` · UI · 스케줄). 그러면 worker 가 그 정의대로 `pipeline_flow` 컨테이너를 띄웁니다.
   - 저장된 모습 (`prefect deployment inspect "pipeline/high_deployment"`):
 
@@ -1170,7 +557,7 @@ Flow Runs
       "work_pool_name": "high_performance", "job_variables": { "image": "pipeline-flow:latest" },
       "parameters": { "payload": "my_flow.py" } }
     ```
-- **entrypoint** — deployment 가 실행할 flow 를 `<파일>:<@flow 함수>` 로 가리키는 문자열입니다 (예: `pipeline.py:pipeline`). server DB 에 저장되고, 컨테이너 런타임이 이 경로로 모듈을 import 해 그 `@flow` 함수를 run 파라미터와 함께 호출합니다 ([§6.2](#62-deployment)).
+- **entrypoint** — deployment 가 실행할 flow 를 `<파일>:<@flow 함수>` 로 가리키는 문자열입니다 (예: `pipeline.py:pipeline`). server DB 에 저장되고, 컨테이너 런타임이 이 경로로 모듈을 import 해 그 `@flow` 함수를 run 파라미터와 함께 호출합니다 ([prefect-flow-ko.md §4](PrefectFlow/prefect-flow-ko.md#4-deployment)).
 - **base job template** — pool 이 띄우는 flow 컨테이너의 공통 설정 (이미지·env·네트워크·메모리 상한 등) 입니다.
 - **`PREFECT_API_URL`** — worker·client 가 server API 를 찾는 주소 (`http://<host>:4200/api`) 입니다. 같은 호스트면 host 가 서비스명 `prefect_server` 입니다.
 
@@ -1186,26 +573,26 @@ Flow Runs
 
 ## Appendix B. Prefect CLI
 
-`prefect` CLI 는 Prefect SDK 와 함께 설치되는 명령행 도구 (`pip install prefect`) 입니다. 본문 꼭지별로 묶었습니다.
+`prefect` CLI 는 Prefect SDK 와 함께 설치되는 명령행 도구 (`pip install prefect`) 입니다. 구성요소별로 묶었습니다.
 
-- **§4 Server·Work Pool**
+- **Server · Work Pool** ([prefect-server-ko.md](PrefectServer/prefect-server-ko.md))
   - `prefect config set PREFECT_API_URL="http://<Host IP>:4200/api"` — client 가 바라볼 server 주소를 프로필에 1회 저장합니다.
   - `prefect config view` — 현재 활성 프로필의 설정값 (`PREFECT_API_URL` 등) 을 출력합니다. CLI 가 지금 어느 server 를 향하는지 확인합니다.
   - `prefect profile ls` — 프로필 목록을 출력합니다. 등록·조회가 어긋날 때 어떤 프로필 (어떤 `PREFECT_API_URL`) 이 활성이었는지 되짚습니다.
   - `prefect server start --host 0.0.0.0` — Prefect server 를 기동합니다.
   - `prefect work-pool create <name> --type docker --base-job-template <file> [--overwrite]` — `docker` work pool 을 server 에 등록합니다.
   - `prefect work-pool ls [--output json]` — 등록된 work pool 을 표 (또는 JSON) 로 출력합니다 (이름·type·동시성 한도; JSON 은 `run_worker.sh` 의 pool 검증이 파싱).
-- **§5 Worker**
-  - `prefect work-pool get-default-base-job-template --type docker` — 도커 worker 의 기본 base job template 을 출력합니다 (§5.1).
-  - `prefect worker start --pool <name> [--limit N]` — worker 를 기동해 그 pool 을 polling 하며 job 을 실행합니다 (§5.2).
-  - `prefect work-pool set-concurrency-limit <pool> <N>` — pool 전체 동시 실행 상한을 설정합니다 ([§4 Work Pool Registration](#work-pool-registration)).
-- **§6 Pipeline Flow**
-  - `prefect deploy` (또는 `flow.deploy(...)`) — deployment 를 등록합니다 (§6.2).
-  - `prefect deployment ls` — server 에 등록된 deployment 를 표 (이름·ID·Work Pool) 로 출력합니다. 등급별 `high`·`low` 가 각자 pool 로 올라갔는지 확인합니다 (§6.2).
-  - `prefect deployment inspect "<flow>/<deployment>"` — deployment 하나의 상세 (entrypoint·work pool·parameters·job_variables 등) 를 출력합니다 (예: `prefect deployment inspect "pipeline/high_deployment"`). `pipeline` 시그니처가 바뀐 뒤 파라미터 스키마가 새로 반영됐는지 확인합니다 (§6.2).
-  - `prefect deployment run "<flow>/<deployment>" -p <key>=<value>` — 등록된 deployment 를 파라미터와 함께 trigger 합니다 (§6.3).
+- **Worker** ([prefect-worker-ko.md](PrefectWorker/prefect-worker-ko.md))
+  - `prefect work-pool get-default-base-job-template --type docker` — 도커 worker 의 기본 base job template 을 출력합니다 ([prefect-server-ko.md §3](PrefectServer/prefect-server-ko.md#3-work-pool-registration)).
+  - `prefect worker start --pool <name> [--limit N]` — worker 를 기동해 그 pool 을 polling 하며 job 을 실행합니다 ([prefect-worker-ko.md §4](PrefectWorker/prefect-worker-ko.md#4-container)).
+  - `prefect work-pool set-concurrency-limit <pool> <N>` — pool 전체 동시 실행 상한을 설정합니다 ([prefect-server-ko.md §3 Work Pool Registration](PrefectServer/prefect-server-ko.md#3-work-pool-registration)).
+- **Pipeline Flow** ([prefect-flow-ko.md](PrefectFlow/prefect-flow-ko.md))
+  - `prefect deploy` (또는 `flow.deploy(...)`) — deployment 를 등록합니다 ([prefect-flow-ko.md §4](PrefectFlow/prefect-flow-ko.md#4-deployment)).
+  - `prefect deployment ls` — server 에 등록된 deployment 를 표 (이름·ID·Work Pool) 로 출력합니다. 등급별 `high`·`low` 가 각자 pool 로 올라갔는지 확인합니다 ([prefect-flow-ko.md §4](PrefectFlow/prefect-flow-ko.md#4-deployment)).
+  - `prefect deployment inspect "<flow>/<deployment>"` — deployment 하나의 상세 (entrypoint·work pool·parameters·job_variables 등) 를 출력합니다 (예: `prefect deployment inspect "pipeline/high_deployment"`). `pipeline` 시그니처가 바뀐 뒤 파라미터 스키마가 새로 반영됐는지 확인합니다 ([prefect-flow-ko.md §4](PrefectFlow/prefect-flow-ko.md#4-deployment)).
+  - `prefect deployment run "<flow>/<deployment>" -p <key>=<value>` — 등록된 deployment 를 파라미터와 함께 trigger 합니다 ([prefect-flow-ko.md §5](PrefectFlow/prefect-flow-ko.md#5-pipelinepy)).
   - `prefect deployment delete "<flow>/<deployment>"` — 등록된 deployment 를 server 에서 삭제합니다 (예: `prefect deployment delete "pipeline/high_deployment"`). 시그니처를 바꿔 다시 올릴 때는 삭제 없이 `prefect deploy` 로 덮어써도 되며, 등급을 폐기할 때만 삭제합니다.
-- **§7 Credentials**
+- **Credentials** ([§7](#7-credentials))
   - `prefect block ls` — server 에 등록된 블록 (`Credentials` 등) 을 표 (ID·Type·Name·Slug) 로 출력합니다. run-code 자격증명 (Credentials 블록, 예 `yrocket`) 이 등록됐는지 확인합니다 (§7). 블록은 **그 server 의 DB 에 저장** 되므로 server 마다 따로 등록해야 하며, 등록 시점의 `PREFECT_API_URL` 이 가리킨 server 에 들어갑니다.
   - `prefect variable ls` — server 에 등록된 Variable 을 출력합니다. 자격증명을 Secret 블록 대신 Variable 로 넣었는지 확인합니다 (§7).
 
@@ -1226,7 +613,7 @@ Prefect 실행 모드는 **serve mode** 와 **work pool mode** 이고, 차이는
 
 ## Appendix D. backing_ports.sh
 
-backing service 포트 하나를 대상으로, action 에 따라 **도달성 확인 (`check`)** 또는 **인바운드 방화벽 개방 (`open`)** 을 하는 스크립트입니다 ([§3 Reachability to backing service](#reachability-to-backing-service)). `open` 은 그 포트를 **serving 하는 호스트**에서 `sudo` 로 (ufw 규칙 추가), `check` 는 backing 호스트가 **아닌 소비 호스트**에서 실행합니다 — serving 호스트에서 자기 IP 로의 접속은 loopback 이라 방화벽과 무관하게 늘 열린 것처럼 보이기 때문입니다. `open` 은 멱등입니다.
+backing service 포트 하나를 대상으로, action 에 따라 **도달성 확인 (`check`)** 또는 **인바운드 방화벽 개방 (`open`)** 을 하는 스크립트입니다 ([§5.1 Reachability to backing service](#51-reachability-to-backing-service)). `open` 은 그 포트를 **serving 하는 호스트**에서 `sudo` 로 (ufw 규칙 추가), `check` 는 backing 호스트가 **아닌 소비 호스트**에서 실행합니다 — serving 호스트에서 자기 IP 로의 접속은 loopback 이라 방화벽과 무관하게 늘 열린 것처럼 보이기 때문입니다. `open` 은 멱등입니다.
 
 ```bash
 #!/usr/bin/env bash
@@ -1268,356 +655,9 @@ else   # open
 fi
 ```
 
-## Appendix E. run_server.sh
+## Appendix E. credentials.py
 
-제어 노드에서 Prefect server compose 스택을 띄우는 기동 스크립트입니다 ([§4 Server Setup](#server-setup)). 공유 `mlops` 네트워크가 없으면 만들고 `docker-compose.server.yml` 을 올립니다. work pool 등록은 별도입니다 (`register_pool.sh` — [Appendix F](#appendix-f-register_poolsh)).
-
-```bash
-#!/usr/bin/env bash
-# run_server.sh — bring up the Prefect server compose stack on the Control Node.
-# __version__ = "0.0.21"  # Semantic Versioning:  Version = Major.Minor.Patch
-set -euo pipefail
-
-YAML="docker-compose.server.yml"   # the server compose file (its top-level name: sets the project)
-NETWORK="mlops"                    # shared external network
-
-while [ $# -gt 0 ]; do
-    case "$1" in
-        --yaml)    YAML="$2"; shift 2 ;;
-        --network) NETWORK="$2"; shift 2 ;;
-        *) echo "Unknown option: $1" >&2; exit 1 ;;
-    esac
-done
-
-# Create the shared network only if it does not exist yet.
-docker network inspect "$NETWORK" >/dev/null 2>&1 || docker network create "$NETWORK" >/dev/null
-
-# --build keeps the worker_pruner sidecar image (Dockerfile.pruner) in sync with prune_loop.sh.
-docker compose -f "$YAML" up -d --build   # project name comes from the compose file's top-level name: (prefect-server)
-```
-
-## Appendix F. register_pool.sh
-
-server 에 work pool 을 등록 (또는 갱신) 하는 스크립트입니다 ([§4 Work Pool Registration](#work-pool-registration)).
-
-`--overwrite` 가 **템플릿 동기** 를 맡습니다 — pool 이 이미 있으면 오류 없이 그 pool 의 **base job template 을 현재 파일** (`docker-pool-template-high.json`·`docker-pool-template-low.json`) **내용으로 갱신** 합니다 (idempotent). 그래서 템플릿을 고친 뒤 다시 실행하면 server 쪽 설정이 로컬 파일과 같아집니다 (`--overwrite` 가 없으면 이미 있는 pool 에 대해 등록이 실패).
-
-등록은 **server API 호출** 로 합니다 — host 의 prefect CLI 가 `docker-compose.env` 의 `PREFECT_API_URL` 로 server 에 접속하므로, server 컨테이너가 없는 호스트에서도 API 만 닿으면 실행됩니다 (host 에 prefect CLI + jq 필요).
-
-```bash
-#!/usr/bin/env bash
-# register_pool.sh — register (or update) one Prefect work pool via the server API.
-# __version__ = "0.1.0"  # Semantic Versioning:  Version = Major.Minor.Patch
-# Idempotent: --overwrite keeps the base job template in sync. Runs on any host that can reach the
-# server API (needs the prefect CLI + jq locally; no server container required). PREFECT_API_URL is
-# taken from docker-compose.env — it is both the API address this script calls and the address
-# injected into the template's env.default, so flow containers know where the server is.
-# Backing addresses (MinIO / PostgreSQL / MLflow) live as prefect Variables (register_variables.sh), not here.
-#
-#   ./register_pool.sh --pool-name high_performance --template-file docker-pool-template-high.json --concurrency-limit 16
-#   ./register_pool.sh --pool-name low_performance  --template-file docker-pool-template-low.json  --concurrency-limit 8
-#
-set -euo pipefail
-
-POOL_NAME=""                           # work pool name, e.g. high_performance | low_performance
-TEMPLATE_FILE=""                       # base job template on the host, e.g. docker-pool-template-high.json
-CONCURRENCY_LIMIT=0                    # pool-wide max concurrent runs (0 = no limit)
-ENV_FILE="../docker-compose.env"      # shared address source; falls back to the committed _example
-
-while [ $# -gt 0 ]; do
-    case "$1" in
-        --pool-name)         POOL_NAME="$2"; shift 2 ;;
-        --template-file)     TEMPLATE_FILE="$2"; shift 2 ;;
-        --concurrency-limit) CONCURRENCY_LIMIT="$2"; shift 2 ;;
-        --env-file)          ENV_FILE="$2"; shift 2 ;;
-        *) echo "Unknown option: $1" >&2; exit 1 ;;
-    esac
-done
-
-if [ -z "$POOL_NAME" ] || [ -z "$TEMPLATE_FILE" ]; then
-    echo "Usage: $0 --pool-name <name> --template-file <file> [--concurrency-limit N] [--env-file file]" >&2
-    exit 1
-fi
-
-command -v jq >/dev/null 2>&1 || { echo "jq is required to build the base job template env. Install jq and retry." >&2; exit 1; }
-command -v prefect >/dev/null 2>&1 || { echo "the prefect CLI is required (pip install prefect). Install and retry." >&2; exit 1; }
-
-# Use the real env if present, otherwise the committed _example (placeholders).
-[ -f "$ENV_FILE" ] || ENV_FILE="../docker-compose.env_example"
-[ -f "$ENV_FILE" ] || { echo "env file not found: $ENV_FILE" >&2; exit 1; }
-
-# Load the addresses (exported) from the single source; PREFECT_API_URL now steers the prefect CLI
-# below (env var beats the profile) and is injected into the template's env.default.
-set -a; . "$ENV_FILE"; set +a
-[ -n "${PREFECT_API_URL:-}" ] || { echo "PREFECT_API_URL missing in $ENV_FILE" >&2; exit 1; }
-
-TMP_TPL="$(mktemp)"
-trap 'rm -f "$TMP_TPL"' EXIT
-jq --arg api "$PREFECT_API_URL" \
-    '.variables.properties.env.default = { PREFECT_API_URL: $api }' "$TEMPLATE_FILE" > "$TMP_TPL"
-
-# Register (or update) the pool through the server API. The API may need a moment after startup,
-# so retry a few times. --overwrite keeps the base job template in sync on re-runs.
-created=false
-for _ in $(seq 1 10); do
-    if prefect work-pool create "$POOL_NAME" --type docker \
-            --base-job-template "$TMP_TPL" --overwrite; then
-        created=true; break
-    fi
-    sleep 3
-done
-[ "$created" = true ] || { echo "register_pool: could not register '$POOL_NAME' at $PREFECT_API_URL" >&2; exit 1; }
-
-# Pool-wide concurrency limit is a separate command (create does not accept it).
-if [ "$CONCURRENCY_LIMIT" -gt 0 ]; then
-    prefect work-pool set-concurrency-limit "$POOL_NAME" "$CONCURRENCY_LIMIT"
-fi
-```
-
-## Appendix G. register_variables.sh
-
-server 에 backing service **주소 Variable** (MinIO·PostgreSQL·MLflow endpoint, 비밀 아님) 을 등록하는 스크립트입니다 ([§4 Service Address Variables](#service-address-variables)).
-
-`--overwrite` 라 재실행하면 값이 동기화됩니다 (idempotent). 등록한 각 값을 stdout 에 그대로 찍습니다. `--postgresql` 은 `host:port` 한 덩어리로 받아 **단일 Variable `postgresql_host_port`** 로 저장하고, 소비 코드 (`catalog.py`·`pipeline.py`) 가 host·port 로 분리합니다.
-
-```bash
-#!/usr/bin/env bash
-# register_variables.sh — register the shared backing-service ADDRESS variables on the Prefect server.
-# __version__ = "0.0.10"  # Semantic Versioning:  Version = Major.Minor.Patch
-# Single, non-secret source of backing addresses (LAN IP). Flow code and host tools (catalog.py) read
-# them via prefect Variables from the server, so no docker-compose.env is needed outside containers.
-# Run after the server is up (run_server.sh). Idempotent (--overwrite).
-#
-#   ./register_variables.sh --minio http://<MINIO_IP>:9000 --postgresql <POSTGRESQL_IP>:5432 \
-#                           --mlflow http://<MLFLOW_IP>:5000
-#
-set -euo pipefail
-
-COMPOSE="docker-compose.server.yml"          # the server compose (its top-level name: sets the project)
-MINIO_ENDPOINT=""          # MinIO S3 endpoint, e.g. http://<MINIO_IP>:9000 (data download / model upload)
-POSTGRESQL_HOST_PORT=""    # PostgreSQL host:port, e.g. <POSTGRESQL_IP>:5432 (catalog / optuna DBs)
-MLFLOW_TRACKING_URI=""     # MLflow tracking server, e.g. http://<MLFLOW_IP>:5000
-
-while [ $# -gt 0 ]; do
-    case "$1" in
-        --minio)      MINIO_ENDPOINT="$2"; shift 2 ;;
-        --postgresql) POSTGRESQL_HOST_PORT="$2"; shift 2 ;;
-        --mlflow)     MLFLOW_TRACKING_URI="$2"; shift 2 ;;
-        --compose)    COMPOSE="$2"; shift 2 ;;
-        *) echo "Unknown option: $1" >&2; exit 1 ;;
-    esac
-done
-
-# All three addresses are required: an empty or placeholder value would be registered silently and every
-# consumer (catalog.py / pipeline.py) would then fail far from here.
-if [ -z "$MINIO_ENDPOINT" ] || [ -z "$POSTGRESQL_HOST_PORT" ] || [ -z "$MLFLOW_TRACKING_URI" ]; then
-    echo "Usage: $0 --minio <URL> --postgresql <HOST:PORT> --mlflow <URL> [--compose <FILE>]" >&2
-    exit 1
-fi
-
-# set one variable on the server (overwrite so re-runs keep it in sync); echo the value we registered.
-set_var() {
-    docker compose -f "$COMPOSE" exec -T prefect_server \
-        prefect variable set "$1" "$2" --overwrite >/dev/null   # hush prefect's value-less line
-    echo "Set variable '$1' to \"$2\""
-}
-
-set_var minio_endpoint      "$MINIO_ENDPOINT"
-set_var postgresql_host_port "$POSTGRESQL_HOST_PORT"  # host:port; consumers (catalog.py / pipeline.py) split it
-set_var mlflow_tracking_uri "$MLFLOW_TRACKING_URI"
-echo "[register_variables] set: minio_endpoint, postgresql_host_port, mlflow_tracking_uri"
-```
-
-## Appendix H. run_worker.sh
-
-각 worker 머신에서 worker compose 스택을 띄우는 기동 스크립트입니다 ([§5.2](#52-container)). server 기동과 work pool 등록은 별도입니다 (server 는 [Appendix E](#appendix-e-run_serversh), pool 은 `register_pool.sh` — [Appendix F](#appendix-f-register_poolsh)).
-
-```bash
-#!/usr/bin/env bash
-# run_worker.sh — start the Prefect worker compose stack on a worker machine.
-# __version__ = "0.0.27"  # Semantic Versioning:  Version = Major.Minor.Patch
-#
-# Brings up prefect_worker, which polls the given work pool. WORK_POOL/WORKER_LIMIT are read from
-# this shell at "docker compose up" (compose interpolation), so they are exported below.
-# (PREFECT_API_URL etc. are read by the container from the env file this script picks, exported as WORKER_ENV_FILE.)
-# Runs on Windows (Git Bash / WSL), Linux and macOS; each finds the LAN IP its own way (see below).
-# Work pools live on the server and are registered there (register_pool.sh), not here. Before starting,
-# this script checks the work pool against the pools registered on the server; if it is missing, it lists
-# the registered pools and lets you pick one (guards against typos / not-yet-registered pools).
-#
-#   ./run_worker.sh --work-pool high_performance    # a high-tier machine
-#   ./run_worker.sh --work-pool low_performance     # a low-tier machine
-#   ./run_worker.sh --work-pool low_performance --worker-ip <LAN_IP>   # when the LAN IP is not detected
-#   ./run_worker.sh --work-pool low_performance --work-queue urgent --worker-limit 2   # a second worker, one queue only
-#
-# The worker is named '<hostname>@<LAN IP>' so the Prefect server (and dashboards reading it) can tell
-# which machine each worker runs on; the Prefect API records no host for a worker otherwise.
-# With --work-queue the worker polls that queue of the pool only, is named '<hostname>-<queue>@<LAN IP>', and runs
-# as its own compose project (prefect-worker-<queue>), so it starts and stops beside the pool-wide worker.
-#
-# The worker image is pulled from IMAGE_REGISTRY (read from ../docker-compose.env, else the _example), so a new
-# machine needs no local build; re-running this script pulls the latest pushed image.
-#
-set -euo pipefail
-
-WORK_POOL="high_performance"   # the work pool this machine polls: high_performance | low_performance
-WORKER_LIMIT=8                 # max pipeline_flow containers this machine spawns concurrently
-WORKER_IP=""                   # LAN IP of this machine; empty = detected below
-WORK_QUEUE=""                  # one work queue of the pool to poll; empty = every queue of the pool
-
-while [ $# -gt 0 ]; do
-    case "$1" in
-        --work-pool)    WORK_POOL="$2"; shift 2 ;;
-        --worker-limit) WORKER_LIMIT="$2"; shift 2 ;;
-        --worker-ip)    WORKER_IP="$2"; shift 2 ;;
-        --work-queue)   WORK_QUEUE="$2"; shift 2 ;;
-        *) echo "Unknown option: $1" >&2; exit 1 ;;
-    esac
-done
-
-COMPOSE="docker-compose.worker.yml"
-ENV_FILE="../docker-compose.env"   # shared address source; falls back to the committed _example
-
-# --- Registry of the worker image: read only IMAGE_REGISTRY (sourcing the whole file would override the
-# host's PREFECT_API_URL with a possible placeholder) ------------------------------------------------
-[ -f "$ENV_FILE" ] || ENV_FILE="../docker-compose.env_example"
-[ -f "$ENV_FILE" ] || { echo "env file not found: $ENV_FILE" >&2; exit 1; }
-IMAGE_REGISTRY="$(sed -n 's/^IMAGE_REGISTRY=//p' "$ENV_FILE" | tail -n 1 | tr -d '\r')"
-if [ -z "$IMAGE_REGISTRY" ] || [[ "$IMAGE_REGISTRY" == *"<"* ]]; then
-    echo "IMAGE_REGISTRY missing or still a placeholder in $ENV_FILE (got '$IMAGE_REGISTRY')." >&2
-    echo "Set it to the registry <host>:<port>; an HTTP registry also needs 'insecure-registries' in the docker daemon." >&2
-    exit 1
-fi
-
-# The worker container reads PREFECT_API_URL from this same env file; a placeholder would start a worker that
-# never reaches the server, so it is rejected here rather than inside the container.
-CONTAINER_API_URL="$(sed -n 's/^PREFECT_API_URL=//p' "$ENV_FILE" | tail -n 1 | tr -d '\r')"
-if [ -z "$CONTAINER_API_URL" ] || [[ "$CONTAINER_API_URL" == *"<"* ]]; then
-    echo "PREFECT_API_URL missing or still a placeholder in $ENV_FILE (got '$CONTAINER_API_URL')." >&2
-    echo "Copy ../docker-compose.env_example to ../docker-compose.env and set the server address there." >&2
-    exit 1
-fi
-WORKER_ENV_FILE="$ENV_FILE"   # compose env_file; relative to this folder, which is also the compose file's folder
-
-command -v jq >/dev/null 2>&1 || { echo "jq is required to parse 'prefect work-pool ls --output json'. Install jq and retry." >&2; exit 1; }
-
-# The pool validation below uses the host 'prefect' CLI, so it must be installed and on PATH.
-if ! command -v prefect >/dev/null 2>&1; then
-    echo "prefect CLI not found on this host (needed to validate the work pool against the server)." >&2
-    echo "Install it, then retry:" >&2
-    echo "  pipx install prefect && pipx ensurepath     # then open a new shell, or: export PATH=\"\$HOME/.local/bin:\$PATH\"" >&2
-    echo "  export PREFECT_API_URL=http://127.0.0.1:4200/api   # point at the running server (run_server.sh)" >&2
-    exit 1
-fi
-
-# On the same host, worker/pipeline_flow containers reach the server by service name over the shared mlops network.
-# (For a worker on another machine, remove the networks block in the worker compose and set PREFECT_API_URL to http://<host IP>:4200/api.)
-docker network inspect mlops >/dev/null 2>&1 || docker network create mlops >/dev/null
-
-# --- Validate the work pool against the pools registered on the server --------------------------
-# Read the registered pools with the host prefect CLI (configured via its PREFECT_API_URL profile).
-# stderr (progress / version warnings) is dropped so only the JSON on stdout is parsed.
-pools_json="$(prefect work-pool ls --output json 2>/dev/null || true)"
-if [ -z "$pools_json" ]; then
-    echo "Could not read work pools via the host 'prefect' CLI. Ensure prefect is installed and PREFECT_API_URL points at a running server (run_server.sh), then retry." >&2
-    exit 1
-fi
-
-# This worker spawns docker containers, so only docker-type pools are valid
-# (a name that exists only as a process pool — e.g. one auto-created by a typo — is rejected here).
-pools=()
-while IFS= read -r line; do
-    [ -n "$line" ] && pools+=("$line")
-done < <(printf '%s' "$pools_json" | jq -r '.[] | select(.type == "docker") | .name')
-
-if [ "${#pools[@]}" -eq 0 ]; then
-    echo "No docker-type work pools are registered on the server. Run register_pool.sh (it registers --type docker) first." >&2
-    exit 1
-fi
-
-match=""
-for p in "${pools[@]}"; do
-    if [ "$p" = "$WORK_POOL" ]; then match="$p"; break; fi
-done
-
-if [ -n "$match" ]; then
-    WORK_POOL="$match"                                   # normalize to the exact registered name
-else
-    echo "Warning: '$WORK_POOL' is not a registered docker work pool." >&2
-    echo "Registered docker work pools:"
-    i=1
-    for p in "${pools[@]}"; do
-        printf '%3d) %s\n' "$i" "$p"
-        i=$((i + 1))
-    done
-    read -r -p "Pick a pool number (Enter to abort): " sel
-    if ! printf '%s' "$sel" | grep -qE '^[0-9]+$' || [ "$sel" -lt 1 ] || [ "$sel" -gt "${#pools[@]}" ]; then
-        echo "Aborted: no valid work pool selected." >&2
-        exit 1
-    fi
-    WORK_POOL="${pools[$((sel - 1))]}"
-    echo "Using work pool '$WORK_POOL'."
-fi
-
-# --- Validate the work queue: prefect worker start would silently create a mistyped queue ------------
-if [ -n "$WORK_QUEUE" ] && ! prefect work-queue inspect "$WORK_QUEUE" --pool "$WORK_POOL" >/dev/null 2>&1; then
-    echo "Work queue '$WORK_QUEUE' is not in work pool '$WORK_POOL'. Create it first, e.g.:" >&2
-    echo "  prefect work-queue create $WORK_QUEUE --pool $WORK_POOL --priority 1" >&2
-    exit 1
-fi
-
-# --- Name the worker after this machine: <hostname>@<LAN IP> ---------------------------------------
-# On Windows (Git Bash, or WSL whose own IP is internal) the LAN IP comes from the Windows default-route
-# interface; on macOS (no powershell.exe, no ip) from the address of the default-route interface;
-# on Linux from the source address of the default route.
-if [ -z "$WORKER_IP" ] && command -v powershell.exe >/dev/null 2>&1; then
-    WORKER_IP="$(powershell.exe -NoProfile -Command \
-        "(Get-NetIPConfiguration | Where-Object IPv4DefaultGateway | Select-Object -First 1).IPv4Address.IPAddress" \
-        2>/dev/null | tr -d '\r' || true)"
-fi
-if [ -z "$WORKER_IP" ] && [ "$(uname -s)" = "Darwin" ]; then
-    default_iface="$(route -n get default 2>/dev/null | awk '/interface:/ {print $2; exit}' || true)"
-    if [ -n "$default_iface" ]; then
-        WORKER_IP="$(ipconfig getifaddr "$default_iface" 2>/dev/null || true)"
-    fi
-fi
-if [ -z "$WORKER_IP" ] && command -v ip >/dev/null 2>&1; then
-    WORKER_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") {print $(i + 1); exit}}')"
-fi
-if ! printf '%s' "$WORKER_IP" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
-    echo "Could not detect this machine's LAN IP (got '$WORKER_IP'); pass it with --worker-ip <ip>." >&2
-    exit 1
-fi
-PROJECT="prefect-worker"       # the compose file's top-level name
-WORK_QUEUE_OPTION=""
-WORKER_NAME="$(hostname)@${WORKER_IP}"
-if [ -n "$WORK_QUEUE" ]; then
-    PROJECT="prefect-worker-${WORK_QUEUE}"
-    WORK_QUEUE_OPTION="--work-queue ${WORK_QUEUE}"
-    WORKER_NAME="$(hostname)-${WORK_QUEUE}@${WORKER_IP}"
-fi
-echo "Worker name: $WORKER_NAME"
-
-# For the worker compose ${...} interpolation — export so this docker compose up sees them.
-export WORK_POOL
-export WORKER_LIMIT
-export WORKER_NAME
-export WORK_QUEUE_OPTION
-export IMAGE_REGISTRY
-export WORKER_ENV_FILE
-
-# Pull the latest worker image (the arch of this machine) before restarting, so a re-run picks up a new push.
-docker compose -p "$PROJECT" -f "$COMPOSE" pull
-
-# Bring the worker stack down (keeping volumes) and back up in the background.
-# -p names the project, so down only ever touches this stack (the pool-wide worker or one queue's worker).
-docker compose -p "$PROJECT" -f "$COMPOSE" down
-docker compose -p "$PROJECT" -f "$COMPOSE" up -d
-```
-
-## Appendix I. credentials.py
-
-자격증명 블록을 JSON 으로 등록하는 스크립트입니다 ([§7 Credential Blocks](#credential-blocks)). 블록 이름은 **CLI 인자 > JSON `name` 필드 > 파일명** 순으로 정해지며, Prefect 규칙상 **소문자·숫자·하이픈만** 허용됩니다 (임의의 소문자 식별자, 팀원 이름과 무관). `Credentials` 클래스도 여기서 정의하며 `catalog.py` 가 import 해 씁니다 (`pipeline.py` 는 이미지 자기완결이라 같은 클래스를 따로 inline 정의 — [§6.3](#63-pipelinepy)).
+자격증명 블록을 JSON 으로 등록하는 스크립트입니다 ([§7.2 Credential Blocks](#72-credential-blocks)). 블록 이름은 **CLI 인자 > JSON `name` 필드 > 파일명** 순으로 정해지며, Prefect 규칙상 **소문자·숫자·하이픈만** 허용됩니다 (임의의 소문자 식별자, 팀원 이름과 무관). `Credentials` 클래스도 여기서 정의하며 `catalog.py` 가 import 해 씁니다 (`pipeline.py` 는 이미지 자기완결이라 같은 클래스를 따로 inline 정의 — [prefect-flow-ko.md §5](PrefectFlow/prefect-flow-ko.md#5-pipelinepy)).
 
 ```python
 # credentials.py — shared Prefect credential block (Credentials) + JSON register CLI.
@@ -1713,146 +753,9 @@ if __name__ == "__main__":
             sys.exit(1)
 ```
 
-## Appendix J. requirements.txt
+## Appendix F. Orchestrator Benchmarking
 
-flow image 에 설치하는 파이썬 의존성 목록입니다 ([§6.1](#61-image)). 팀 소스는 이미지에 굽지 않고 런타임에 git worktree 로 받으므로 여기에는 라이브러리만 고정합니다 (base: `python:3.11.15`). 카테고리로 나눠 두고 버전은 `numpy` 기준에 맞춥니다.
-
-```text
-# rev. 12
-# Python dependencies for the shared team Pipeline Flow image (base: python:3.11.15, see Dockerfile).
-# The team source is NOT baked; it is fetched into a git worktree at runtime, so only libraries are pinned here.
-
-# WorkFlow
-prefect>=3,<4                  # Prefect runtime (flow execution)
-pydantic>=2,<3                 # Prefect blocks are pydantic models (SecretDict in pipeline.py); pinned to Prefect 3
-boto3==1.34.131                # Object storage (MinIO, S3-compatible) access
-psycopg2-binary==2.9.9         # Catalog DB (PostgreSQL) access
-mlflow==2.14.1                 # Experiment tracking / model registry
-
-# --- Core ML / DL: model training / inference frameworks ---
-tensorflow==2.17.0             # Deep learning framework
-tensorflow-datasets==4.9.9     # Standard dataset loader
-keras==3.12.1                  # High-level neural network API
-torch==2.9.1                   # Deep learning framework (PyTorch)
-scikit-learn==1.4.2            # Classical machine learning algorithms
-lightgbm==4.6.0                # Gradient boosting (LightGBM)
-catboost==1.2.10               # Gradient boosting (CatBoost)
-imbalanced-learn==0.14.1       # Imbalanced-data resampling
-statsmodels==0.14.6            # Statistical models / tests
-prophet==1.1.5                 # Time-series forecasting
-bayesian-optimization==1.4.3   # Bayesian hyperparameter optimization
-keract==4.5.1                  # Neural network activation / gradient visualization
-optuna==4.8.0                  # Hyperparameter tuning
-
-# --- Numeric / data: array & tabular ops and parallel processing ---
-numpy==1.26.4                  # Numeric arrays (baseline version for all dependencies)
-scipy==1.13.1                  # Scientific computing
-pandas==2.0.3                  # Tabular data processing
-numba==0.61.2                  # JIT compilation acceleration
-numpy-ext==0.9.9               # numpy helper functions
-dask==2025.12.0                # Parallel / distributed computation
-h5py==3.15.1                   # HDF5 I/O
-
-# --- Time series: pattern / distance / event detection ---
-stumpy==1.14.1                 # Matrix Profile-based motif discovery
-pyts==0.13.0                   # Time-series classification / transformation
-dtaidistance==2.4.0            # DTW distance (C extension)
-fastdtw==0.3.4                 # Approximate DTW
-ucrdtw==0.201                  # UCR DTW (C extension)
-peakdetect==1.2                # Peak detection
-
-# --- Financial domain data: quotes / filings / calendars / technical indicators ---
-dart-fss==0.4.10               # DART electronic disclosure collection
-pandas-datareader==0.10.0      # External financial data loader
-pandas-market-calendars==4.4.0 # Exchange trading calendars
-ta==0.11.0                     # Technical analysis indicators (pure Python)
-TA-Lib==0.4.29                 # Technical analysis indicators (requires C library)
-
-# --- Visualization: graphs / plots ---
-matplotlib==3.8.4              # Basic plotting
-seaborn==0.11.2                # Statistical visualization
-plotly==6.6.0                  # Interactive charts
-mplcursors==0.6                # matplotlib cursors / tooltips
-mpld3==0.5.11                  # matplotlib -> D3 web output
-pydot==2.0.0                   # Graph (DOT) rendering
-cycler==0.12.1                 # Plot style cycling
-
-# --- File / IO / utils: storage / documents / crypto / general utils ---
-pymongo==4.6.3                 # MongoDB driver
-openpyxl==3.1.5                # Excel (xlsx) read / write
-PyMuPDF==1.27.2.3              # PDF processing
-Pillow==12.2.0                 # Image processing
-pycryptodome==3.20.0           # Cryptographic algorithms
-bcrypt==4.2.0                  # Password hashing
-xmltodict==0.12.0              # XML <-> dict conversion
-deepdiff==7.0.1                # Object diffing
-semver==3.0.4                  # Semantic version handling
-lockfile==0.12.2               # File locking
-click==8.4.2                   # CLI building
-rich==15.0.0                   # Terminal formatted output
-tqdm==4.68.3                   # Progress bars
-psutil==7.2.2                  # System / process info
-packaging==24.2                # Version / package metadata handling
-python-dateutil==2.9.0.post0   # Date parsing / arithmetic
-pytz==2024.2                   # Timezone data
-tzlocal==5.4.3                 # Local timezone detection
-typing-extensions==4.15.0      # Type hint backport
-protobuf==4.25.9               # Serialization (TensorFlow dependency)
-pyarrow==15.0.2                # parquet I/O; mlflow 2.14.1 requires pyarrow<16
-```
-
-## Appendix K. Mounting a remote data folder
-
-같은 LAN 의 remote Ubuntu 머신에 있는 data 폴더를 worker 호스트의 docker 에 **NFS 로 mount** 해, `pipeline_flow` 컨테이너가 MinIO 다운로드 없이 그 폴더를 직접 읽게 하는 방법입니다. payload 는 `--data-folder` 로 경로만 받으므로 (`pipeline.py` [§6.3](#63-pipelinepy)) 다운로드든 mount 든 **무변경** 입니다.
-
-**1) 데이터 호스트 (remote Ubuntu) — NFS export.** 폴더를 LAN 서브넷에 읽기전용으로 내보냅니다.
-
-```bash
-# on the data host (e.g. <DATA_HOST_IP>)
-sudo apt-get install -y nfs-kernel-server
-sudo mkdir -p /srv/datasets
-# export read-only to the LAN subnet
-echo "/srv/datasets <LAN_SUBNET>(ro,sync,no_subtree_check)" | sudo tee -a /etc/exports
-sudo exportfs -ra
-sudo systemctl enable --now nfs-kernel-server
-```
-
-**2) worker 호스트 — export 를 mount.** 두 방식 중 하나.
-
-```bash
-# option A: mount on the host, then bind-mount into the container (step 3)
-sudo apt-get install -y nfs-common
-sudo mkdir -p /mnt/datasets
-sudo mount -t nfs <DATA_HOST_IP>:/srv/datasets /mnt/datasets        # ad-hoc
-echo "<DATA_HOST_IP>:/srv/datasets /mnt/datasets nfs ro,_netdev 0 0" | sudo tee -a /etc/fstab   # persistent
-
-# option B: a docker NFS volume (no host mount needed)
-docker volume create --driver local \
-  --opt type=nfs --opt o=addr=<DATA_HOST_IP>,ro \
-  --opt device=:/srv/datasets datasets_nfs
-```
-
-**3) pool base job template 에 `volumes` 추가.** worker 가 띄우는 모든 `pipeline_flow` 컨테이너에 마운트를 겁니다 (docker-pool-template-*.json 의 job 변수 → register_pool 재실행). option A 는 호스트 경로, option B 는 볼륨 이름.
-
-```json
-"volumes": ["/mnt/datasets:/datasets:ro"]
-```
-
-**4) pipeline.py — 다운로드 대신 마운트 경로 사용.** MinIO 다운로드 블록을 마운트 하위 경로로 바꿉니다.
-
-```python
-# instead of downloading from MinIO, point at the mounted folder
-data = Path("/datasets") / minio_key
-```
-
-- **읽기전용 (`ro`) 권장** — 여러 run 이 공유하는 불변 데이터. 각 run 의 쓰기 산출물은 컨테이너 내부 임시 경로로.
-- **다중 머신** — worker 가 여러 대면 **모든 호스트에 같은 mount·같은 컨테이너 경로** (`/datasets`) 여야 payload 가 어디서 뜨든 동일하게 읽습니다.
-- **lineage** — `minio_key` 를 경로 키로 재사용하면 "어느 데이터" 기록이 유지됩니다.
-- **Windows/Docker Desktop worker** 라면 NFS 대신 **SMB/CIFS** 가 편합니다 (대안: SSHFS·CIFS). 권한은 컨테이너 안에서 읽기 가능한 UID/GID 인지 확인합니다.
-
-## Appendix L. Orchestrator Benchmarking
-
-### Prefect vs Dagster vs Airflow
+### F.1 Prefect vs Dagster vs Airflow
 
   오케스트레이터를 고를 때 자주 견주는 세 python 도구입니다. 셋 다 데이터/ML 파이프라인을 스케줄·실행·관측하지만 지향이 다릅니다 — **Prefect** 는 순수 python·동적 흐름, **Dagster** 는 데이터 자산 (asset) 과 타입·테스트, **Airflow** 는 성숙한 스케줄러와 최대 생태계입니다. 이 스택이 **Prefect** 를 고른 까닭은 flow 를 평범한 python 으로 짜면서 run 마다 격리된 컨테이너로 동적으로 띄우는 구성이 자연스럽기 때문입니다 (docker work pool).
 
@@ -1867,7 +770,7 @@ data = Path("/datasets") / minio_key
   | Maturity / ecosystem | 신생 · 경량, 빠른 반복 | 신생, 데이터 플랫폼 지향 | 최고참 · 최대 생태계 |
   | Best fit | 동적 ML/데이터 파이프라인, python 우선 | 데이터 자산 · 품질/테스트 중시 | 정형 배치 ETL · 대규모 스케줄 |
 
-### Execution pattern across systems
+### F.2 Execution Pattern Across Systems
 
   "**가벼운 에이전트 (worker) 가 작업을 집어, 작업마다 격리된 일시적 실행 단위를 띄워 실행하고 정리**" 하는 패턴은 오케스트레이션의 업계 표준입니다. 이 스택의 `docker` work pool 은 그 표준의 **단일 호스트 변형** 이고, 규모가 커지면 실행 단위를 컨테이너 → **pod** 로 올린 Kubernetes 변형으로 확장됩니다.
 
@@ -1880,11 +783,11 @@ data = Path("/datasets") / minio_key
   | **GitHub Actions / GitLab CI** | runner | job 마다 **컨테이너** | CI/CD |
   | **Kubernetes** (native Job) | controller | **pod** | 클러스터 |
 
-### What a pod is
+### F.3 What a Pod Is
 
   - **pod** — Kubernetes 의 **최소 실행/배포 단위** 입니다. 컨테이너 하나 이상이 같은 네트워크·스토리지를 공유하며 한 덩어리로 스케줄됩니다. "작업 1개 → pod 1개" 가 격리 단위이며, 단일 호스트의 컨테이너 자리에 클러스터 규모에서 들어가는 것이 pod 입니다 (Kubernetes 의 실행 껍데기).
 
-### job · task · step compared
+### F.4 job · task · step Compared
 
   이 세 단어는 동의어가 아니라 **서로 다른 단위 (granularity)** 입니다. 도구마다 이름이 달라 혼동되므로 공통 계층으로 정리합니다.
 
@@ -1902,11 +805,11 @@ data = Path("/datasets") / minio_key
 
   > granularity 는 **Workflow → Run/Job → Task → Step** 순으로 좁아지고, 실행을 감싸는 껍데기는 **컨테이너 (단일 호스트) / pod (클러스터)** 입니다. 세 단어를 하나로 통일하기보다 이 계층 안에서 구분해 쓰는 것이 업계 표준에 맞습니다.
 
-## Appendix M. Prefect @task
+## Appendix G. Prefect @task
 
 `@task` 를 쓰지 않아도 이력 관리와 재현 (reproducibility) 은 완전히 됩니다. Prefect 에서 실행 흐름을 묶는 핵심 단위는 `@task` 가 아니라 **`@flow`** 이기 때문입니다. `@flow` 데코레이터만 붙이면 그 안의 코드가 일반 함수든 클래스든 **실행 이력과 입력 파라미터가 Prefect Server 에 기록**됩니다.
 
-### Reproducing without @task
+### G.1 Reproducing without @task
 
   `@task` 없이 `@flow` 와 일반 함수만으로 과거 시점 (git 커밋 + MinIO 데이터 버전) 을 재현하는 구조입니다.
 
@@ -1940,7 +843,7 @@ data = Path("/datasets") / minio_key
   - **파라미터 추적** — Prefect Server 가 `@flow` 진입 인자 (`git_commit_hash`·`minio_data_version`) 를 DB 에 기록합니다. UI 에서 그 기록을 보고 같은 파라미터로 재실행 (재현) 할 수 있습니다.
   - **상태 관리** — flow 의 성공 (Completed) / 실패 (Failed) 와 로그가 기록되므로 이력 관리에 문제가 없습니다.
 
-### Why use @task then
+### G.2 Why Use @task Then
 
   `@task` 없이도 이력은 남지만, 쓰는 이유는 **실패 복구**와 **성능** 입니다.
 
@@ -1950,204 +853,6 @@ data = Path("/datasets") / minio_key
   | Step monitoring | flow 하나의 진행만 보임 | 단계별 (다운로드·학습) 시각화·시간 측정 |
   | Caching | 매번 같은 데이터를 다시 다운로드 | 같은 입력이면 그 단계를 건너뜀 (cached) |
 
-### Summary
+### G.3 Summary
 
   이력 관리와 과거 재현은 **`@flow` 에 파라미터 (git 커밋·MinIO 버전) 를 넘기는 것만으로 작동**합니다. 학습 소스가 클래스 덩어리라 `@task` 를 일일이 붙이기 번거롭다면, `@task` 를 생략하고 `@flow` 만 씌워도 MLOps 재현 목적에는 지장이 없습니다.
-
-## Appendix N. push_worker_image.sh
-
-build 하는 machine 에서 worker image 를 여러 CPU architecture 로 build 해 registry 에 올리는 script 입니다 ([§5.1](#51-image)).
-
-```bash
-#!/usr/bin/env bash
-# push_worker_image.sh — build the Prefect worker image for several CPU architectures and push it to the registry.
-# __version__ = "0.0.0"  # Semantic Versioning:  Version = Major.Minor.Patch
-# Author: yRocket
-#
-# Builds Dockerfile.worker as one multi-arch image <registry>/prefect-worker:<tag> and pushes it, so every worker
-# machine (amd64 PC, arm64 Mac) pulls its own variant through run_worker.sh. The registry defaults to IMAGE_REGISTRY
-# of ../docker-compose.env (else the _example), the same value run_worker.sh pulls from.
-#
-#   ./push_worker_image.sh                                  # registry = IMAGE_REGISTRY of ../docker-compose.env
-#   ./push_worker_image.sh --registry localhost:12357       # on the registry machine itself
-#   ./push_worker_image.sh --platform linux/arm64           # one architecture only
-#
-# A multi-arch build needs the containerd image store (Docker Desktop: Settings > General > "Use containerd for
-# pulling and storing images") or a docker-container buildx builder. The final tag check reads the HTTP API of a
-# plain registry:2 container.
-#
-set -euo pipefail
-
-IMAGE_NAME="prefect-worker"              # the name docker-compose.worker.yml pulls
-REGISTRY=""                              # <host>:<port>; empty = IMAGE_REGISTRY of the env file
-PLATFORM="linux/amd64,linux/arm64"       # CPU architectures of the worker machines
-TAG="latest"
-
-usage() { echo "Usage: $0 [--registry <host:port>] [--platform <list>] [--tag <tag>]" >&2; }
-
-while [ $# -gt 0 ]; do
-    case "$1" in
-        --registry|--platform|--tag)
-            # a missing value would make 'shift 2' fail silently under set -e
-            [ $# -ge 2 ] || { echo "$1 needs a value." >&2; usage; exit 1; }
-            case "$1" in
-                --registry) REGISTRY="$2" ;;
-                --platform) PLATFORM="$2" ;;
-                --tag)      TAG="$2" ;;
-            esac
-            shift 2 ;;
-        -h|--help) usage; exit 0 ;;
-        *) echo "Unknown option: $1" >&2; usage; exit 1 ;;
-    esac
-done
-
-cd "$(dirname "$0")"   # Dockerfile.worker and ../docker-compose.env are relative to this folder
-[ -f Dockerfile.worker ] || { echo "Dockerfile.worker not found in $(pwd)." >&2; exit 1; }
-
-if [ -z "$REGISTRY" ]; then
-    ENV_FILE="../docker-compose.env"
-    [ -f "$ENV_FILE" ] || ENV_FILE="../docker-compose.env_example"
-    [ -f "$ENV_FILE" ] || { echo "env file not found: $ENV_FILE" >&2; exit 1; }
-    REGISTRY="$(sed -n 's/^IMAGE_REGISTRY=//p' "$ENV_FILE" | tail -n 1 | tr -d '\r')"
-    REGISTRY_SOURCE="IMAGE_REGISTRY in $ENV_FILE"
-else
-    REGISTRY_SOURCE="--registry"
-fi
-if [ -z "$REGISTRY" ] || [[ "$REGISTRY" == *"<"* ]] || [[ "$REGISTRY" == */* ]]; then
-    echo "Registry missing, a placeholder or not <host>:<port> (got '$REGISTRY' from $REGISTRY_SOURCE)." >&2
-    echo "Set IMAGE_REGISTRY in ../docker-compose.env or pass --registry <host:port>." >&2
-    exit 1
-fi
-if [ -z "$PLATFORM" ] || [ -z "$TAG" ]; then
-    echo "--platform and --tag need non-empty values." >&2
-    exit 1
-fi
-
-command -v docker >/dev/null 2>&1 || { echo "docker not found on PATH." >&2; exit 1; }
-docker buildx version >/dev/null 2>&1 || { echo "docker buildx is required (Docker Desktop ships it)." >&2; exit 1; }
-
-REF="$REGISTRY/$IMAGE_NAME:$TAG"
-echo "Building $REF for $PLATFORM"
-if ! docker buildx build --platform "$PLATFORM" -f Dockerfile.worker -t "$REF" --push .; then
-    echo "push_worker_image.sh: ERROR: build or push of $REF failed." >&2
-    echo "  A multi-arch build needs the containerd image store or a docker-container builder;" >&2
-    echo "  an HTTP registry other than localhost needs 'insecure-registries' in this docker daemon." >&2
-    exit 1
-fi
-
-# Confirm the registry now lists the tag, so a push that went elsewhere does not pass as done.
-if command -v curl >/dev/null 2>&1; then
-    tags="$(curl -s -m 10 "http://$REGISTRY/v2/$IMAGE_NAME/tags/list" || true)"
-    if ! printf '%s' "$tags" | grep -q "\"$TAG\""; then
-        echo "push_worker_image.sh: ERROR: pushed $REF, but the registry does not list tag '$TAG' (got: '$tags')." >&2
-        exit 1
-    fi
-    echo "Registry lists $IMAGE_NAME tags: $tags"
-else
-    echo "push_worker_image.sh: WARNING: curl not found; the registry's tag list was not checked." >&2
-fi
-echo "pushed $REF"
-```
-
-## Appendix O. push_flow_image.sh
-
-build 하는 machine 에서 flow image 를 여러 CPU architecture 로 build 해 registry 에 올리는 script 입니다 ([§6.1](#61-image)).
-
-```bash
-#!/usr/bin/env bash
-# push_flow_image.sh — build the Pipeline Flow image (flow image) for several CPU architectures and push it.
-# __version__ = "0.0.0"  # Semantic Versioning:  Version = Major.Minor.Patch
-# Author: yRocket
-#
-# Builds Dockerfile.pipeline_flow as one multi-arch image <registry>/pipeline-flow:<tag> and pushes it, so every
-# worker machine (amd64 PC, arm64 Mac) pulls its own variant for each flow run. The registry defaults to
-# IMAGE_REGISTRY of ../docker-compose.env (else the _example), the same value register_pool.sh prefixes to the
-# pool templates' image.default (pipeline-flow:latest).
-#
-#   ./push_flow_image.sh                                    # registry = IMAGE_REGISTRY of ../docker-compose.env
-#   ./push_flow_image.sh --registry localhost:12357         # on the registry machine itself
-#   ./push_flow_image.sh --platform linux/arm64             # one architecture only
-#
-# A multi-arch build needs the containerd image store (Docker Desktop: Settings > General > "Use containerd for
-# pulling and storing images") or a docker-container buildx builder. The non-native variant builds under emulation
-# and compiles C libraries (TA-Lib), so it takes much longer than the native one. The final tag check reads the
-# HTTP API of a plain registry:2 container.
-#
-set -euo pipefail
-
-IMAGE_NAME="pipeline-flow"               # the bare name the pool templates' image.default holds
-REGISTRY=""                              # <host>:<port>; empty = IMAGE_REGISTRY of the env file
-PLATFORM="linux/amd64,linux/arm64"       # CPU architectures of the worker machines
-TAG="latest"
-
-usage() { echo "Usage: $0 [--registry <host:port>] [--platform <list>] [--tag <tag>]" >&2; }
-
-while [ $# -gt 0 ]; do
-    case "$1" in
-        --registry|--platform|--tag)
-            # a missing value would make 'shift 2' fail silently under set -e
-            [ $# -ge 2 ] || { echo "$1 needs a value." >&2; usage; exit 1; }
-            case "$1" in
-                --registry) REGISTRY="$2" ;;
-                --platform) PLATFORM="$2" ;;
-                --tag)      TAG="$2" ;;
-            esac
-            shift 2 ;;
-        -h|--help) usage; exit 0 ;;
-        *) echo "Unknown option: $1" >&2; usage; exit 1 ;;
-    esac
-done
-
-cd "$(dirname "$0")"   # the Dockerfile, its COPY sources and ../docker-compose.env are relative to this folder
-for f in Dockerfile.pipeline_flow requirements.txt pipeline.py; do
-    [ -f "$f" ] || { echo "$f not found in $(pwd); the build copies it into the image." >&2; exit 1; }
-done
-
-if [ -z "$REGISTRY" ]; then
-    ENV_FILE="../docker-compose.env"
-    [ -f "$ENV_FILE" ] || ENV_FILE="../docker-compose.env_example"
-    [ -f "$ENV_FILE" ] || { echo "env file not found: $ENV_FILE" >&2; exit 1; }
-    REGISTRY="$(sed -n 's/^IMAGE_REGISTRY=//p' "$ENV_FILE" | tail -n 1 | tr -d '\r')"
-    REGISTRY_SOURCE="IMAGE_REGISTRY in $ENV_FILE"
-else
-    REGISTRY_SOURCE="--registry"
-fi
-if [ -z "$REGISTRY" ] || [[ "$REGISTRY" == *"<"* ]] || [[ "$REGISTRY" == */* ]]; then
-    echo "Registry missing, a placeholder or not <host>:<port> (got '$REGISTRY' from $REGISTRY_SOURCE)." >&2
-    echo "Set IMAGE_REGISTRY in ../docker-compose.env or pass --registry <host:port>." >&2
-    exit 1
-fi
-if [ -z "$PLATFORM" ] || [ -z "$TAG" ]; then
-    echo "--platform and --tag need non-empty values." >&2
-    exit 1
-fi
-if [ "$TAG" != "latest" ]; then
-    # register_pool.sh points the pools at pipeline-flow:latest; another tag is used only by a deployment that names it
-    echo "push_flow_image.sh: NOTE: pool templates use tag 'latest'; '$TAG' runs only where a deployment names it." >&2
-fi
-
-command -v docker >/dev/null 2>&1 || { echo "docker not found on PATH." >&2; exit 1; }
-docker buildx version >/dev/null 2>&1 || { echo "docker buildx is required (Docker Desktop ships it)." >&2; exit 1; }
-
-REF="$REGISTRY/$IMAGE_NAME:$TAG"
-echo "Building $REF for $PLATFORM"
-if ! docker buildx build --platform "$PLATFORM" -f Dockerfile.pipeline_flow -t "$REF" --push .; then
-    echo "push_flow_image.sh: ERROR: build or push of $REF failed." >&2
-    echo "  A multi-arch build needs the containerd image store or a docker-container builder;" >&2
-    echo "  an HTTP registry other than localhost needs 'insecure-registries' in this docker daemon." >&2
-    exit 1
-fi
-
-# Confirm the registry now lists the tag, so a push that went elsewhere does not pass as done.
-if command -v curl >/dev/null 2>&1; then
-    tags="$(curl -s -m 10 "http://$REGISTRY/v2/$IMAGE_NAME/tags/list" || true)"
-    if ! printf '%s' "$tags" | grep -q "\"$TAG\""; then
-        echo "push_flow_image.sh: ERROR: pushed $REF, but the registry does not list tag '$TAG' (got: '$tags')." >&2
-        exit 1
-    fi
-    echo "Registry lists $IMAGE_NAME tags: $tags"
-else
-    echo "push_flow_image.sh: WARNING: curl not found; the registry's tag list was not checked." >&2
-fi
-echo "pushed $REF"
-```
