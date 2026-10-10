@@ -1,5 +1,5 @@
 # run_worker.sh
-Rev. 3 | Created: 2026-09-30 | Updated: 2026-10-08 21:30 CDT
+Rev. 4 | Created: 2026-09-30 | Updated: 2026-10-09 23:36 CDT
 
 > **Goal** — 한 machine 에서 Prefect worker container 를 띄워, 지정한 docker work pool 또는 그 pool 의 work queue 하나에 들어온 run 을 그 machine 이 실행하게 한다. 잘못된 pool·queue 이름으로 worker 가 run 을 하나도 받지 못하는 일은 기동 전에 막는다.
 >
@@ -24,12 +24,12 @@ Rev. 3 | Created: 2026-09-30 | Updated: 2026-10-08 21:30 CDT
 `run_worker.sh` 는 아래 차례로 worker container 를 띄운다. 코드 전체는 [Appendix D](#appendix-d-script) 에 있다.
 
 1. 옵션 읽기 — `--work-pool`, `--worker-limit`, `--worker-ip`, `--work-queue`.
-2. Registry 읽기 — `../docker-compose.env` 에서 `IMAGE_REGISTRY` 한 줄만 읽고, 파일이 없으면 `../docker-compose.env_example` 을 읽는다. 값이 비었거나 `<` 가 든 자리표시자면 멈춘다.
+2. Registry 읽기 — `../docker-compose.env` 에서 `IMAGE_REGISTRY` 한 줄만 읽고, 파일이 없으면 `../docker-compose.env_example` 을 읽는다. 값이 비었거나 `<` 가 든 자리표시자면 멈추고, 같은 파일의 `PREFECT_API_URL` 도 같은 기준으로 검사한다.
 3. 도구 확인 — `jq` 와 host 의 `prefect` CLI 가 없으면 설치 방법을 출력하고 멈춘다.
 4. Network 준비 — docker network `mlops` 가 없으면 만든다.
 5. Pool 검증 — `prefect work-pool ls --output json` 으로 server 의 docker type pool 목록을 읽어 `--work-pool` 과 대조한다. 목록에 없으면 번호를 붙여 보여 주고 하나를 고르게 한다.
 6. Queue 검증 — `--work-queue` 를 주었으면 `prefect work-queue inspect` 로 그 queue 가 pool 에 있는지 확인한다. 없으면 만드는 명령을 출력하고 멈춘다.
-7. LAN IP 결정 — `--worker-ip` 가 없으면 Windows 의 default route interface (`powershell.exe`) 또는 Linux 의 default route source 주소 (`ip route`) 에서 읽는다.
+7. LAN IP 결정 — `--worker-ip` 가 없으면 Windows 는 default route interface (`powershell.exe`), macOS 는 default route interface 의 주소 (`route` 와 `ipconfig`), Linux 는 default route source 주소 (`ip route`) 에서 읽는다.
 8. 이름 결정 — compose project, worker 이름, queue 옵션을 정한다 ([2. Method](#2-method)).
 9. 기동 — 변수를 export 하고, `docker compose -p <project> pull` 로 이 machine 의 architecture 에 맞는 worker image 를 받은 뒤 `down` 하고 `up -d` 한다.
 
@@ -54,8 +54,7 @@ Table 1. Names by queue option
 - Host 의 `prefect` CLI — `PREFECT_API_URL` 이 Prefect server 를 가리켜야 pool·queue 검증이 된다.
 - `jq` — `prefect work-pool ls --output json` 의 출력을 읽는다.
 - `docker compose` — 같은 folder 의 `docker-compose.worker.yml` 을 띄운다.
-- `../docker-compose.env_example` — worker container 가 읽는 `PREFECT_API_URL` 을 담는다.
-- `../docker-compose.env` — script 가 읽는 `IMAGE_REGISTRY` (registry 의 `<host>:<port>`) 를 담는다.
+- `../docker-compose.env` — script 가 읽는 `IMAGE_REGISTRY` (registry 의 `<host>:<port>`) 와, worker container 가 읽는 `PREFECT_API_URL` 을 담는다. 파일이 없으면 `../docker-compose.env_example` 을 읽지만, 그 자리표시자 값으로는 script 가 멈춘다.
 - Registry 의 `prefect-worker:latest` — worker image 를 `IMAGE_REGISTRY` 에 미리 push 해 둔다. HTTP registry 면 이 machine 의 docker daemon 에 `insecure-registries` 도 있어야 pull 이 된다.
 - Server 에 등록된 docker type work pool 과, `--work-queue` 를 쓸 때는 그 pool 의 work queue.
 
@@ -125,11 +124,12 @@ LAN IP 를 자동으로 읽지 못하는 machine 에서 worker 이름에 넣을 
 ```bash
 #!/usr/bin/env bash
 # run_worker.sh — start the Prefect worker compose stack on a worker machine.
-# __version__ = "0.0.26"  # Semantic Versioning:  Version = Major.Minor.Patch
+# __version__ = "0.0.27"  # Semantic Versioning:  Version = Major.Minor.Patch
 #
 # Brings up prefect_worker, which polls the given work pool. WORK_POOL/WORKER_LIMIT are read from
 # this shell at "docker compose up" (compose interpolation), so they are exported below.
-# (PREFECT_API_URL etc. are read directly by the container from env_file=docker-compose.env.)
+# (PREFECT_API_URL etc. are read by the container from the env file this script picks, exported as WORKER_ENV_FILE.)
+# Runs on Windows (Git Bash / WSL), Linux and macOS; each finds the LAN IP its own way (see below).
 # Work pools live on the server and are registered there (register_pool.sh), not here. Before starting,
 # this script checks the work pool against the pools registered on the server; if it is missing, it lists
 # the registered pools and lets you pick one (guards against typos / not-yet-registered pools).
@@ -177,6 +177,16 @@ if [ -z "$IMAGE_REGISTRY" ] || [[ "$IMAGE_REGISTRY" == *"<"* ]]; then
     echo "Set it to the registry <host>:<port>; an HTTP registry also needs 'insecure-registries' in the docker daemon." >&2
     exit 1
 fi
+
+# The worker container reads PREFECT_API_URL from this same env file; a placeholder would start a worker that
+# never reaches the server, so it is rejected here rather than inside the container.
+CONTAINER_API_URL="$(sed -n 's/^PREFECT_API_URL=//p' "$ENV_FILE" | tail -n 1 | tr -d '\r')"
+if [ -z "$CONTAINER_API_URL" ] || [[ "$CONTAINER_API_URL" == *"<"* ]]; then
+    echo "PREFECT_API_URL missing or still a placeholder in $ENV_FILE (got '$CONTAINER_API_URL')." >&2
+    echo "Copy ../docker-compose.env_example to ../docker-compose.env and set the server address there." >&2
+    exit 1
+fi
+WORKER_ENV_FILE="$ENV_FILE"   # compose env_file; relative to this folder, which is also the compose file's folder
 
 command -v jq >/dev/null 2>&1 || { echo "jq is required to parse 'prefect work-pool ls --output json'. Install jq and retry." >&2; exit 1; }
 
@@ -247,11 +257,18 @@ fi
 
 # --- Name the worker after this machine: <hostname>@<LAN IP> ---------------------------------------
 # On Windows (Git Bash, or WSL whose own IP is internal) the LAN IP comes from the Windows default-route
-# interface; on Linux from the source address of the default route.
+# interface; on macOS (no powershell.exe, no ip) from the address of the default-route interface;
+# on Linux from the source address of the default route.
 if [ -z "$WORKER_IP" ] && command -v powershell.exe >/dev/null 2>&1; then
     WORKER_IP="$(powershell.exe -NoProfile -Command \
         "(Get-NetIPConfiguration | Where-Object IPv4DefaultGateway | Select-Object -First 1).IPv4Address.IPAddress" \
         2>/dev/null | tr -d '\r' || true)"
+fi
+if [ -z "$WORKER_IP" ] && [ "$(uname -s)" = "Darwin" ]; then
+    default_iface="$(route -n get default 2>/dev/null | awk '/interface:/ {print $2; exit}' || true)"
+    if [ -n "$default_iface" ]; then
+        WORKER_IP="$(ipconfig getifaddr "$default_iface" 2>/dev/null || true)"
+    fi
 fi
 if [ -z "$WORKER_IP" ] && command -v ip >/dev/null 2>&1; then
     WORKER_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") {print $(i + 1); exit}}')"
@@ -276,6 +293,7 @@ export WORKER_LIMIT
 export WORKER_NAME
 export WORK_QUEUE_OPTION
 export IMAGE_REGISTRY
+export WORKER_ENV_FILE
 
 # Pull the latest worker image (the arch of this machine) before restarting, so a re-run picks up a new push.
 docker compose -p "$PROJECT" -f "$COMPOSE" pull
