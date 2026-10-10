@@ -2,7 +2,7 @@
 # to run the code, then cleans it up. This container never runs code itself.
 #
 # - Mounts the host docker socket to spawn sibling containers.
-#   (Windows/Docker Desktop also exposes /var/run/docker.sock to Linux containers.)
+#   (Docker Desktop on Windows and macOS also exposes /var/run/docker.sock to Linux containers.)
 # - prefect + prefect-docker are baked into the image (Dockerfile.worker), so there is no per-boot install.
 # - The work pool + base job template are registered on the server (see docker-compose.server.yml),
 #   so the worker only polls the pool — no pool creation here.
@@ -11,14 +11,15 @@
 #   docker buildx build --platform linux/amd64,linux/arm64 -f Dockerfile.worker \
 #       -t <IMAGE_REGISTRY>/prefect-worker:latest --push .
 # Start:         ./run_worker.sh --work-pool high_performance   (pulls the image from IMAGE_REGISTRY)
-# __version__ = "0.0.15"
+# __version__ = "0.0.16"
 name: prefect-worker   # compose project name baked in (replaces -p); run_worker.sh relies on it
 services:
   prefect_worker:
     # multi-arch image from the registry (prefect + prefect-docker); the pool is chosen at start, not baked in
     image: ${IMAGE_REGISTRY:?run_worker.sh sets IMAGE_REGISTRY}/prefect-worker:latest
     env_file:
-      - ../docker-compose.env_example       # PREFECT_API_URL (shared, kept at Docker/Prefect root)
+      # PREFECT_API_URL: ../docker-compose.env, else the _example; run_worker.sh rejects a placeholder value
+      - ${WORKER_ENV_FILE:?run_worker.sh sets WORKER_ENV_FILE}
     # --name <hostname>@<LAN IP> (set by run_worker.sh) tells the server which machine this worker runs on;
     # WORK_QUEUE_OPTION (run_worker.sh --work-queue) is "--work-queue <queue>" for a one-queue worker, else empty
     command: prefect worker start --type docker --pool ${WORK_POOL:-high_performance} ${WORK_QUEUE_OPTION:-} --limit ${WORKER_LIMIT:-8} --no-create-pool-if-not-found --name ${WORKER_NAME:?run_worker.sh sets WORKER_NAME}

@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # run_worker.sh — start the Prefect worker compose stack on a worker machine.
-# __version__ = "0.0.26"  # Semantic Versioning:  Version = Major.Minor.Patch
+# __version__ = "0.0.27"  # Semantic Versioning:  Version = Major.Minor.Patch
 #
 # Brings up prefect_worker, which polls the given work pool. WORK_POOL/WORKER_LIMIT are read from
 # this shell at "docker compose up" (compose interpolation), so they are exported below.
-# (PREFECT_API_URL etc. are read directly by the container from env_file=docker-compose.env.)
+# (PREFECT_API_URL etc. are read by the container from the env file this script picks, exported as WORKER_ENV_FILE.)
+# Runs on Windows (Git Bash / WSL), Linux and macOS; each finds the LAN IP its own way (see below).
 # Work pools live on the server and are registered there (register_pool.sh), not here. Before starting,
 # this script checks the work pool against the pools registered on the server; if it is missing, it lists
 # the registered pools and lets you pick one (guards against typos / not-yet-registered pools).
@@ -52,6 +53,16 @@ if [ -z "$IMAGE_REGISTRY" ] || [[ "$IMAGE_REGISTRY" == *"<"* ]]; then
     echo "Set it to the registry <host>:<port>; an HTTP registry also needs 'insecure-registries' in the docker daemon." >&2
     exit 1
 fi
+
+# The worker container reads PREFECT_API_URL from this same env file; a placeholder would start a worker that
+# never reaches the server, so it is rejected here rather than inside the container.
+CONTAINER_API_URL="$(sed -n 's/^PREFECT_API_URL=//p' "$ENV_FILE" | tail -n 1 | tr -d '\r')"
+if [ -z "$CONTAINER_API_URL" ] || [[ "$CONTAINER_API_URL" == *"<"* ]]; then
+    echo "PREFECT_API_URL missing or still a placeholder in $ENV_FILE (got '$CONTAINER_API_URL')." >&2
+    echo "Copy ../docker-compose.env_example to ../docker-compose.env and set the server address there." >&2
+    exit 1
+fi
+WORKER_ENV_FILE="$ENV_FILE"   # compose env_file; relative to this folder, which is also the compose file's folder
 
 command -v jq >/dev/null 2>&1 || { echo "jq is required to parse 'prefect work-pool ls --output json'. Install jq and retry." >&2; exit 1; }
 
@@ -122,11 +133,18 @@ fi
 
 # --- Name the worker after this machine: <hostname>@<LAN IP> ---------------------------------------
 # On Windows (Git Bash, or WSL whose own IP is internal) the LAN IP comes from the Windows default-route
-# interface; on Linux from the source address of the default route.
+# interface; on macOS (no powershell.exe, no ip) from the address of the default-route interface;
+# on Linux from the source address of the default route.
 if [ -z "$WORKER_IP" ] && command -v powershell.exe >/dev/null 2>&1; then
     WORKER_IP="$(powershell.exe -NoProfile -Command \
         "(Get-NetIPConfiguration | Where-Object IPv4DefaultGateway | Select-Object -First 1).IPv4Address.IPAddress" \
         2>/dev/null | tr -d '\r' || true)"
+fi
+if [ -z "$WORKER_IP" ] && [ "$(uname -s)" = "Darwin" ]; then
+    default_iface="$(route -n get default 2>/dev/null | awk '/interface:/ {print $2; exit}' || true)"
+    if [ -n "$default_iface" ]; then
+        WORKER_IP="$(ipconfig getifaddr "$default_iface" 2>/dev/null || true)"
+    fi
 fi
 if [ -z "$WORKER_IP" ] && command -v ip >/dev/null 2>&1; then
     WORKER_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") {print $(i + 1); exit}}')"
@@ -151,6 +169,7 @@ export WORKER_LIMIT
 export WORKER_NAME
 export WORK_QUEUE_OPTION
 export IMAGE_REGISTRY
+export WORKER_ENV_FILE
 
 # Pull the latest worker image (the arch of this machine) before restarting, so a re-run picks up a new push.
 docker compose -p "$PROJECT" -f "$COMPOSE" pull

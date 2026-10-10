@@ -1,5 +1,5 @@
 # Prefect Pipeline Orchestration on Docker
-Rev. 618 | Created: 2026-06-13 | Updated: 2026-10-09 23:27 CDT
+Rev. 619 | Created: 2026-06-13 | Updated: 2026-10-09 23:36 CDT
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
@@ -562,7 +562,7 @@ worker 는 **`docker` work pool** 을 polling 해 job 마다 `pipeline_flow` 컨
   # to run the code, then cleans it up. This container never runs code itself.
   #
   # - Mounts the host docker socket to spawn sibling containers.
-  #   (Windows/Docker Desktop also exposes /var/run/docker.sock to Linux containers.)
+  #   (Docker Desktop on Windows and macOS also exposes /var/run/docker.sock to Linux containers.)
   # - prefect + prefect-docker are baked into the image (Dockerfile.worker), so there is no per-boot install.
   # - The work pool + base job template are registered on the server (see docker-compose.server.yml),
   #   so the worker only polls the pool — no pool creation here.
@@ -571,14 +571,15 @@ worker 는 **`docker` work pool** 을 polling 해 job 마다 `pipeline_flow` 컨
   #   docker buildx build --platform linux/amd64,linux/arm64 -f Dockerfile.worker \
   #       -t <IMAGE_REGISTRY>/prefect-worker:latest --push .
   # Start:         ./run_worker.sh --work-pool high_performance   (pulls the image from IMAGE_REGISTRY)
-  # __version__ = "0.0.15"
+  # __version__ = "0.0.16"
   name: prefect-worker   # compose project name baked in (replaces -p); run_worker.sh relies on it
   services:
     prefect_worker:
       # multi-arch image from the registry (prefect + prefect-docker); the pool is chosen at start, not baked in
       image: ${IMAGE_REGISTRY:?run_worker.sh sets IMAGE_REGISTRY}/prefect-worker:latest
       env_file:
-        - ../docker-compose.env_example       # PREFECT_API_URL (shared, kept at Docker/Prefect root)
+        # PREFECT_API_URL: ../docker-compose.env, else the _example; run_worker.sh rejects a placeholder value
+        - ${WORKER_ENV_FILE:?run_worker.sh sets WORKER_ENV_FILE}
       # --name <hostname>@<LAN IP> (set by run_worker.sh) tells the server which machine this worker runs on;
       # WORK_QUEUE_OPTION (run_worker.sh --work-queue) is "--work-queue <queue>" for a one-queue worker, else empty
       command: prefect worker start --type docker --pool ${WORK_POOL:-high_performance} ${WORK_QUEUE_OPTION:-} --limit ${WORKER_LIMIT:-8} --no-create-pool-if-not-found --name ${WORKER_NAME:?run_worker.sh sets WORKER_NAME}
@@ -598,7 +599,7 @@ worker 는 **`docker` work pool** 을 polling 해 job 마다 `pipeline_flow` 컨
 
   - `volumes: /var/run/docker.sock` — worker 가 호스트 도커로 `pipeline_flow` 컨테이너를 띄우는 통로입니다. Windows 도 같은 줄로 됩니다 — Docker Desktop 이 Linux 컨테이너용으로 이 경로에 도커 소켓을 노출하기 때문입니다 (호스트의 named pipe `\\.\pipe\docker_engine` 을 컨테이너 안 `/var/run/docker.sock` 로 연결).
   - `image` — worker image 를 `<IMAGE_REGISTRY>/prefect-worker:latest` 로 registry 에서 받습니다 ([§5.1](#51-image)). `IMAGE_REGISTRY` 는 `run_worker.sh` 가 `docker-compose.env` 에서 읽어 export 하며, 값이 없으면 compose 가 기동 전에 멈춥니다.
-  - `command` — `prefect worker start` 만 합니다. prefect·prefect-docker 는 **이미지에 구워져** 있고 `PREFECT_API_URL` 은 env_file 이 주므로, 부팅 때 설치·export 가 없습니다 (`bash -c` 도 불필요). `--type docker` 로 docker worker 임을 고정하고, `--no-create-pool-if-not-found` 로 **없는 pool 을 자동 생성하지 않습니다** (오타 이름이 들어와도 process pool 이 몰래 생기지 않고 오류로 멈춤; pool 은 server [§4](#4-prefect-server-container) 가 이미 등록). `IMAGE_REGISTRY`·`WORK_POOL`·`WORKER_LIMIT`·`WORK_QUEUE_OPTION` 은 `docker compose up` 시 셸에서 읽는 변수입니다.
+  - `command` — `prefect worker start` 만 합니다. prefect·prefect-docker 는 **이미지에 구워져** 있고 `PREFECT_API_URL` 은 env_file 이 주므로, 부팅 때 설치·export 가 없습니다 (`bash -c` 도 불필요). `--type docker` 로 docker worker 임을 고정하고, `--no-create-pool-if-not-found` 로 **없는 pool 을 자동 생성하지 않습니다** (오타 이름이 들어와도 process pool 이 몰래 생기지 않고 오류로 멈춤; pool 은 server [§4](#4-prefect-server-container) 가 이미 등록). `IMAGE_REGISTRY`·`WORKER_ENV_FILE`·`WORK_POOL`·`WORKER_LIMIT`·`WORK_QUEUE_OPTION` 은 `docker compose up` 시 셸에서 읽는 변수입니다. `WORKER_ENV_FILE` 은 `run_worker.sh` 가 고른 env 파일 (`../docker-compose.env`, 없으면 `_example`) 이고, container 는 그 파일에서 `PREFECT_API_URL` 을 받습니다.
   - `--limit` 은 이 worker 가 **동시에 띄우는 컨테이너 수의 상한** 입니다 (동시성 세 층은 [§4 Work Pool Registration](#work-pool-registration) 의 여러 pool 표 참고).
 
   #### Execution Command
@@ -1359,11 +1360,12 @@ echo "[register_variables] set: minio_endpoint, postgresql_host_port, mlflow_tra
 ```bash
 #!/usr/bin/env bash
 # run_worker.sh — start the Prefect worker compose stack on a worker machine.
-# __version__ = "0.0.26"  # Semantic Versioning:  Version = Major.Minor.Patch
+# __version__ = "0.0.27"  # Semantic Versioning:  Version = Major.Minor.Patch
 #
 # Brings up prefect_worker, which polls the given work pool. WORK_POOL/WORKER_LIMIT are read from
 # this shell at "docker compose up" (compose interpolation), so they are exported below.
-# (PREFECT_API_URL etc. are read directly by the container from env_file=docker-compose.env.)
+# (PREFECT_API_URL etc. are read by the container from the env file this script picks, exported as WORKER_ENV_FILE.)
+# Runs on Windows (Git Bash / WSL), Linux and macOS; each finds the LAN IP its own way (see below).
 # Work pools live on the server and are registered there (register_pool.sh), not here. Before starting,
 # this script checks the work pool against the pools registered on the server; if it is missing, it lists
 # the registered pools and lets you pick one (guards against typos / not-yet-registered pools).
@@ -1411,6 +1413,16 @@ if [ -z "$IMAGE_REGISTRY" ] || [[ "$IMAGE_REGISTRY" == *"<"* ]]; then
     echo "Set it to the registry <host>:<port>; an HTTP registry also needs 'insecure-registries' in the docker daemon." >&2
     exit 1
 fi
+
+# The worker container reads PREFECT_API_URL from this same env file; a placeholder would start a worker that
+# never reaches the server, so it is rejected here rather than inside the container.
+CONTAINER_API_URL="$(sed -n 's/^PREFECT_API_URL=//p' "$ENV_FILE" | tail -n 1 | tr -d '\r')"
+if [ -z "$CONTAINER_API_URL" ] || [[ "$CONTAINER_API_URL" == *"<"* ]]; then
+    echo "PREFECT_API_URL missing or still a placeholder in $ENV_FILE (got '$CONTAINER_API_URL')." >&2
+    echo "Copy ../docker-compose.env_example to ../docker-compose.env and set the server address there." >&2
+    exit 1
+fi
+WORKER_ENV_FILE="$ENV_FILE"   # compose env_file; relative to this folder, which is also the compose file's folder
 
 command -v jq >/dev/null 2>&1 || { echo "jq is required to parse 'prefect work-pool ls --output json'. Install jq and retry." >&2; exit 1; }
 
@@ -1481,11 +1493,18 @@ fi
 
 # --- Name the worker after this machine: <hostname>@<LAN IP> ---------------------------------------
 # On Windows (Git Bash, or WSL whose own IP is internal) the LAN IP comes from the Windows default-route
-# interface; on Linux from the source address of the default route.
+# interface; on macOS (no powershell.exe, no ip) from the address of the default-route interface;
+# on Linux from the source address of the default route.
 if [ -z "$WORKER_IP" ] && command -v powershell.exe >/dev/null 2>&1; then
     WORKER_IP="$(powershell.exe -NoProfile -Command \
         "(Get-NetIPConfiguration | Where-Object IPv4DefaultGateway | Select-Object -First 1).IPv4Address.IPAddress" \
         2>/dev/null | tr -d '\r' || true)"
+fi
+if [ -z "$WORKER_IP" ] && [ "$(uname -s)" = "Darwin" ]; then
+    default_iface="$(route -n get default 2>/dev/null | awk '/interface:/ {print $2; exit}' || true)"
+    if [ -n "$default_iface" ]; then
+        WORKER_IP="$(ipconfig getifaddr "$default_iface" 2>/dev/null || true)"
+    fi
 fi
 if [ -z "$WORKER_IP" ] && command -v ip >/dev/null 2>&1; then
     WORKER_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") {print $(i + 1); exit}}')"
@@ -1510,6 +1529,7 @@ export WORKER_LIMIT
 export WORKER_NAME
 export WORK_QUEUE_OPTION
 export IMAGE_REGISTRY
+export WORKER_ENV_FILE
 
 # Pull the latest worker image (the arch of this machine) before restarting, so a re-run picks up a new push.
 docker compose -p "$PROJECT" -f "$COMPOSE" pull
