@@ -6,14 +6,18 @@ FROM python:3.11.15
 #   git             : pipeline.py shallow-fetches the team repo into a per-run worktree at runtime
 #   build-essential : compiles C extensions (ucrdtw / dtaidistance / TA-Lib Python wrappers)
 #   wget            : downloads the TA-Lib C library source
+#   autotools-dev   : current config.guess / config.sub, which know aarch64 (see the TA-Lib step)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        git build-essential wget \
+        git build-essential wget autotools-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # The TA-Lib Python package needs the C library of the same name, so build and install it from source.
+# ta-lib-0.4.0 ships config.guess / config.sub from 2007, whose configure stops on arm64 (aarch64) with
+# "cannot guess build type"; the copies from autotools-dev replace them so one Dockerfile builds amd64 and arm64.
 RUN wget -q http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz \
     && tar -xzf ta-lib-0.4.0-src.tar.gz \
     && cd ta-lib \
+    && cp /usr/share/misc/config.guess /usr/share/misc/config.sub . \
     && ./configure --prefix=/usr \
     && make \
     && make install \
