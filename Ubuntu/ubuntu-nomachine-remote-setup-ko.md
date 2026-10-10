@@ -1,6 +1,6 @@
 # 우분투 원격 접속 서버 구축
 
-Rev. 22 | Created: 2026-07-14 | Updated: 2026-10-10 19:17 UTC
+Rev. 23 | Created: 2026-07-14 | Updated: 2026-10-10 19:31 UTC
 
 <table width="100%">
 <tr>
@@ -54,9 +54,12 @@ ISO 파일을 먼저 로컬 디스크에 받은 뒤, Windows 에서 Rufus 로 �
 
 ### 2.1 Preparation
 - 8GB 이상 USB 메모리 (기존 내용은 모두 지워짐)
-- ISO 파일: `ubuntu-26.04-desktop-amd64.iso` ([releases.ubuntu.com/26.04](https://releases.ubuntu.com/26.04/))
-  - 네트워크 드라이브가 아니라 로컬 디스크 (C: 등) 에 저장 (→ **[Appendix C](#appendix-c-bad-iso-read--source-drive-m-problem)**)
-  - 같은 페이지의 `SHA256SUMS` 로 파일 손상 여부 확인
+- ISO 파일 (설치할 OS 에 따라 하나):
+  - Ubuntu 26.04: [releases.ubuntu.com/26.04](https://releases.ubuntu.com/26.04/) → `ubuntu-26.04-desktop-amd64.iso`
+  - Linux Mint 22.3: [linuxmint.com/download.php](https://linuxmint.com/download.php) → edition 의 Download → 가까운 mirror server 선택 → `linuxmint-22.3-xfce-64bit.iso` 등 (약 3GB)
+- Linux Mint edition: Cinnamon (기본 추천), Xfce (가장 가벼워 오래된 노트북에 적합), MATE (classic desktop)
+- ISO 는 네트워크 드라이브가 아니라 로컬 디스크 (C: 등) 에 저장 (→ **[Appendix C](#appendix-c-bad-iso-read--source-drive-m-problem)**)
+- 다운로드 페이지의 SHA256 checksum 으로 파일 손상 여부 확인
 
 ### 2.2 Rufus download
 - Windows 에 기본 포함되지 않으므로 공식 사이트 [rufus.ie](https://rufus.ie/ko/) 에서 받음 (이름이 비슷한 광고성 사이트 주의)
@@ -121,6 +124,7 @@ Table 1. Rufus settings
 - 이 설정이 필요했던 이유(헤드리스 접속 실패)는 → **[Appendix F](#appendix-f-logout-headless-connection-failure--worked-around-via-auto-login)** 참조
 
 ### 3.4 Windows client connection (client, desktop)
+- **MATE**: 전통적인 화면 구성의 가벼운 desktop 환경.
 - **NoMachine** 클라이언트 실행 (RDP 클라이언트 `mstsc` 아님)
 - 접속 정보:
   - Host: `<SERVER_IP>`
@@ -140,6 +144,7 @@ Table 1. Rufus settings
 - **amd64**: 64-bit x86 CPU architecture 의 Debian/Ubuntu 표기. `x86_64` 와 같음.
 - **auto-login**: 부팅 시 비밀번호 입력 없이 지정 사용자로 로그인하는 GDM 설정.
 - **BIOS**: Basic Input/Output System. UEFI 이전의 PC firmware.
+- **Cinnamon**: Linux Mint 의 기본 desktop 환경.
 - **CLI**: Command-line interface. terminal 에 입력하는 text 명령 방식.
 - **CSM**: Compatibility Support Module. UEFI 에서 BIOS 방식 부팅을 흉내 내는 기능.
 - **DEB**: Debian/Ubuntu 계열 package 형식 (`.deb`).
@@ -153,7 +158,9 @@ Table 1. Rufus settings
 - **headless**: 로그인된 화면 session 없이 운영하는 상태.
 - **ISO**: 광디스크 image file 형식. OS 설치 매체 배포에 사용.
 - **LAN**: Local area network. 같은 가정·사무실 내부 network.
+- **Linux Mint**: Ubuntu LTS 기반 Linux 배포판.
 - **MBR**: Master Boot Record. BIOS system 의 partition table 형식.
+- **mirror server**: 같은 파일을 나누어 배포하는 download server.
 - **mount**: disk 나 공유 folder 를 directory 경로에 연결해 접근 가능하게 하는 것.
 - **mstsc**: Windows 원격 데스크톱 연결 client. RDP 사용.
 - **NoMachine**: NX protocol 기반 원격 데스크톱 software.
@@ -171,6 +178,7 @@ Table 1. Rufus settings
 - **UEFI**: BIOS 를 대체하는 PC firmware interface.
 - **Wayland**: Ubuntu 기본 display server protocol. X11 의 후속.
 - **X11**: 전통적인 Linux display server protocol.
+- **Xfce**: 자원을 적게 쓰는 가벼운 desktop 환경.
 
 ---
 
