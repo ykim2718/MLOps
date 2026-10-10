@@ -1,5 +1,5 @@
 # Prefect Pipeline Orchestration on Docker
-Rev. 624 | Created: 2026-06-13 | Updated: 2026-10-10 08:40 CDT
+Rev. 625 | Created: 2026-06-13 | Updated: 2026-10-10 08:42 CDT
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
@@ -375,6 +375,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
   다음은 `docker-pool-template-high.json` 입니다.
 
   ```json
+  // PrefectServer/docker-pool-template-high.json
   {
     "variables": {
       "type": "object",
@@ -408,7 +409,18 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
         "network_mode": { "title": "Network Mode", "type": "string" },
         "auto_remove": { "title": "Auto Remove", "type": "boolean", "default": true },
         "mem_limit": { "title": "Memory Limit", "type": "string", "default": "16g" },
-        "stream_output": { "title": "Stream Output", "type": "boolean", "default": true }
+        "stream_output": { "title": "Stream Output", "type": "boolean", "default": true },
+        "volumes": {
+          "title": "Volumes",
+          "type": "array",
+          "items": { "type": "string" },
+          "default": []
+        },
+        "container_create_kwargs": {
+          "title": "Container Create Kwargs",
+          "type": "object",
+          "default": {}
+        }
       }
     },
     "job_configuration": {
@@ -420,7 +432,9 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
       "network_mode": "{{ network_mode }}",
       "auto_remove": "{{ auto_remove }}",
       "mem_limit": "{{ mem_limit }}",
-      "stream_output": "{{ stream_output }}"
+      "stream_output": "{{ stream_output }}",
+      "volumes": "{{ volumes }}",
+      "container_create_kwargs": "{{ container_create_kwargs }}"
     }
   }
   ```
@@ -431,6 +445,8 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
   - `image_pull_policy` — flow image 를 언제 pull 할지입니다. Worker 는 flow image 를 registry 에서 받고, 같은 `latest` tag 를 다시 push 해 갱신하므로 `Always` 로 둡니다. `IfNotPresent` 면 worker machine 이 처음 받은 image 를 계속 써서 새로 push 한 image 가 반영되지 않습니다. 네 값 (`IfNotPresent` · `Always` · `IfPossible` · `Never`) 의 뜻은 [prefect-registry-ko.md](prefect-registry-ko.md) 를 따릅니다.
   - `env` — flow 컨테이너가 server·Secret 을 찾는 `PREFECT_API_URL` 을 줍니다. 이 값은 템플릿에 **하드코딩하지 않습니다** — `register_pool.sh` 가 등록 시 실행 호스트의 `docker-compose.env` 에 있는 `PREFECT_API_URL` 로 `env.default` 를 덮어씁니다. 위 JSON 의 `http://prefect_server:4200/api` 는 register_pool.sh 없이 등록할 때만 쓰이는 fallback 이고, 실제 주소는 `docker-compose.env` 한 곳에서 관리합니다.
   - `mem_limit` — flow 컨테이너 메모리 상한입니다. 등급별 pool 의 핵심 차이값입니다 (high 크게·low 작게). `16g` 의 `g` 는 기가바이트 (GiB) 를 뜻합니다.
+  - `volumes` — flow 컨테이너에 mount 할 `<host path>:<container path>` 목록입니다. 기본값은 비어 있고, 필요한 deployment 가 `job_variables` 로 채웁니다.
+  - `container_create_kwargs` — docker 가 flow 컨테이너를 만들 때 넘기는 추가 인자 (예: `extra_hosts`) 입니다. 기본값은 비어 있고, 필요한 deployment 가 `job_variables` 로 채웁니다.
 
   `networks` 는 flow 컨테이너가 붙을 네트워크로, `mlops` 면 `minio`·`prefect_server` 를 서비스명으로 찾습니다. `auto_remove: true` 면 run 이 끝날 때 컨테이너가 자동으로 삭제됩니다.
 
