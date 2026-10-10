@@ -12,7 +12,7 @@
         "title": "Image Pull Policy",
         "type": "string",
         "enum": ["IfNotPresent", "Always", "Never"],
-        "default": "IfNotPresent"
+        "default": "Always"
       },
       "env": {
         "title": "Environment Variables",

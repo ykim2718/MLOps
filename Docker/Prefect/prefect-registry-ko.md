@@ -1,5 +1,5 @@
 # Prefect Docker Registry
-Rev. 2 | Created: 2026-10-08 | Updated: 2026-10-08 21:11 CDT
+Rev. 3 | Created: 2026-10-08 | Updated: 2026-10-10 08:40 CDT
 
 - [1. Purpose](#1-purpose)
 - [2. Summary](#2-summary)
@@ -300,6 +300,6 @@ Table 4. Symptom, cause and fix
 - Build script 는 image 를 `localhost:12357/yrocket-finance:latest` 로 tag 해 push 하고, push 가 실패하면 exit code 1 로 끝나 pool 의 run 이 이전 image 로 도는 것을 알린다.
 - Deployment 를 등록하는 serve container 는 환경 변수 `POOL_IMAGE=<REGISTRY_IP>:12357/yrocket-finance:latest` 를 받아, pool deployment 를 `image=POOL_IMAGE`, `build=False`, `push=False`, `job_variables` 의 `image_pull_policy="Always"` 로 등록한다.
 - Worker machine 의 docker daemon 은 `insecure-registries` 에 `<REGISTRY_IP>:12357` 을 갖는다. 그 machine 의 `docker images` 에 남은 `<REGISTRY_IP>:12357/yrocket-finance:latest` 는 지난 pull 의 cache 이며, `Always` 이므로 다음 run 이 registry 의 최신 digest 로 바꾼다.
-- Pool template 의 `image_pull_policy` 기본값은 `IfNotPresent` 이고, deployment 의 `job_variables` 가 `Always` 로 덮는다 ([4.3](#43-where-image-and-policy-are-set)).
+- Pool template 의 `image_pull_policy` 기본값도 `Always` 이므로, deployment 가 `job_variables` 로 정하지 않아도 run 마다 registry 에 묻는다 ([4.3](#43-where-image-and-policy-are-set)).
 - Worker 의 compose 설정은 worker image 를 `<IMAGE_REGISTRY>/prefect-worker:latest` 로 받고, worker 를 띄우는 script 가 기동 전에 `docker compose pull` 을 돈다. Worker image 는 amd64 와 arm64 variant 를 한 tag 로 push 하는 것이 이 stack 의 절차이다.
 - Registry 에는 아직 `prefect-worker` repository 가 없고, 도는 worker 는 그 전에 local 에서 build 한 `prefect-worker:latest` 로 떠 있다. Worker 를 다시 띄우려면 `IMAGE_REGISTRY` 를 registry 주소로 설정하고 worker image 를 먼저 push 해야 한다 ([5.5](#55-pulling-the-worker-image)).
