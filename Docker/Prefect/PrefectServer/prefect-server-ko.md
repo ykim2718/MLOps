@@ -1,5 +1,5 @@
 # Prefect Server
-Rev. 0 | Created: 2026-10-10 | Updated: 2026-10-10 09:28 CDT
+Rev. 1 | Created: 2026-10-10 | Updated: 2026-10-10 13:31 CDT
 
 - [1. Purpose](#1-purpose)
 - [2. Server Setup](#2-server-setup)
@@ -171,7 +171,7 @@ Rev. 0 | Created: 2026-10-10 | Updated: 2026-10-10 09:28 CDT
 
   > **`properties` vs `job_configuration`** — `variables.properties` 는 **변수 선언** (타입 + `default`) 이고, `job_configuration` 은 그 변수를 `{{ }}` 로 받아 **실제 도커 job 설정에 끼워 넣는 틀** 입니다. 같은 키가 양쪽에 보이는 건 '선언 ↔ 사용' 한 쌍이기 때문이고, 값 우선순위는 **deployment 의 `job_variables` override > 템플릿 `default`** 입니다 (override 가 없으면 `default` 가 `{{ }}` 자리에 들어갑니다).
 
-  - `image` — flow 컨테이너로 쓸 flow image ([prefect-flow-ko.md §3](../PrefectFlow/prefect-flow-ko.md#3-image)). 태그 (`pipeline-flow:latest`) 가 곧 **런타임 버전** (라이브러리 + orchestrator) 입니다.
+  - `image` — flow 컨테이너로 쓸 flow image ([prefect-flow-ko.md §3](../PrefectFlow/prefect-flow-ko.md#3-image)). 태그 (`pipeline-flow:latest`) 가 곧 **런타임 버전** (라이브러리 + orchestrator) 입니다. `register_pool.sh` 는 등록할 때 이 기본값 앞에 `docker-compose.env` 의 `IMAGE_REGISTRY` 를 붙여, worker 가 flow image 를 registry 에서 받게 합니다.
   - `image_pull_policy` — flow image 를 언제 pull 할지입니다. Worker 는 flow image 를 registry 에서 받고, 같은 `latest` tag 를 다시 push 해 갱신하므로 `Always` 로 둡니다. `IfNotPresent` 면 worker machine 이 처음 받은 image 를 계속 써서 새로 push 한 image 가 반영되지 않습니다. 네 값 (`IfNotPresent` · `Always` · `IfPossible` · `Never`) 의 뜻은 [prefect-registry-ko.md](../prefect-registry-ko.md) 를 따릅니다.
   - `env` — flow 컨테이너가 server·Secret 을 찾는 `PREFECT_API_URL` 을 줍니다. 이 값은 템플릿에 **하드코딩하지 않습니다** — `register_pool.sh` 가 등록 시 실행 호스트의 `docker-compose.env` 에 있는 `PREFECT_API_URL` 로 `env.default` 를 덮어씁니다. 위 JSON 의 `http://prefect_server:4200/api` 는 register_pool.sh 없이 등록할 때만 쓰이는 fallback 이고, 실제 주소는 `docker-compose.env` 한 곳에서 관리합니다.
   - `mem_limit` — flow 컨테이너 메모리 상한입니다. 등급별 pool 의 핵심 차이값입니다 (high 크게·low 작게). `16g` 의 `g` 는 기가바이트 (GiB) 를 뜻합니다.
@@ -304,11 +304,13 @@ server 에 work pool 을 등록 (또는 갱신) 하는 스크립트입니다 ([�
 ```bash
 #!/usr/bin/env bash
 # register_pool.sh — register (or update) one Prefect work pool via the server API.
-# __version__ = "0.1.0"  # Semantic Versioning:  Version = Major.Minor.Patch
+# __version__ = "0.1.1"  # Semantic Versioning:  Version = Major.Minor.Patch
 # Idempotent: --overwrite keeps the base job template in sync. Runs on any host that can reach the
 # server API (needs the prefect CLI + jq locally; no server container required). PREFECT_API_URL is
 # taken from docker-compose.env — it is both the API address this script calls and the address
 # injected into the template's env.default, so flow containers know where the server is.
+# IMAGE_REGISTRY (same env file) is prefixed to the template's bare image.default, so every worker
+# pulls the flow image (multi-arch) from the registry instead of needing a local build.
 # Backing addresses (MinIO / PostgreSQL / MLflow) live as prefect Variables (register_variables.sh), not here.
 #
 #   ./register_pool.sh --pool-name high_performance --template-file docker-pool-template-high.json --concurrency-limit 16
@@ -347,11 +349,24 @@ command -v prefect >/dev/null 2>&1 || { echo "the prefect CLI is required (pip i
 # below (env var beats the profile) and is injected into the template's env.default.
 set -a; . "$ENV_FILE"; set +a
 [ -n "${PREFECT_API_URL:-}" ] || { echo "PREFECT_API_URL missing in $ENV_FILE" >&2; exit 1; }
+if [ -z "${IMAGE_REGISTRY:-}" ] || [[ "$IMAGE_REGISTRY" == *"<"* ]]; then
+    echo "IMAGE_REGISTRY missing or still a placeholder in $ENV_FILE (got '${IMAGE_REGISTRY:-}')" >&2; exit 1
+fi
+
+# The template keeps the bare flow image name; the registry is prefixed here from the single env source.
+# A name that already carries a registry would be double-prefixed, so it is rejected.
+bare_image="$(jq -r '.variables.properties.image.default' "$TEMPLATE_FILE")"
+if [ -z "$bare_image" ] || [ "$bare_image" = "null" ] || [[ "$bare_image" == */* ]]; then
+    echo "$TEMPLATE_FILE: image.default must be a bare image name like pipeline-flow:latest (got '$bare_image')" >&2
+    exit 1
+fi
 
 TMP_TPL="$(mktemp)"
 trap 'rm -f "$TMP_TPL"' EXIT
-jq --arg api "$PREFECT_API_URL" \
-    '.variables.properties.env.default = { PREFECT_API_URL: $api }' "$TEMPLATE_FILE" > "$TMP_TPL"
+jq --arg api "$PREFECT_API_URL" --arg image "$IMAGE_REGISTRY/$bare_image" \
+    '.variables.properties.env.default = { PREFECT_API_URL: $api }
+     | .variables.properties.image.default = $image' "$TEMPLATE_FILE" > "$TMP_TPL"
+echo "flow image: $IMAGE_REGISTRY/$bare_image"
 
 # Register (or update) the pool through the server API. The API may need a moment after startup,
 # so retry a few times. --overwrite keeps the base job template in sync on re-runs.

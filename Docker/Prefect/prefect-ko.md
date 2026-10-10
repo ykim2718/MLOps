@@ -1,5 +1,5 @@
 # Prefect Pipeline Orchestration on Docker
-Rev. 628 | Created: 2026-06-13 | Updated: 2026-10-10 09:28 CDT
+Rev. 629 | Created: 2026-06-13 | Updated: 2026-10-10 13:31 CDT
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
@@ -364,7 +364,7 @@ Worker image 와 flow image 는 같은 docker registry 에서 받습니다. 두 
 
   ```dotenv
   # docker-compose.env_example  (Prefect stack — server/worker bootstrap config)
-  # __version__ = "0.0.13"
+  # __version__ = "0.0.17"
   # Container-only config: read via env_file by prefect_server and prefect_worker. NOT used by host
   # tools. Backing-service addresses (MinIO / PostgreSQL / MLflow) live on the server as prefect Variables
   # (register_variables.sh) — a single, non-secret source read by the flow and by host tools alike.
@@ -380,10 +380,16 @@ Worker image 와 flow image 는 같은 docker registry 에서 받습니다. 두 
   # -- Prefect metadata DB (bootstrap) ----------------------------------------
   # Where the server stores flow runs / deployments / logs. Host = the PostgreSQL host LAN IP.
   PREFECT_SERVER_DATABASE_CONNECTION_URL=postgresql+asyncpg://CHANGE_ME:CHANGE_ME@<POSTGRESQL_IP>:5432/prefect
+
+  # -- Docker registry (image source) -----------------------------------------
+  # <host>:<port> of the registry holding the multi-arch prefect-worker / pipeline-flow images. Read by
+  # run_worker.sh (worker image) and register_pool.sh (flow image default of the base job template).
+  IMAGE_REGISTRY=<REGISTRY_IP>:<REGISTRY_PORT>
   ```
 
   - **메타 DB 호스트** 는 PostgreSQL 이 있는 머신의 **LAN IP** (`<POSTGRESQL_IP>`) — IP 로 두면 server 와 같은 머신이든 다른 머신이든 동작합니다 (같은 머신·같은 `mlops` 망이면 서비스 이름 `postgres` 도 가능).
   - `PREFECT_UI_API_URL` — 브라우저는 docker network 밖이라 `prefect_server` 대신 **LAN IP**.
+  - `IMAGE_REGISTRY` — worker image 와 flow image 를 담은 registry 의 `<host>:<port>` 입니다 ([§6](#6-docker-registry)). `run_worker.sh` 는 worker image 를 이 주소에서 받고, `register_pool.sh` 는 pool 의 flow image 기본값 앞에 이 주소를 붙입니다.
   - **backing 주소 (MinIO·PostgreSQL·MLflow) 는 여기 없습니다** — 서버 Variable 로 관리합니다 ([prefect-server-ko.md §4 Service Address Variables](PrefectServer/prefect-server-ko.md#4-service-address-variables)). worker 는 자격증명·주소를 들지 않습니다.
 
 ### 7.2 Credential Blocks
@@ -618,7 +624,7 @@ backing service 포트 하나를 대상으로, action 에 따라 **도달성 확
 ```bash
 #!/usr/bin/env bash
 # backing_ports.sh — check reachability of, or open the inbound firewall (ufw) for, one backing service port.
-# __version__ = "0.0.2"  # Semantic Versioning:  Version = Major.Minor.Patch
+# __version__ = "0.0.4"  # Semantic Versioning:  Version = Major.Minor.Patch
 #   check : TCP-test the port. Run from a CONSUMING host (server / worker) to see real reachability;
 #           from the serving host it is a meaningless loopback (always OPEN).
 #   open  : open the inbound firewall (ufw) for the port. Run on the host that SERVES it (needs sudo). Idempotent.
@@ -662,8 +668,9 @@ fi
 ```python
 # credentials.py — shared Prefect credential block (Credentials) + JSON register CLI.
 #
-# Defines the one credential Block used across the stack and registers a Credentials block from a
-# JSON file. Block name precedence: --block-name > JSON "name" field > file stem. Prefect requires the
+# Defines the one credential Block (SECRETS only; service addresses live in prefect Variables)
+# and registers a Credentials block from a JSON file. Block name precedence: --block-name > JSON "name"
+# field > file stem. Prefect requires the
 # block name to be lowercase letters, numbers, and dashes only — any lowercase id (not tied to a person).
 #
 #     prefect block delete credentials/yrocket
@@ -683,7 +690,7 @@ from typing import List, Optional, Union
 from prefect.blocks.core import Block
 from prefect.blocks.fields import SecretDict
 
-__version__ = "0.0.19"  # Semantic Versioning:  Version = Major.Minor.Patch
+__version__ = "0.0.22"  # Semantic Versioning:  Version = Major.Minor.Patch
 
 # Prefect block document names allow lowercase letters, numbers, and dashes only (no upper/underscore/space/dot).
 _BLOCK_NAME_RE = re.compile(r"^[a-z0-9-]+$")

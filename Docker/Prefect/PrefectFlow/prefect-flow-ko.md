@@ -1,5 +1,5 @@
 # Prefect Flow
-Rev. 0 | Created: 2026-10-10 | Updated: 2026-10-10 09:28 CDT
+Rev. 1 | Created: 2026-10-10 | Updated: 2026-10-10 13:32 CDT
 
 - [1. Purpose](#1-purpose)
 - [2. Role](#2-role)
@@ -337,7 +337,7 @@ Pipeline Flow 는 worker 가 job 마다 띄우는 per-flow 컨테이너입니다
 flow image 에 설치하는 파이썬 의존성 목록입니다 ([§3](#3-image)). 팀 소스는 이미지에 굽지 않고 런타임에 git worktree 로 받으므로 여기에는 라이브러리만 고정합니다 (base: `python:3.11.15`). 카테고리로 나눠 두고 버전은 `numpy` 기준에 맞춥니다.
 
 ```text
-# rev. 12
+# rev. 13
 # Python dependencies for the shared team Pipeline Flow image (base: python:3.11.15, see Dockerfile).
 # The team source is NOT baked; it is fetched into a git worktree at runtime, so only libraries are pinned here.
 
@@ -356,6 +356,7 @@ torch==2.9.1                   # Deep learning framework (PyTorch)
 scikit-learn==1.4.2            # Classical machine learning algorithms
 lightgbm==4.6.0                # Gradient boosting (LightGBM)
 catboost==1.2.10               # Gradient boosting (CatBoost)
+xgboost==3.2.0                 # Gradient boosting (XgBoost)
 imbalanced-learn==0.14.1       # Imbalanced-data resampling
 statsmodels==0.14.6            # Statistical models / tests
 prophet==1.1.5                 # Time-series forecasting
