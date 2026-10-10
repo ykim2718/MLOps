@@ -1,0 +1,5 @@
+# .dockerignore — send only what Dockerfile.pipeline_flow COPYs into the image.
+# An allowlist: a new COPY source must be added here, or the build stops with "not found".
+*
+!requirements.txt
+!pipeline.py
