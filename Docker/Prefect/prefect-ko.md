@@ -1,5 +1,5 @@
 # Prefect Pipeline Orchestration on Docker
-Rev. 620 | Created: 2026-06-13 | Updated: 2026-10-09 23:55 CDT
+Rev. 621 | Created: 2026-06-13 | Updated: 2026-10-09 23:56 CDT
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
@@ -680,15 +680,29 @@ Pipeline Flow 는 worker 가 job 마다 띄우는 per-flow 컨테이너입니다
 
   #### Execution Command
 
-  `PipelineFlow/` 에서 `docker build` 를 셋업 때 1회 합니다.
+  build 하는 machine 의 `PipelineFlow/` 에서 `push_flow_image.sh` 를 실행합니다. `Dockerfile.pipeline_flow`, `requirements.txt`, `pipeline.py` 를 바꿀 때마다 다시 실행합니다 (코드는 [Appendix O](#appendix-o-push_flow_imagesh)).
 
   ```bash
-  docker build -f Dockerfile.pipeline_flow -t pipeline-flow:latest .
+  ./push_flow_image.sh                              # registry = IMAGE_REGISTRY of ../docker-compose.env
+  ./push_flow_image.sh --registry localhost:12357   # on the registry machine itself
   ```
 
-  - `docker CLI -f` — 빌드할 Dockerfile.
-  - `docker CLI -t` — image tag. 이미지에 붙이는 이름:태그 표식이며 (`pipeline-flow:latest`), deployment·base job template 이 이 이름으로 컨테이너를 띄웁니다.
-  - `docker CLI .` — build context. 빌드 시 Docker 데몬에 보내는 파일 루트로 (`.` 는 현재 폴더), `COPY` 소스가 이 안에서 해석됩니다.
+  - `--registry <host:port>` — image 를 올릴 registry 입니다. 생략하면 `../docker-compose.env` (없으면 `_example`) 의 `IMAGE_REGISTRY` 를 쓰고, 값이 비었거나 자리표시자면 build 전에 멈춥니다.
+  - `--platform <list>` — build 할 CPU architecture 입니다. 기본값 `linux/amd64,linux/arm64` 는 두 architecture 의 이미지를 한 tag 로 묶고, worker machine 은 run 마다 자기 architecture 의 것을 받습니다. Build 하는 machine 과 다른 architecture 는 emulation 으로 build 되어 훨씬 오래 걸립니다.
+  - `--tag <tag>` — image tag 입니다 (기본 `latest`). Base job template 의 기본값이 `pipeline-flow:latest` 이므로, 다른 tag 는 그 tag 를 지정한 deployment 에서만 쓰입니다.
+
+  script 는 build 전에 `requirements.txt` 와 `pipeline.py` 가 있는지 확인하고, 아래 `docker buildx build` 를 실행한 뒤, registry 의 tag 목록에 그 tag 가 올라갔는지 확인합니다.
+
+  ```bash
+  docker buildx build --platform <PLATFORM> -f Dockerfile.pipeline_flow -t <REGISTRY>/pipeline-flow:<TAG> --push .
+  ```
+
+  - `-f Dockerfile.pipeline_flow` — build 할 Dockerfile 입니다.
+  - `-t <REGISTRY>/pipeline-flow:<TAG>` — registry 주소가 든 image 이름입니다. `register_pool.sh` 가 base job template 의 `pipeline-flow:latest` 앞에 같은 `IMAGE_REGISTRY` 를 붙이므로, worker 는 이 이름으로 flow 컨테이너를 띄웁니다 ([§4 Work Pool Registration](#work-pool-registration)).
+  - `--push` — build 한 이미지를 그 registry 에 바로 올립니다.
+  - `.` — build context 입니다. `COPY` 소스가 이 안에서 해석되며, 같은 folder 의 `.dockerignore` 가 `requirements.txt` 와 `pipeline.py` 만 보냅니다.
+
+  > 두 architecture 를 한 번에 build 하려면 build 하는 machine 의 Docker 가 containerd image store 를 써야 합니다 (Docker Desktop: Settings > General > "Use containerd for pulling and storing images").
 
   **GPU** — 이 이미지로 GPU 를 쓰려면 `requirements.txt` 의 torch 를 CUDA 휠로 설치합니다 (CUDA 런타임이 휠에 번들되어 호스트 드라이버만 맞으면 동작). 더해 호스트에 NVIDIA 드라이버·nvidia-container-toolkit 을 두고, base job template 에서 GPU 를 요청합니다 ([§4 Work Pool Registration](#work-pool-registration)). 드라이버와 CUDA 버전이 안 맞으면 베이스 이미지를 `nvidia/cuda` 계열로 바꿉니다. GPU job 은 무거우므로 그 등급 worker 의 `--limit` 을 1–2 로 낮춰 동시 실행을 제한합니다.
 
@@ -1980,6 +1994,109 @@ if command -v curl >/dev/null 2>&1; then
     echo "Registry lists $IMAGE_NAME tags: $tags"
 else
     echo "push_worker_image.sh: WARNING: curl not found; the registry's tag list was not checked." >&2
+fi
+echo "pushed $REF"
+```
+
+## Appendix O. push_flow_image.sh
+
+build 하는 machine 에서 flow image 를 여러 CPU architecture 로 build 해 registry 에 올리는 script 입니다 ([§6.1](#61-image)).
+
+```bash
+#!/usr/bin/env bash
+# push_flow_image.sh — build the Pipeline Flow image (flow image) for several CPU architectures and push it.
+# __version__ = "0.0.0"  # Semantic Versioning:  Version = Major.Minor.Patch
+# Author: yRocket
+#
+# Builds Dockerfile.pipeline_flow as one multi-arch image <registry>/pipeline-flow:<tag> and pushes it, so every
+# worker machine (amd64 PC, arm64 Mac) pulls its own variant for each flow run. The registry defaults to
+# IMAGE_REGISTRY of ../docker-compose.env (else the _example), the same value register_pool.sh prefixes to the
+# pool templates' image.default (pipeline-flow:latest).
+#
+#   ./push_flow_image.sh                                    # registry = IMAGE_REGISTRY of ../docker-compose.env
+#   ./push_flow_image.sh --registry localhost:12357         # on the registry machine itself
+#   ./push_flow_image.sh --platform linux/arm64             # one architecture only
+#
+# A multi-arch build needs the containerd image store (Docker Desktop: Settings > General > "Use containerd for
+# pulling and storing images") or a docker-container buildx builder. The non-native variant builds under emulation
+# and compiles C libraries (TA-Lib), so it takes much longer than the native one. The final tag check reads the
+# HTTP API of a plain registry:2 container.
+#
+set -euo pipefail
+
+IMAGE_NAME="pipeline-flow"               # the bare name the pool templates' image.default holds
+REGISTRY=""                              # <host>:<port>; empty = IMAGE_REGISTRY of the env file
+PLATFORM="linux/amd64,linux/arm64"       # CPU architectures of the worker machines
+TAG="latest"
+
+usage() { echo "Usage: $0 [--registry <host:port>] [--platform <list>] [--tag <tag>]" >&2; }
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --registry|--platform|--tag)
+            # a missing value would make 'shift 2' fail silently under set -e
+            [ $# -ge 2 ] || { echo "$1 needs a value." >&2; usage; exit 1; }
+            case "$1" in
+                --registry) REGISTRY="$2" ;;
+                --platform) PLATFORM="$2" ;;
+                --tag)      TAG="$2" ;;
+            esac
+            shift 2 ;;
+        -h|--help) usage; exit 0 ;;
+        *) echo "Unknown option: $1" >&2; usage; exit 1 ;;
+    esac
+done
+
+cd "$(dirname "$0")"   # the Dockerfile, its COPY sources and ../docker-compose.env are relative to this folder
+for f in Dockerfile.pipeline_flow requirements.txt pipeline.py; do
+    [ -f "$f" ] || { echo "$f not found in $(pwd); the build copies it into the image." >&2; exit 1; }
+done
+
+if [ -z "$REGISTRY" ]; then
+    ENV_FILE="../docker-compose.env"
+    [ -f "$ENV_FILE" ] || ENV_FILE="../docker-compose.env_example"
+    [ -f "$ENV_FILE" ] || { echo "env file not found: $ENV_FILE" >&2; exit 1; }
+    REGISTRY="$(sed -n 's/^IMAGE_REGISTRY=//p' "$ENV_FILE" | tail -n 1 | tr -d '\r')"
+    REGISTRY_SOURCE="IMAGE_REGISTRY in $ENV_FILE"
+else
+    REGISTRY_SOURCE="--registry"
+fi
+if [ -z "$REGISTRY" ] || [[ "$REGISTRY" == *"<"* ]] || [[ "$REGISTRY" == */* ]]; then
+    echo "Registry missing, a placeholder or not <host>:<port> (got '$REGISTRY' from $REGISTRY_SOURCE)." >&2
+    echo "Set IMAGE_REGISTRY in ../docker-compose.env or pass --registry <host:port>." >&2
+    exit 1
+fi
+if [ -z "$PLATFORM" ] || [ -z "$TAG" ]; then
+    echo "--platform and --tag need non-empty values." >&2
+    exit 1
+fi
+if [ "$TAG" != "latest" ]; then
+    # register_pool.sh points the pools at pipeline-flow:latest; another tag is used only by a deployment that names it
+    echo "push_flow_image.sh: NOTE: pool templates use tag 'latest'; '$TAG' runs only where a deployment names it." >&2
+fi
+
+command -v docker >/dev/null 2>&1 || { echo "docker not found on PATH." >&2; exit 1; }
+docker buildx version >/dev/null 2>&1 || { echo "docker buildx is required (Docker Desktop ships it)." >&2; exit 1; }
+
+REF="$REGISTRY/$IMAGE_NAME:$TAG"
+echo "Building $REF for $PLATFORM"
+if ! docker buildx build --platform "$PLATFORM" -f Dockerfile.pipeline_flow -t "$REF" --push .; then
+    echo "push_flow_image.sh: ERROR: build or push of $REF failed." >&2
+    echo "  A multi-arch build needs the containerd image store or a docker-container builder;" >&2
+    echo "  an HTTP registry other than localhost needs 'insecure-registries' in this docker daemon." >&2
+    exit 1
+fi
+
+# Confirm the registry now lists the tag, so a push that went elsewhere does not pass as done.
+if command -v curl >/dev/null 2>&1; then
+    tags="$(curl -s -m 10 "http://$REGISTRY/v2/$IMAGE_NAME/tags/list" || true)"
+    if ! printf '%s' "$tags" | grep -q "\"$TAG\""; then
+        echo "push_flow_image.sh: ERROR: pushed $REF, but the registry does not list tag '$TAG' (got: '$tags')." >&2
+        exit 1
+    fi
+    echo "Registry lists $IMAGE_NAME tags: $tags"
+else
+    echo "push_flow_image.sh: WARNING: curl not found; the registry's tag list was not checked." >&2
 fi
 echo "pushed $REF"
 ```
