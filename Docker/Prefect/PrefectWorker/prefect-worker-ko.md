@@ -1,5 +1,5 @@
-# Prefect Worker
-Rev. 0 | Created: 2026-10-10 | Updated: 2026-10-10 09:28 CDT
+# MLOps Prefect Stack: Worker
+Rev. 1 | Created: 2026-10-10 | Updated: 2026-10-10 15:07 CDT
 
 - [1. Purpose](#1-purpose)
 - [2. Role](#2-role)
@@ -150,7 +150,7 @@ worker 는 **`docker` work pool** 을 polling 해 job 마다 `pipeline_flow` 컨
 
   worker 가 뜨는 **그 순간** server 에 자기를 알리며 (heartbeat 시작) 해당 work pool 에 **자동 등록**됩니다 — **polling 시작 = 등록** 이라 별도 절차가 없습니다. heartbeat 가 끊기면 잠시 뒤 **OFFLINE** 으로 바뀝니다 (worker 등록은 deployment 등록과 별개).
 
-  > **보안 주의** — 도커 소켓 마운트는 worker 에 호스트 도커 전체 제어권 (사실상 root) 을 줍니다. 신뢰된 내부망·스터디 용도로 한정하고, 더 강한 격리는 Kubernetes work pool 을 고려합니다 ([prefect-ko.md Appendix F](../prefect-ko.md#appendix-f-orchestrator-benchmarking)).
+  > **보안 주의** — 도커 소켓 마운트는 worker 에 호스트 도커 전체 제어권 (사실상 root) 을 줍니다. 신뢰된 내부망·스터디 용도로 한정하고, 더 강한 격리는 Kubernetes work pool 을 고려합니다 ([prefect-concepts-ko.md Appendix B](../prefect-concepts-ko.md#appendix-b-orchestrator-benchmarking)).
 
 ## 5. run_worker.sh
 
@@ -209,7 +209,7 @@ Table 1. Names by queue option
   prefect work-pool inspect high_performance
   ```
 
-  `inspect` 의 `status` 가 `READY` 면 그 pool 을 polling 하는 worker 가 1개 이상 떠 있다는 뜻입니다 — pool 단위 간접 확인입니다. **어느 worker 가 ONLINE 인지**·마지막 heartbeat 는 UI 의 Work Pools → 해당 pool → **Workers 탭** 에서 봅니다 ([prefect-ko.md §9](../prefect-ko.md#9-prefect-ui)).
+  `inspect` 의 `status` 가 `READY` 면 그 pool 을 polling 하는 worker 가 1개 이상 떠 있다는 뜻입니다 — pool 단위 간접 확인입니다. **어느 worker 가 ONLINE 인지**·마지막 heartbeat 는 UI 의 Work Pools → 해당 pool → **Workers 탭** 에서 봅니다 ([prefect-stack-ko.md §9](../prefect-stack-ko.md#9-prefect-ui)).
 
 ---
 

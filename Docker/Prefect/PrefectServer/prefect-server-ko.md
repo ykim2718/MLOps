@@ -1,5 +1,5 @@
-# Prefect Server
-Rev. 1 | Created: 2026-10-10 | Updated: 2026-10-10 13:31 CDT
+# MLOps Prefect Stack: Server
+Rev. 2 | Created: 2026-10-10 | Updated: 2026-10-10 15:07 CDT
 
 - [1. Purpose](#1-purpose)
 - [2. Server Setup](#2-server-setup)

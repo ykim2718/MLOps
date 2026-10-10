@@ -1,5 +1,5 @@
-# Prefect Flow
-Rev. 1 | Created: 2026-10-10 | Updated: 2026-10-10 13:32 CDT
+# MLOps Prefect Stack: Flow
+Rev. 2 | Created: 2026-10-10 | Updated: 2026-10-10 15:07 CDT
 
 - [1. Purpose](#1-purpose)
 - [2. Role](#2-role)
@@ -19,7 +19,7 @@ Rev. 1 | Created: 2026-10-10 | Updated: 2026-10-10 13:32 CDT
 
 ## 2. Role
 
-Pipeline Flow 는 worker 가 job 마다 띄우는 per-flow 컨테이너입니다. worker 하나가 동시 job 수만큼 **여러 개 (n 개)** 를 띄우며 (상한 `--limit`, 현재 8), 각 컨테이너는 독립입니다. 세 가지를 다룹니다 — 컨테이너가 쓰는 **이미지** ([§3](#3-image)), 그 이미지로 무엇을 실행할지 server 에 등록하는 **deployment** ([§4](#4-deployment)), 컨테이너 안에서 generic flow orchestrator 역할을 하는 `pipeline.py` ([§5](#5-pipelinepy)). worker 자신은 flow 를 실행하지 않으므로 flow 는 **별도 이미지** 를 쓰며 ([prefect-worker-ko.md §3](../PrefectWorker/prefect-worker-ko.md#3-image)), 팀 라이브러리는 이 flow image 에만 둡니다. 실행이 server UI 에 어떻게 보이는지는 [prefect-ko.md §9](../prefect-ko.md#9-prefect-ui) 입니다.
+Pipeline Flow 는 worker 가 job 마다 띄우는 per-flow 컨테이너입니다. worker 하나가 동시 job 수만큼 **여러 개 (n 개)** 를 띄우며 (상한 `--limit`, 현재 8), 각 컨테이너는 독립입니다. 세 가지를 다룹니다 — 컨테이너가 쓰는 **이미지** ([§3](#3-image)), 그 이미지로 무엇을 실행할지 server 에 등록하는 **deployment** ([§4](#4-deployment)), 컨테이너 안에서 generic flow orchestrator 역할을 하는 `pipeline.py` ([§5](#5-pipelinepy)). worker 자신은 flow 를 실행하지 않으므로 flow 는 **별도 이미지** 를 쓰며 ([prefect-worker-ko.md §3](../PrefectWorker/prefect-worker-ko.md#3-image)), 팀 라이브러리는 이 flow image 에만 둡니다. 실행이 server UI 에 어떻게 보이는지는 [prefect-stack-ko.md §9](../prefect-stack-ko.md#9-prefect-ui) 입니다.
 
 ## 3. Image
 
@@ -297,12 +297,12 @@ Pipeline Flow 는 worker 가 job 마다 띄우는 per-flow 컨테이너입니다
 
   - **자유로운 코드** — `payload` 로 팀원이 자기 스크립트를 지정하므로 코드를 정해진 틀에 맞출 필요가 없습니다. 입력은 CLI 인자 (`--submitter`·`--data-folder`) 로 받으므로, 팀원 스크립트는 `argparse` 로 그 값만 읽으면 됩니다. (payload 는 이미 체크아웃된 `script/` 안에서 돌므로 git 정보는 넘기지 않고, MLflow 서버 주소만 Variable `mlflow_tracking_uri` 를 `MLFLOW_TRACKING_URI` 환경변수로 넘깁니다.)
   - **데이터 이력** — `minio_bucket`·`minio_key` 가 **flow 파라미터** 라서 Prefect 가 run 마다 입력값을 `prefect` DB 에 자동 저장합니다 (어느 버킷·객체를 썼는지 lineage 로 남습니다).
-  - **crash 확인** — payload 가 0 이 아닌 코드로 끝나면 `run_payload` 이 `RuntimeError` 를 raise 해 **pipeline run 이 `Failed` 로 표시됩니다**. payload 가 도는 동안 그 출력은 한 줄씩 pipeline run 의 **Logs** 로 스트리밍되고, 실패하면 마지막 출력 (stdout·stderr, traceback 포함) 이 예외 메시지에도 함께 담깁니다. payload 가 `@flow` 로 감싸여 자기 `my_flow` run 을 만든 경우엔 그 run 도 **Failed** 로 남아 [prefect-ko.md §9](../prefect-ko.md#9-prefect-ui) 에서 **어느 단계** 가 깨졌는지 함께 보입니다. 반면 payload 가 **`@flow` 에 진입하기 전에** 죽으면 (import error·`__main__` 예외·잘못된 CLI 인자) payload flow run 자체가 만들어지지 않으므로, dashboard 의 **Runs** 에는 payload flow error 가 **안 보이고 pipeline flow error 만** 보입니다 — 이때 crash 원인은 pipeline run 의 Logs·예외 메시지에서 확인합니다. git·MinIO 등 orchestrator **자신의** 오류도 그대로 raise 되어 pipeline run 이 **Failed** 로 표시됩니다.
-  - **이력 자동 저장** — `@flow` 진입 시 Prefect 가 run 의 상태·로그·파라미터를 자동 기록합니다. 지표·모델은 팀원 코드가 MLflow 로 로깅하면 함께 남습니다 — pipeline.py 가 Variable `mlflow_tracking_uri` 를 `MLFLOW_TRACKING_URI` env 로 넘기므로 payload 는 그 tracking 서버로 로깅합니다 (없으면 로컬 `./mlruns` 로 빠지니 `mlflow_tracking_uri` Variable 을 등록해야 대시보드에 뜹니다). 마찬가지로 블록의 `postgresql_optuna` 비밀 + Variable `postgresql_host_port` 로 DSN 을 조립해 `POSTGRESQL_OPTUNA_DSN` env 로 넘기므로, Optuna 를 쓰는 payload 는 공유 postgres study 에 연결합니다 ([prefect-ko.md Appendix G](../prefect-ko.md#appendix-g-prefect-task)).
+  - **crash 확인** — payload 가 0 이 아닌 코드로 끝나면 `run_payload` 이 `RuntimeError` 를 raise 해 **pipeline run 이 `Failed` 로 표시됩니다**. payload 가 도는 동안 그 출력은 한 줄씩 pipeline run 의 **Logs** 로 스트리밍되고, 실패하면 마지막 출력 (stdout·stderr, traceback 포함) 이 예외 메시지에도 함께 담깁니다. payload 가 `@flow` 로 감싸여 자기 `my_flow` run 을 만든 경우엔 그 run 도 **Failed** 로 남아 [prefect-stack-ko.md §9](../prefect-stack-ko.md#9-prefect-ui) 에서 **어느 단계** 가 깨졌는지 함께 보입니다. 반면 payload 가 **`@flow` 에 진입하기 전에** 죽으면 (import error·`__main__` 예외·잘못된 CLI 인자) payload flow run 자체가 만들어지지 않으므로, dashboard 의 **Runs** 에는 payload flow error 가 **안 보이고 pipeline flow error 만** 보입니다 — 이때 crash 원인은 pipeline run 의 Logs·예외 메시지에서 확인합니다. git·MinIO 등 orchestrator **자신의** 오류도 그대로 raise 되어 pipeline run 이 **Failed** 로 표시됩니다.
+  - **이력 자동 저장** — `@flow` 진입 시 Prefect 가 run 의 상태·로그·파라미터를 자동 기록합니다. 지표·모델은 팀원 코드가 MLflow 로 로깅하면 함께 남습니다 — pipeline.py 가 Variable `mlflow_tracking_uri` 를 `MLFLOW_TRACKING_URI` env 로 넘기므로 payload 는 그 tracking 서버로 로깅합니다 (없으면 로컬 `./mlruns` 로 빠지니 `mlflow_tracking_uri` Variable 을 등록해야 대시보드에 뜹니다). 마찬가지로 블록의 `postgresql_optuna` 비밀 + Variable `postgresql_host_port` 로 DSN 을 조립해 `POSTGRESQL_OPTUNA_DSN` env 로 넘기므로, Optuna 를 쓰는 payload 는 공유 postgres study 에 연결합니다 ([prefect-concepts-ko.md §6](../prefect-concepts-ko.md#6-prefect-task)).
 
   [§4](#4-deployment) 의 deployment 가 entrypoint 를 **`pipeline.py:pipeline`** 로 가리킵니다. 이 문자열은 server 의 deployment 레코드 (`prefect` DB) 에 저장되고, worker 가 띄운 컨테이너 안에서 Prefect 런타임이 이미지 작업 디렉터리 (`/work`, `Dockerfile.pipeline_flow` 가 `pipeline.py` 를 COPY 한 곳) 기준으로 `pipeline.py` 를 import 해 콜론 뒤 **`@flow` 함수 `pipeline`** 을 run 파라미터 (`git_repo`·`git_commit_hash`·`minio_key`·`minio_bucket`·`submitter`·`prefect_block`·`payload`) 와 함께 호출합니다. 그래서 deployment entrypoint 가 곧 이 `pipeline.py` 입니다.
 
-  `pipeline` 함수에 전달한 run 파라미터 **값** 은 **trigger 할 때** 지정합니다 — trigger 주체는 보통 **팀원** (또는 스케줄·automation) 입니다. 팀원이 자기 머신·CI 에서 CLI `prefect deployment run "pipeline/high_deployment" -p git_repo=… -p git_commit_hash=… -p minio_key=… -p submitter=… -p prefect_block=…` 을 실행하거나 (CLI 는 [prefect-ko.md Appendix B](../prefect-ko.md#appendix-b-prefect-cli)), server UI 의 Run 폼, 스케줄·automation, 또는 `run_deployment(name, parameters={…})` 로 ([prefect-ko.md §8.2](../prefect-ko.md#82-python-sdk)) trigger 합니다.
+  `pipeline` 함수에 전달한 run 파라미터 **값** 은 **trigger 할 때** 지정합니다 — trigger 주체는 보통 **팀원** (또는 스케줄·automation) 입니다. 팀원이 자기 머신·CI 에서 CLI `prefect deployment run "pipeline/high_deployment" -p git_repo=… -p git_commit_hash=… -p minio_key=… -p submitter=… -p prefect_block=…` 을 실행하거나 (CLI 는 [prefect-concepts-ko.md §5](../prefect-concepts-ko.md#5-prefect-cli)), server UI 의 Run 폼, 스케줄·automation, 또는 `run_deployment(name, parameters={…})` 로 ([prefect-concepts-ko.md §4.2](../prefect-concepts-ko.md#42-python-sdk)) trigger 합니다.
 
   `pipeline.py` 가 **`pipeline_flow` 컨테이너 안에서** run 마다 만드는 폴더 구조입니다 (끝나면 통째로 삭제 — 컨테이너 자체가 일시적이라 함께 사라집니다).
 
@@ -317,7 +317,7 @@ Pipeline Flow 는 worker 가 job 마다 띄우는 per-flow 컨테이너입니다
   ```
 
   - **팀원별 repo** — `git_repo` 가 **flow 파라미터** 라 deployment 마다 다른 repo 를 기본값으로 등록할 수 있습니다. 팀원은 각자 repo·커밋을 쓰고, run 마다 사설 `script/` 에 펼쳐져 서로 간섭하지 않습니다. Prefect 가 `git_repo`·`git_commit_hash` 을 run 파라미터로 자동 기록해 재현·lineage 가 남습니다.
-  - **데이터 준비** — `pipeline.py` 가 MinIO 에서 `minio_bucket`/`minio_key` 객체를 `data/` 로 미리 내려받고 `--data-folder` 로 경로를 넘깁니다. 접속 자격증명 (그 블록의 `minio` 섹션) 은 [prefect-ko.md §7](../prefect-ko.md#7-credentials) 의 Credential Blocks 로 받습니다. 팀원 코드는 자격증명·다운로드를 각자 짤 필요 없이 `--data-folder` 폴더의 파일을 읽기만 하면 됩니다 (`pipeline.py` 가 `boto3` 로 받으므로 flow image 에 `boto3` 가 있어야 합니다 — [§3](#3-image)).
+  - **데이터 준비** — `pipeline.py` 가 MinIO 에서 `minio_bucket`/`minio_key` 객체를 `data/` 로 미리 내려받고 `--data-folder` 로 경로를 넘깁니다. 접속 자격증명 (그 블록의 `minio` 섹션) 은 [prefect-stack-ko.md §7](../prefect-stack-ko.md#7-credentials) 의 Credential Blocks 로 받습니다. 팀원 코드는 자격증명·다운로드를 각자 짤 필요 없이 `--data-folder` 폴더의 파일을 읽기만 하면 됩니다 (`pipeline.py` 가 `boto3` 로 받으므로 flow image 에 `boto3` 가 있어야 합니다 — [§3](#3-image)).
 
 ---
 

@@ -1,5 +1,5 @@
-# Prefect Pipeline Orchestration on Docker
-Rev. 629 | Created: 2026-06-13 | Updated: 2026-10-10 13:31 CDT
+# MLOps Prefect Stack
+Rev. 630 | Created: 2026-06-13 | Updated: 2026-10-10 15:07 CDT
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
@@ -20,30 +20,16 @@ Rev. 629 | Created: 2026-06-13 | Updated: 2026-10-10 13:31 CDT
   - [7.1 docker-compose.env_example](#71-docker-composeenv_example)
   - [7.2 Credential Blocks](#72-credential-blocks)
 - [8. Job Triggering](#8-job-triggering)
-  - [8.1 Prefect CLI](#81-prefect-cli)
-  - [8.2 Python SDK](#82-python-sdk)
-  - [8.3 Serve Mode](#83-serve-mode)
 - [9. Prefect UI](#9-prefect-ui)
 - [Appendix A. Terminology](#appendix-a-terminology)
-- [Appendix B. Prefect CLI](#appendix-b-prefect-cli)
-- [Appendix C. Execution Architecture](#appendix-c-execution-architecture)
-- [Appendix D. backing_ports.sh](#appendix-d-backing_portssh)
-- [Appendix E. credentials.py](#appendix-e-credentialspy)
-- [Appendix F. Orchestrator Benchmarking](#appendix-f-orchestrator-benchmarking)
-  - [F.1 Prefect vs Dagster vs Airflow](#f1-prefect-vs-dagster-vs-airflow)
-  - [F.2 Execution Pattern Across Systems](#f2-execution-pattern-across-systems)
-  - [F.3 What a Pod Is](#f3-what-a-pod-is)
-  - [F.4 job · task · step Compared](#f4-job--task--step-compared)
-- [Appendix G. Prefect @task](#appendix-g-prefect-task)
-  - [G.1 Reproducing without @task](#g1-reproducing-without-task)
-  - [G.2 Why Use @task Then](#g2-why-use-task-then)
-  - [G.3 Summary](#g3-summary)
+- [Appendix B. backing_ports.sh](#appendix-b-backing_portssh)
+- [Appendix C. credentials.py](#appendix-c-credentialspy)
 
 ## 1. Purpose
 
 - **Problem Statement**: Prefect stack 을 server · worker · flow 세 구성요소로 나눠 docker 로 운영하므로, 구성요소마다 설정과 script 가 다른 folder 에 있어 전체 순서와 공통 설정을 한곳에서 보기 어렵습니다.
 - **Goal**: 실무자가 이 문서로 stack 의 전체 구성, 설치 순서, 공통 설정 (network · registry · credentials · job trigger) 을 파악하고, 구성요소 문서로 바로 이동할 수 있게 합니다.
-- **Non-Goal**: 구성요소별 설정과 script 의 세부는 각 구성요소 문서에 두고 여기서 다루지 않습니다. Backing service (PostgreSQL · MinIO · MLflow) 의 설치는 다루지 않습니다.
+- **Non-Goal**: 구성요소별 설정과 script 의 세부는 각 구성요소 문서에, Prefect 의 일반 개념 (실행 구조 · trigger · CLI · `@task`) 은 [prefect-concepts-ko.md](prefect-concepts-ko.md) 에 두고 여기서 다루지 않습니다. Backing service (PostgreSQL · MinIO · MLflow) 의 설치는 다루지 않습니다.
 
 ## 2. Summary
 
@@ -56,16 +42,17 @@ Table 1. Documents of the stack
 | [prefect-server-ko.md](PrefectServer/prefect-server-ko.md)       | `PrefectServer/` | server 기동, work pool 등록, 서비스 주소 Variable              |
 | [prefect-worker-ko.md](PrefectWorker/prefect-worker-ko.md)       | `PrefectWorker/` | worker image push, `run_worker.sh`, scaling                    |
 | [prefect-flow-ko.md](PrefectFlow/prefect-flow-ko.md)             | `PrefectFlow/`   | flow image push, deployment 등록, `pipeline.py`                |
+| [prefect-concepts-ko.md](prefect-concepts-ko.md)                 | `./`             | Prefect 실행 구조, trigger, CLI, `@task`                       |
 | [prefect-registry-ko.md](prefect-registry-ko.md)                 | `./`             | docker registry 와 pull policy                                 |
 | [prefect-work-queue-ko.md](prefect-work-queue-ko.md)             | `./`             | work queue, priority, 전용 worker                              |
 | [prefect-secret-ko.md](prefect-secret-ko.md)                     | `./`             | Prefect Secret block                                           |
-| [troubleshooting-ko.md](troubleshooting-ko.md)                   | `./`             | 증상별 원인과 해결                                             |
+| [prefect-stack-troubleshooting-ko.md](prefect-stack-troubleshooting-ko.md) | `./`             | 증상별 원인과 해결                                             |
 
 ## 3. Architecture
 
 Prefect stack 을 한 호스트에서 **세 구성요소 (Prefect Server · Prefect Worker · Pipeline Flow)** 로 나눠 도커로 실행합니다. Prefect stack 의 backing service 는 PostgreSQL · MinIO · MLflow 가 있습니다. **AI/ML flow 의 실행은 하나의 python docker 이미지** (`pipeline-flow:latest`) **로만 하고, 그 flow image 는 worker 이미지와 분리** 합니다. job 마다 그 이미지로 **일시적 컨테이너 (ephemeral)** 를 띄웠다 파괴하며, **여러 팀원이 동시에 다수 job 을 trigger** 하는 환경을 전제로 Prefect 의 **Docker work pool** 로 구현합니다.
 
-Prefect work pool 의 type 은 `process` · `docker` · `kubernetes` 가 있는데 ([Appendix C](#appendix-c-execution-architecture)), 이 스택은 **`docker`** 를 씁니다 — flow 를 worker 와 **분리된 별도 컨테이너** 에서 실행하기 위함입니다.
+Prefect work pool 의 type 은 `process` · `docker` · `kubernetes` 가 있는데 ([prefect-concepts-ko.md §3](prefect-concepts-ko.md#3-execution-architecture)), 이 스택은 **`docker`** 를 씁니다 — flow 를 worker 와 **분리된 별도 컨테이너** 에서 실행하기 위함입니다. 이 stack 이 Prefect 를 고른 까닭은 flow 를 평범한 python 으로 짜면서 run 마다 격리된 컨테이너로 동적으로 띄우는 구성이 자연스럽기 때문입니다.
 
 Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단일 진입점** 입니다. 단 **코드는 실행하지 않습니다** — 실행은 항상 Pipeline Flow 컨테이너 안에서 일어납니다.
 
@@ -255,7 +242,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
   4) **[Credentials](#7-credentials)** — 자격증명 블록 (admin · 블록마다 1회) · `Docker/Prefect/` 루트
 
      ```
-     credentials.py                    Credentials block class + JSON register CLI (Appendix E)
+     credentials.py                    Credentials block class + JSON register CLI (Appendix C)
      <name>.json                       credential JSON (e.g. yrocket.json)
      ```
 
@@ -281,7 +268,7 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
 
   방화벽 열기와 도달성 검증은 **서로 다른 호스트**의 일입니다 — 여는 것은 그 backing 호스트의 로컬 방화벽이라 거기서, 검증은 자기 자신이 아닌 **소비 호스트**에서 해야 실제 네트워크 도달성을 봅니다 (backing 호스트에서 자기 LAN IP 로의 접속은 loopback 이라 방화벽과 무관하게 늘 열린 것처럼 보입니다). 순서대로:
 
-  `backing_ports.sh` 에 action (`open` · `check`) 과 `-host`·`-port` 를 줘서 포트 하나씩 처리합니다. 코드는 [Appendix D](#appendix-d-backing_portssh).
+  `backing_ports.sh` 에 action (`open` · `check`) 과 `-host`·`-port` 를 줘서 포트 하나씩 처리합니다. 코드는 [Appendix B](#appendix-b-backing_portssh).
 
   **① backing 호스트에서 인바운드 열기** (`open`, 멱등) — 주소에서 뽑은 LAN subnet 으로 제한합니다.
 
@@ -405,7 +392,7 @@ Worker image 와 flow image 는 같은 docker registry 에서 받습니다. 두 
   └─ postgresql_optuna  : username, password, database
   ```
 
-  자격증명을 **JSON 파일** 로 적고 `credentials.py` 로 등록합니다 — 블록 이름은 Prefect 규칙상 **소문자·숫자·하이픈만** 가능하므로 `--block-name` 으로 소문자 이름을 지정합니다 (예: 파일 `yrocket.json` → 블록 이름 `yrocket`). `credentials.py` 코드는 [Appendix E](#appendix-e-credentialspy).
+  자격증명을 **JSON 파일** 로 적고 `credentials.py` 로 등록합니다 — 블록 이름은 Prefect 규칙상 **소문자·숫자·하이픈만** 가능하므로 `--block-name` 으로 소문자 이름을 지정합니다 (예: 파일 `yrocket.json` → 블록 이름 `yrocket`). `credentials.py` 코드는 [Appendix C](#appendix-c-credentialspy).
 
   `yrocket.json`:
 
@@ -452,65 +439,16 @@ Worker image 와 flow image 는 같은 docker registry 에서 받습니다. 두 
 
 ## 8. Job Triggering
 
-등록된 deployment 를 실제로 돌리는 (trigger) 방법은 여러 가지지만, 결국 모두 **server 의 Prefect API 에 "flow run 생성" 요청을 보내는 것**입니다 — 코드가 아니라 **deployment 이름 + 파라미터 값** 만 보냅니다. **trigger 인터페이스 (CLI·SDK) 는 실행 모드와 무관하게 같고**, 실제 실행 주체는 **실행 모드** 가 정합니다 — 이 스택의 **work pool mode** (server 가 run 을 work pool 에 얹고 worker 가 `pipeline_flow` 컨테이너를 띄워 그 안에서 `pipeline(**parameters)` 실행, [prefect-flow-ko.md §5](PrefectFlow/prefect-flow-ko.md#5-pipelinepy)) 와 단일 머신 대안인 **serve mode** ([§8.3](#83-serve-mode) · [Appendix C](#appendix-c-execution-architecture)) 입니다. 그래서 아래 §8.1·§8.2 는 두 모드 공통의 trigger 인터페이스이고, §8.3 이 serve mode 의 차이를 다룹니다.
+이 stack 의 deployment 는 `pipeline/high_deployment` 와 `pipeline/low_deployment` 이고, server 가 run 을 work pool 에 얹으면 worker 가 `pipeline_flow` 컨테이너를 띄워 그 안에서 `pipeline(**parameters)` 를 실행합니다 ([prefect-flow-ko.md §5](PrefectFlow/prefect-flow-ko.md#5-pipelinepy)). CLI · SDK · serve mode 로 trigger 하는 방법은 [prefect-concepts-ko.md §4](prefect-concepts-ko.md#4-job-triggering) 를 따릅니다.
 
-> ⚠️ `pipeline(...)` 함수를 파이썬에서 직접 호출하는 것은 trigger 가 **아닙니다** — server·work pool 을 거치지 않고 그 자리에서 로컬 실행되어 컨테이너 격리·lineage 가 없습니다. 아래 [§8.2](#82-python-sdk) 는 반드시 `run_deployment` 를 말합니다.
+```bash
+prefect deployment run "pipeline/high_deployment" \
+  -p git_repo=https://github.com/team/repo.git -p git_commit_hash=a1b2c3d \
+  -p minio_key="SYDNEY/Bennelong Point" -p submitter=alice -p prefect_block=yrocket
+```
 
-| Aspect | Prefect CLI | Python SDK |
-|--------|-------------|------------|
-| 호출 | `prefect deployment run "<flow>/<deployment>"` | `run_deployment(name=…)` |
-| 파라미터 | `-p key=value` (문자열) | `parameters={…}` (파이썬 타입) |
-| 반환 | run id 출력 후 종료 | `FlowRun` 객체 |
-| 완료 대기 | 기본 안 함 (`--watch` 로 따라감) | 기본 대기 (`timeout=0` 이면 즉시) |
-| 주 용도 | 수동·셸·CI 스텝 | 코드 내 자동 trigger·chaining |
-
-### 8.1 Prefect CLI
-
-  사람이 셸에서, 또는 CI 의 한 스텝으로 직접 trigger 합니다. 필요한 것은 그 셸의 `prefect` CLI 와 `PREFECT_API_URL` 설정뿐입니다.
-
-  ```bash
-  prefect deployment run "pipeline/high_deployment" \
-    -p git_repo=https://github.com/team/repo.git -p git_commit_hash=a1b2c3d \
-    -p minio_key="SYDNEY/Bennelong Point" -p submitter=alice -p prefect_block=yrocket
-  ```
-
-  - **파라미터** — `-p key=value` 로 하나씩 **문자열** 로 줍니다. server 가 `pipeline` 시그니처 스키마로 타입을 변환·검증합니다.
-  - **반환·제어** — run 을 만들고 **id 만 출력한 뒤 바로 끝납니다** (완료를 기다리지 않음). 진행을 따라가려면 `--watch` 를 붙입니다.
-  - **주 용도** — 사람이 수동으로 한 번, 셸 스크립트, CI/CD 의 한 스텝, 빠른 테스트입니다 (CLI 목록은 [Appendix B](#appendix-b-prefect-cli)).
-
-### 8.2 Python SDK
-
-  다른 파이썬 코드 (앱·서비스·또 다른 flow) 가 프로그램적으로 trigger 합니다.
-
-  ```python
-  from prefect.deployments import run_deployment
-
-  flow_run = run_deployment(                                                   # ask the server to create a flow run
-      name="pipeline/high_deployment",                                      # deployment name
-      parameters={"git_repo": "https://github.com/team/repo.git",
-                  "git_commit_hash": "a1b2c3d", "minio_key": "SYDNEY/Bennelong Point",
-                  "submitter": "alice", "prefect_block": "yrocket"},
-  )
-  print(flow_run.id, flow_run.state)                                          # FlowRun object — id and final state
-  ```
-
-  - **파라미터** — `parameters={…}` dict 로, **네이티브 파이썬 타입** (int·bool·list 등) 을 그대로 넘깁니다.
-  - **반환·제어** — `FlowRun` **객체** 를 돌려주고, 기본값은 run 이 **끝날 때까지 대기 (poll)** 합니다 (`timeout` 으로 제어, `timeout=0` 이면 즉시 반환). 그래서 상태·결과를 코드로 받아 다음 분기에 씁니다.
-  - **주 용도** — flow 안에서 다른 run 을 **자동 trigger** (fan-out·orchestration), 조건부 실행, run 객체를 받아 상태 검사·후속 chaining (A 끝나면 B) 입니다.
-
-### 8.3 Serve Mode
-
-  work pool·worker·이미지 빌드 없이 `pipeline.serve(name=…)` **한 프로세스가 deployment 등록과 실행을 겸하는** 단일 머신·소규모 대안입니다 (`serve()` 는 `@flow` 객체의 메서드라, flow 이름이 `pipeline` 이면 `pipeline.serve(...)` 입니다 — [Appendix C](#appendix-c-execution-architecture)).
-
-  ```python
-  # serve mode — one process registers the deployment AND runs it (no work pool / worker).
-  from my_flow import pipeline                 # the @flow object
-  pipeline.serve(name="serve")    # long-lived; Ctrl-C to stop
-  ```
-
-  - **등록+실행** — `pipeline.serve(...)` 한 줄이 deployment 등록과 실행 프로세스를 겸합니다 (`prefect deploy`·worker·이미지 빌드 불필요).
-  - **trigger** — serve 프로세스는 상시 떠 있으므로 **별도 터미널에서** trigger 하며, 방법은 **§8.1·§8.2 와 똑같습니다** (`prefect deployment run "pipeline/serve"` · `run_deployment(...)`). served 프로세스가 그 run 을 자기 안에서 실행합니다.
-  - **차이·적합** — run 마다 컨테이너 격리가 없고, 그 프로세스가 떠 있어야 run 이 돕니다. 다수 팀원·동시 실행·격리가 필요하면 work pool (이 스택) 입니다 ([Appendix C](#appendix-c-execution-architecture)).
+- server 가 `pipeline` 시그니처 스키마로 `-p` 값의 타입을 변환·검증합니다.
+- `pipeline(...)` 함수를 Python 에서 직접 부르면 work pool 을 거치지 않고 부른 process 안에서 바로 실행되므로, 컨테이너 격리가 없고 deployment 와도 이어지지 않습니다.
 
 ## 9. Prefect UI
 
@@ -518,7 +456,7 @@ server 대시보드 (`http://<Host IP>:4200`) 에서 deployment·run·task 가 �
 
 - **Deployments** — `<flow_name>/<deployment_name>` 로 나열됩니다 (예: `pipeline/high_deployment`·`pipeline/low_deployment`). flow 이름은 `@flow(name="pipeline")`, deployment 이름은 yaml 의 `name` 입니다.
 - **Flow Runs** — trigger 된 run 이 `flow_run_name` 으로 나열됩니다. `submitter` 가 들어가 같은 deployment 아래에서 `alice@a1b2c3d` 처럼 **누구의 run 인지** 구분됩니다 ([prefect-flow-ko.md §5](PrefectFlow/prefect-flow-ko.md#5-pipelinepy) 의 `flow_run_name`). `pipeline.py` 는 payload 에 실행자 이름 (`submitter`) 만 넘기고 git 정보는 넘기지 않으므로, 팀 payload 의 flow run 은 실행자 이름 (예: `alice`) 으로 나열됩니다 (orchestrator run 은 `alice@a1b2c3d`).
-- **Tasks** — 팀 payload 가 단계 (dp·fe·train·test) 를 **`@task`** 로 감싸고 `@flow` 로 묶으면, 컨테이너 env 의 `PREFECT_API_URL` 덕분에 그 subprocess 가 **자기 flow run 과 task** 를 보고해 단계가 보입니다 (orchestrator run 과 **별개 flow run**, subprocess 라 격리 유지 — [Appendix G](#appendix-g-prefect-task)).
+- **Tasks** — 팀 payload 가 단계 (dp·fe·train·test) 를 **`@task`** 로 감싸고 `@flow` 로 묶으면, 컨테이너 env 의 `PREFECT_API_URL` 덕분에 그 subprocess 가 **자기 flow run 과 task** 를 보고해 단계가 보입니다 (orchestrator run 과 **별개 flow run**, subprocess 라 격리 유지 — [prefect-concepts-ko.md §6](prefect-concepts-ko.md#6-prefect-task)).
 - **Parameters · State · Logs** — run 마다 입력 파라미터 (`git_repo`·`git_commit_hash`·`minio_key`·`submitter`)·상태·로그가 자동 기록되어 (UI 의 Flow Run → Parameters), 같은 파라미터로 재실행 (재현) 할 수 있습니다.
 
 job 하나가 trigger 되면 대시보드에 다음처럼 보입니다.
@@ -577,47 +515,7 @@ Flow Runs
 - **DSN** = Data Source Name — DB 접속에 필요한 정보 (드라이버·계정·호스트·포트·DB 이름) 를 한 줄로 엮은 접속 문자열입니다 (예: `postgresql://user:pass@host:5432/catalog`). 이 스택은 DSN 을 통째로 저장하지 않고 Credentials 블록 (이름은 임의의 소문자 id; 예 `yrocket`) 의 `postgresql_catalog`·`postgresql_optuna` 섹션 비밀 (`username`·`password`·`database`) 에 Variable `postgresql_host_port` (host:port) 를 더해 `catalog.py`·`pipeline.py` 가 이 문자열을 조립합니다.
 - **CPU / GPU** = Central / Graphics Processing Unit
 
-## Appendix B. Prefect CLI
-
-`prefect` CLI 는 Prefect SDK 와 함께 설치되는 명령행 도구 (`pip install prefect`) 입니다. 구성요소별로 묶었습니다.
-
-- **Server · Work Pool** ([prefect-server-ko.md](PrefectServer/prefect-server-ko.md))
-  - `prefect config set PREFECT_API_URL="http://<Host IP>:4200/api"` — client 가 바라볼 server 주소를 프로필에 1회 저장합니다.
-  - `prefect config view` — 현재 활성 프로필의 설정값 (`PREFECT_API_URL` 등) 을 출력합니다. CLI 가 지금 어느 server 를 향하는지 확인합니다.
-  - `prefect profile ls` — 프로필 목록을 출력합니다. 등록·조회가 어긋날 때 어떤 프로필 (어떤 `PREFECT_API_URL`) 이 활성이었는지 되짚습니다.
-  - `prefect server start --host 0.0.0.0` — Prefect server 를 기동합니다.
-  - `prefect work-pool create <name> --type docker --base-job-template <file> [--overwrite]` — `docker` work pool 을 server 에 등록합니다.
-  - `prefect work-pool ls [--output json]` — 등록된 work pool 을 표 (또는 JSON) 로 출력합니다 (이름·type·동시성 한도; JSON 은 `run_worker.sh` 의 pool 검증이 파싱).
-- **Worker** ([prefect-worker-ko.md](PrefectWorker/prefect-worker-ko.md))
-  - `prefect work-pool get-default-base-job-template --type docker` — 도커 worker 의 기본 base job template 을 출력합니다 ([prefect-server-ko.md §3](PrefectServer/prefect-server-ko.md#3-work-pool-registration)).
-  - `prefect worker start --pool <name> [--limit N]` — worker 를 기동해 그 pool 을 polling 하며 job 을 실행합니다 ([prefect-worker-ko.md §4](PrefectWorker/prefect-worker-ko.md#4-container)).
-  - `prefect work-pool set-concurrency-limit <pool> <N>` — pool 전체 동시 실행 상한을 설정합니다 ([prefect-server-ko.md §3 Work Pool Registration](PrefectServer/prefect-server-ko.md#3-work-pool-registration)).
-- **Pipeline Flow** ([prefect-flow-ko.md](PrefectFlow/prefect-flow-ko.md))
-  - `prefect deploy` (또는 `flow.deploy(...)`) — deployment 를 등록합니다 ([prefect-flow-ko.md §4](PrefectFlow/prefect-flow-ko.md#4-deployment)).
-  - `prefect deployment ls` — server 에 등록된 deployment 를 표 (이름·ID·Work Pool) 로 출력합니다. 등급별 `high`·`low` 가 각자 pool 로 올라갔는지 확인합니다 ([prefect-flow-ko.md §4](PrefectFlow/prefect-flow-ko.md#4-deployment)).
-  - `prefect deployment inspect "<flow>/<deployment>"` — deployment 하나의 상세 (entrypoint·work pool·parameters·job_variables 등) 를 출력합니다 (예: `prefect deployment inspect "pipeline/high_deployment"`). `pipeline` 시그니처가 바뀐 뒤 파라미터 스키마가 새로 반영됐는지 확인합니다 ([prefect-flow-ko.md §4](PrefectFlow/prefect-flow-ko.md#4-deployment)).
-  - `prefect deployment run "<flow>/<deployment>" -p <key>=<value>` — 등록된 deployment 를 파라미터와 함께 trigger 합니다 ([prefect-flow-ko.md §5](PrefectFlow/prefect-flow-ko.md#5-pipelinepy)).
-  - `prefect deployment delete "<flow>/<deployment>"` — 등록된 deployment 를 server 에서 삭제합니다 (예: `prefect deployment delete "pipeline/high_deployment"`). 시그니처를 바꿔 다시 올릴 때는 삭제 없이 `prefect deploy` 로 덮어써도 되며, 등급을 폐기할 때만 삭제합니다.
-- **Credentials** ([§7](#7-credentials))
-  - `prefect block ls` — server 에 등록된 블록 (`Credentials` 등) 을 표 (ID·Type·Name·Slug) 로 출력합니다. run-code 자격증명 (Credentials 블록, 예 `yrocket`) 이 등록됐는지 확인합니다 (§7). 블록은 **그 server 의 DB 에 저장** 되므로 server 마다 따로 등록해야 하며, 등록 시점의 `PREFECT_API_URL` 이 가리킨 server 에 들어갑니다.
-  - `prefect variable ls` — server 에 등록된 Variable 을 출력합니다. 자격증명을 Secret 블록 대신 Variable 로 넣었는지 확인합니다 (§7).
-
-## Appendix C. Execution Architecture
-
-Prefect 실행 모드는 **serve mode** 와 **work pool mode** 이고, 차이는 **누가 코드를 실행하느냐** 입니다. work pool 은 type (`process`·`docker`·`kubernetes`) 에 따라 실행 주체가 달라지며, 이 스택은 **`docker`** 를 씁니다.
-
-| Mode | Register | Code executor | Isolation | Best for |
-|------|----------|---------------|-----------|----------|
-| Serve Mode | `flow.serve()` | serve python | 단일 프로세스 | 단일 머신·단순 |
-| Work Pool (`process`) | `flow.deploy()`<br>`prefect work-pool create --type process` | worker 컨테이너의 subprocess | worker 와 같은 컨테이너 | 격리 불필요·경량 |
-| Work Pool (`docker`) | `flow.deploy()`<br>`prefect work-pool create --type docker` | flow 컨테이너 | run 마다 컨테이너 격리 | 다수 팀원·동시 실행 (이 문서가 채택) |
-| Work Pool (`kubernetes`) | `flow.deploy()`<br>`prefect work-pool create --type kubernetes` | flow pod | run 마다 pod 격리 | 클러스터·대규모 |
-
-- **공통 — 등록** — **server 는 코드를 실행하지 않습니다** (이름표만 보관).
-- **핵심 차이 — 실행 주체** — work pool type 이 실행 주체를 정합니다. `process` 는 worker 가 자기 컨테이너 안 subprocess 로, `docker` 는 job 마다 뜨는 flow 컨테이너가, `kubernetes` 는 job 마다 뜨는 pod 가 실행합니다. 그 실행 주체의 이미지에 라이브러리가 있어야 합니다.
-- **serve mode** — 단일 머신·소규모 구성에는 work pool 없이 `flow.serve()` 만 띄우는 serve mode 가 더 단순합니다.
-
-## Appendix D. backing_ports.sh
+## Appendix B. backing_ports.sh
 
 backing service 포트 하나를 대상으로, action 에 따라 **도달성 확인 (`check`)** 또는 **인바운드 방화벽 개방 (`open`)** 을 하는 스크립트입니다 ([§5.1 Reachability to backing service](#51-reachability-to-backing-service)). `open` 은 그 포트를 **serving 하는 호스트**에서 `sudo` 로 (ufw 규칙 추가), `check` 는 backing 호스트가 **아닌 소비 호스트**에서 실행합니다 — serving 호스트에서 자기 IP 로의 접속은 loopback 이라 방화벽과 무관하게 늘 열린 것처럼 보이기 때문입니다. `open` 은 멱등입니다.
 
@@ -661,7 +559,7 @@ else   # open
 fi
 ```
 
-## Appendix E. credentials.py
+## Appendix C. credentials.py
 
 자격증명 블록을 JSON 으로 등록하는 스크립트입니다 ([§7.2 Credential Blocks](#72-credential-blocks)). 블록 이름은 **CLI 인자 > JSON `name` 필드 > 파일명** 순으로 정해지며, Prefect 규칙상 **소문자·숫자·하이픈만** 허용됩니다 (임의의 소문자 식별자, 팀원 이름과 무관). `Credentials` 클래스도 여기서 정의하며 `catalog.py` 가 import 해 씁니다 (`pipeline.py` 는 이미지 자기완결이라 같은 클래스를 따로 inline 정의 — [prefect-flow-ko.md §5](PrefectFlow/prefect-flow-ko.md#5-pipelinepy)).
 
@@ -759,107 +657,3 @@ if __name__ == "__main__":
             print(f"[credentials] error: {e}", file=sys.stderr)
             sys.exit(1)
 ```
-
-## Appendix F. Orchestrator Benchmarking
-
-### F.1 Prefect vs Dagster vs Airflow
-
-  오케스트레이터를 고를 때 자주 견주는 세 python 도구입니다. 셋 다 데이터/ML 파이프라인을 스케줄·실행·관측하지만 지향이 다릅니다 — **Prefect** 는 순수 python·동적 흐름, **Dagster** 는 데이터 자산 (asset) 과 타입·테스트, **Airflow** 는 성숙한 스케줄러와 최대 생태계입니다. 이 스택이 **Prefect** 를 고른 까닭은 flow 를 평범한 python 으로 짜면서 run 마다 격리된 컨테이너로 동적으로 띄우는 구성이 자연스럽기 때문입니다 (docker work pool).
-
-  | Aspect | Prefect | Dagster | Airflow |
-  |--------|---------|---------|---------|
-  | Core abstraction | `@flow` · `@task` (명령형 python) | software-defined **asset** (데이터 자산 중심) | **DAG** (task 의존 그래프) |
-  | Programming model | 순수 python·동적, 런타임에 흐름 결정 | asset·graph 선언형, 타입·테스트 강조 | DAG 선언, 스케줄러 중심 |
-  | Dynamic workflows | native (런타임 분기·매핑 자유) | 지원 (제약 있음) | 약함 (정적 DAG 전제) |
-  | Scheduling | flow run · automation · event | schedule · sensor · asset 기반 | 강력한 cron 스케줄러 (원조) |
-  | Execution isolation | work pool: process · **docker** · k8s | run launcher: docker · k8s · celery | executor: Local · Celery · **Kubernetes** |
-  | UI / lineage | flow run · task · 파라미터 자동 기록 | 데이터 자산 계보 (lineage) 1급 | DAG/task 로그 · 성숙한 UI |
-  | Maturity / ecosystem | 신생 · 경량, 빠른 반복 | 신생, 데이터 플랫폼 지향 | 최고참 · 최대 생태계 |
-  | Best fit | 동적 ML/데이터 파이프라인, python 우선 | 데이터 자산 · 품질/테스트 중시 | 정형 배치 ETL · 대규모 스케줄 |
-
-### F.2 Execution Pattern Across Systems
-
-  "**가벼운 에이전트 (worker) 가 작업을 집어, 작업마다 격리된 일시적 실행 단위를 띄워 실행하고 정리**" 하는 패턴은 오케스트레이션의 업계 표준입니다. 이 스택의 `docker` work pool 은 그 표준의 **단일 호스트 변형** 이고, 규모가 커지면 실행 단위를 컨테이너 → **pod** 로 올린 Kubernetes 변형으로 확장됩니다.
-
-  | System | Worker (agent) | Execution unit | Scale |
-  |--------|--------------------|----------------|-------|
-  | **Prefect** (docker pool) | worker | run 마다 **컨테이너** | 단일 호스트·소–중 |
-  | **Prefect** (kubernetes pool) | worker | run 마다 **pod** | 클러스터·대 |
-  | **Airflow** (KubernetesExecutor) | scheduler/executor | task 마다 **pod** | 클러스터·대 |
-  | **Argo Workflows** | controller | step 마다 **pod** | 클러스터·대 |
-  | **GitHub Actions / GitLab CI** | runner | job 마다 **컨테이너** | CI/CD |
-  | **Kubernetes** (native Job) | controller | **pod** | 클러스터 |
-
-### F.3 What a Pod Is
-
-  - **pod** — Kubernetes 의 **최소 실행/배포 단위** 입니다. 컨테이너 하나 이상이 같은 네트워크·스토리지를 공유하며 한 덩어리로 스케줄됩니다. "작업 1개 → pod 1개" 가 격리 단위이며, 단일 호스트의 컨테이너 자리에 클러스터 규모에서 들어가는 것이 pod 입니다 (Kubernetes 의 실행 껍데기).
-
-### F.4 job · task · step Compared
-
-  이 세 단어는 동의어가 아니라 **서로 다른 단위 (granularity)** 입니다. 도구마다 이름이 달라 혼동되므로 공통 계층으로 정리합니다.
-
-  | Concept | Definition | Prefect | Airflow | Argo | GitHub Actions |
-  |---------|------------|---------|---------|------|----------------|
-  | **Workflow / Pipeline** | 전체 작업 그래프의 정의 | flow | DAG | Workflow | workflow |
-  | **Run** | 그 정의를 한 번 실행한 인스턴스 | flow run | DAG run | Workflow (instance) | run |
-  | **Task** | run 안의 한 작업 단위 (1 연산) | task | task | template | — |
-  | **Step** | job/task 안의 순서 있는 하위 동작 | — | — | step | step |
-  | **Job** | 제출되는 상위 작업 묶음 (실행 단위로 스케줄) | flow run ≈ job | — | — | job |
-
-  - **job** — 시스템에 제출되어 한 덩어리로 스케줄되는 상위 작업입니다 (GitHub Actions 의 job, Kubernetes 의 Job). Prefect 에서는 한 flow run 이 사실상 여기 해당합니다.
-  - **task** — run 안의 개별 작업 단위 (1 연산) 입니다 (`@task` 하나).
-  - **step** — job/task 안에서 순서대로 실행되는 하위 동작입니다 (Argo·CI 의 step).
-
-  > granularity 는 **Workflow → Run/Job → Task → Step** 순으로 좁아지고, 실행을 감싸는 껍데기는 **컨테이너 (단일 호스트) / pod (클러스터)** 입니다. 세 단어를 하나로 통일하기보다 이 계층 안에서 구분해 쓰는 것이 업계 표준에 맞습니다.
-
-## Appendix G. Prefect @task
-
-`@task` 를 쓰지 않아도 이력 관리와 재현 (reproducibility) 은 완전히 됩니다. Prefect 에서 실행 흐름을 묶는 핵심 단위는 `@task` 가 아니라 **`@flow`** 이기 때문입니다. `@flow` 데코레이터만 붙이면 그 안의 코드가 일반 함수든 클래스든 **실행 이력과 입력 파라미터가 Prefect Server 에 기록**됩니다.
-
-### G.1 Reproducing without @task
-
-  `@task` 없이 `@flow` 와 일반 함수만으로 과거 시점 (git 커밋 + MinIO 데이터 버전) 을 재현하는 구조입니다.
-
-  ```python
-  from prefect import flow
-  import boto3
-
-  # A plain Python function (not a Prefect @task).
-  def download_data(minio_key):
-      s3 = boto3.client("s3", endpoint_url="http://minio:9000")
-      s3.download_file("ml-data", minio_key, "local.csv")     # the data version lives in the key path
-
-  # A plain Python function (not a Prefect @task).
-  def train_and_evaluate():
-      accuracy = 0.95     # real training/validation logic (the git-checked-out code runs here)
-      return accuracy
-
-  # History and parameter tracking come from @flow, not @task.
-  @flow(name="mlops-reproduce-pipeline")
-  def reproduce_flow(git_commit_hash: str, minio_data_version: str):
-      download_data(f"dataset/{minio_data_version}/dataset.csv")     # version pinned via the key path
-      return train_and_evaluate()
-
-  if __name__ == "__main__":
-      # The arguments passed here are recorded in the Prefect server DB.
-      reproduce_flow(git_commit_hash="a1b2c3d", minio_data_version="v3_best")
-  ```
-
-  이렇게 해도 이력·재현이 되는 이유는 둘입니다.
-
-  - **파라미터 추적** — Prefect Server 가 `@flow` 진입 인자 (`git_commit_hash`·`minio_data_version`) 를 DB 에 기록합니다. UI 에서 그 기록을 보고 같은 파라미터로 재실행 (재현) 할 수 있습니다.
-  - **상태 관리** — flow 의 성공 (Completed) / 실패 (Failed) 와 로그가 기록되므로 이력 관리에 문제가 없습니다.
-
-### G.2 Why Use @task Then
-
-  `@task` 없이도 이력은 남지만, 쓰는 이유는 **실패 복구**와 **성능** 입니다.
-
-  | Capability | @flow only | @flow + @task (recommended) |
-  |------------|-----------|-----------------------------|
-  | Partial retry | 학습 중 에러 나면 데이터부터 다시 | 성공한 단계는 두고 실패한 단계만 재시도 |
-  | Step monitoring | flow 하나의 진행만 보임 | 단계별 (다운로드·학습) 시각화·시간 측정 |
-  | Caching | 매번 같은 데이터를 다시 다운로드 | 같은 입력이면 그 단계를 건너뜀 (cached) |
-
-### G.3 Summary
-
-  이력 관리와 과거 재현은 **`@flow` 에 파라미터 (git 커밋·MinIO 버전) 를 넘기는 것만으로 작동**합니다. 학습 소스가 클래스 덩어리라 `@task` 를 일일이 붙이기 번거롭다면, `@task` 를 생략하고 `@flow` 만 씌워도 MLOps 재현 목적에는 지장이 없습니다.
