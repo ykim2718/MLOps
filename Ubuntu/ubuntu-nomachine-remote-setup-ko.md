@@ -1,6 +1,6 @@
 # 우분투 원격 접속 서버 구축
 
-Rev. 21 | Created: 2026-07-14 | Updated: 2026-09-30 15:30 UTC
+Rev. 22 | Created: 2026-07-14 | Updated: 2026-10-10 19:17 UTC
 
 <table width="100%">
 <tr>
@@ -48,15 +48,49 @@ Rev. 21 | Created: 2026-07-14 | Updated: 2026-09-30 15:30 UTC
 
 ---
 
-## 2. Success Path — Steps in Order
+## 2. Boot USB Creation
 
-### 2.1 Ubuntu 26.04 LTS clean install (server, laptop)
-- 부팅 USB 제작: Rufus로 `ubuntu-26.04-desktop-amd64.iso` 기록
-  - 파티션 구성 GPT / 대상 시스템 UEFI / ISO 모드
+ISO 파일을 먼저 로컬 디스크에 받은 뒤, Windows 에서 Rufus 로 그 ISO 를 USB 에 기록한다.
+
+### 2.1 Preparation
+- 8GB 이상 USB 메모리 (기존 내용은 모두 지워짐)
+- ISO 파일: `ubuntu-26.04-desktop-amd64.iso` ([releases.ubuntu.com/26.04](https://releases.ubuntu.com/26.04/))
+  - 네트워크 드라이브가 아니라 로컬 디스크 (C: 등) 에 저장 (→ **[Appendix C](#appendix-c-bad-iso-read--source-drive-m-problem)**)
+  - 같은 페이지의 `SHA256SUMS` 로 파일 손상 여부 확인
+
+### 2.2 Rufus download
+- Windows 에 기본 포함되지 않으므로 공식 사이트 [rufus.ie](https://rufus.ie/ko/) 에서 받음 (이름이 비슷한 광고성 사이트 주의)
+- 64-bit Windows 표준판: [rufus-4.15.exe](https://github.com/pbatard/rufus/releases/download/v4.15/rufus-4.15.exe)
+  - 다른 판: portable `rufus-4.15p.exe`, 32-bit `rufus-4.15_x86.exe`, ARM `rufus-4.15_arm64.exe`
+- 설치 과정 없이 exe 를 더블클릭하면 바로 실행됨 (Windows 8 이상)
+- 보안 경고의 게시자가 **Akeo Consulting** 인지 확인 (공식 Rufus 의 디지털 서명)
+
+### 2.3 Rufus settings
+Table 1. Rufus settings
+
+| Item                       | Value                  | Note                                      |
+| :------------------------: | :--------------------: | :---------------------------------------: |
+| Device                     | 꽂은 USB               | 외장 하드를 고르지 않도록 용량으로 확인   |
+| Boot selection             | 받은 ISO 파일          | "선택" 버튼으로 지정                      |
+| Partition scheme           | GPT                    | BIOS 모드가 Legacy 인 오래된 PC 는 MBR    |
+| Target system              | UEFI (CSM 없음)        | GPT 를 고르면 자동 설정                   |
+| File system                | FAT32                  | ISO 선택 시 자동 설정, NTFS·FAT 선택 금지 |
+| Volume label, Cluster size | 기본값                 | 변경 불필요                               |
+| Write mode                 | ISO 이미지 모드 (권장) | 시작 후 나오는 창에서 선택                |
+
+- BIOS 모드 확인: `Win + R` → `msinfo32` → 시스템 요약의 **BIOS 모드** 가 UEFI 이면 GPT, 레거시 (Legacy) 이면 MBR
+- 시작 → USB 데이터 삭제 경고에 확인 → 상태가 "준비" 로 바뀌면 완료
+- Rufus 가 USB 를 "다중 파티션" 으로 표시하며 기록이 실패하면 → **[Appendix B](#appendix-b-rufus-multiple-partitions-usb-write-failure)** 참조
+
+---
+
+## 3. Success Path — Steps in Order
+
+### 3.1 Ubuntu 26.04 LTS clean install (server, laptop)
+- 부팅 USB 제작: → **[2. Boot USB Creation](#2-boot-usb-creation)** 참조
 - 설치: "Erase disk and install Ubuntu"로 기존 OS 완전 삭제
-- 부팅 USB 제작 및 ISO 관련 문제는 → **[Appendix B](#appendix-b-rufus-multiple-partitions-usb-write-failure)**, **[Appendix C](#appendix-c-bad-iso-read--source-drive-m-problem)** 참조
 
-### 2.2 Install NoMachine server (server, laptop)
+### 3.2 Install NoMachine server (server, laptop)
 - 패키지: `nomachine_9.8.2_1_amd64.deb` (DEB / amd64)
 - 설치:
   ```bash
@@ -72,7 +106,7 @@ Rev. 21 | Created: 2026-07-14 | Updated: 2026-09-30 15:30 UTC
 - RDP → NoMachine 전환 배경은 → **[Appendix D](#appendix-d-rdp-gnome-remote-desktop-limitations--display--keyboard-issues)** 참조
 - NoMachine 패키지 다운로드 및 형식(DEB/RPM) 문제는 → **[Appendix E](#appendix-e-nomachine-package-download-problems)** 참조
 
-### 2.3 Auto-login setup (server, laptop)
+### 3.3 Auto-login setup (server, laptop)
 - 파일 편집:
   ```bash
   sudo vi /etc/gdm3/custom.conf
@@ -86,7 +120,7 @@ Rev. 21 | Created: 2026-07-14 | Updated: 2026-09-30 15:30 UTC
 - 재부팅 시 비밀번호 입력 없이 바탕화면까지 자동 진입 → 원격 접속 가능한 상태 상시 유지
 - 이 설정이 필요했던 이유(헤드리스 접속 실패)는 → **[Appendix F](#appendix-f-logout-headless-connection-failure--worked-around-via-auto-login)** 참조
 
-### 2.4 Windows client connection (client, desktop)
+### 3.4 Windows client connection (client, desktop)
 - **NoMachine** 클라이언트 실행 (RDP 클라이언트 `mstsc` 아님)
 - 접속 정보:
   - Host: `<SERVER_IP>`
@@ -94,7 +128,7 @@ Rev. 21 | Created: 2026-07-14 | Updated: 2026-09-30 15:30 UTC
 - 결과: 화면 스케일링 정상, 키보드 정상 동작
 - RDP(mstsc)와의 혼동 문제는 → **[Appendix G](#appendix-g-client-connection-error--mstsc-rdp-vs-nomachine-confusion)** 참조
 
-### 2.5 Operating rules
+### 3.5 Operating rules
 - **재부팅(O)**: 자동 로그인으로 바탕화면 자동 진입 → 접속 정상
 - **로그아웃(X)**: GDM 로그인 화면으로 이동하며, 원격에서 키보드 입력 불가 (→ **[Appendix F](#appendix-f-logout-headless-connection-failure--worked-around-via-auto-login)**)
 - 원격에서 노트북을 껐다 켜거나 재부팅해도, 자동 로그인 덕분에 부팅만 되면 재접속 가능
@@ -105,10 +139,13 @@ Rev. 21 | Created: 2026-07-14 | Updated: 2026-09-30 15:30 UTC
 
 - **amd64**: 64-bit x86 CPU architecture 의 Debian/Ubuntu 표기. `x86_64` 와 같음.
 - **auto-login**: 부팅 시 비밀번호 입력 없이 지정 사용자로 로그인하는 GDM 설정.
+- **BIOS**: Basic Input/Output System. UEFI 이전의 PC firmware.
 - **CLI**: Command-line interface. terminal 에 입력하는 text 명령 방식.
+- **CSM**: Compatibility Support Module. UEFI 에서 BIOS 방식 부팅을 흉내 내는 기능.
 - **DEB**: Debian/Ubuntu 계열 package 형식 (`.deb`).
 - **diskpart**: Windows 의 disk·partition 관리 명령줄 도구.
 - **dpkg**: `.deb` package 를 설치·제거하는 저수준 도구.
+- **FAT32**: UEFI firmware 가 읽을 수 있는 file system. 부팅 USB 에 사용.
 - **FUSE**: Filesystem in Userspace. kernel 수정 없이 file system 을 mount 하는 방식.
 - **GDM**: GNOME Display Manager. 로그인 화면과 auto-login 담당.
 - **GNOME**: Ubuntu 기본 desktop 환경.
@@ -116,9 +153,11 @@ Rev. 21 | Created: 2026-07-14 | Updated: 2026-09-30 15:30 UTC
 - **headless**: 로그인된 화면 session 없이 운영하는 상태.
 - **ISO**: 광디스크 image file 형식. OS 설치 매체 배포에 사용.
 - **LAN**: Local area network. 같은 가정·사무실 내부 network.
+- **MBR**: Master Boot Record. BIOS system 의 partition table 형식.
 - **mount**: disk 나 공유 folder 를 directory 경로에 연결해 접근 가능하게 하는 것.
 - **mstsc**: Windows 원격 데스크톱 연결 client. RDP 사용.
 - **NoMachine**: NX protocol 기반 원격 데스크톱 software.
+- **NTFS**: Windows 기본 file system.
 - **NX protocol**: NoMachine 의 원격 화면 전송 protocol. 기본 port 4000.
 - **nxserver**: NoMachine server service.
 - **PAM**: Pluggable Authentication Modules. Linux 로그인 인증 framework.
