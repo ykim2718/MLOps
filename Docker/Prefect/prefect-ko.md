@@ -1,5 +1,5 @@
 # Prefect Pipeline Orchestration on Docker
-Rev. 625 | Created: 2026-06-13 | Updated: 2026-10-10 08:42 CDT
+Rev. 626 | Created: 2026-06-13 | Updated: 2026-10-10 08:44 CDT
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
@@ -99,8 +99,8 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
        ▼
   ══ DOCKER 2 ── PREFECT WORKER ════════════════════════════════════════
      dir    : PrefectWorker/
-     files  : Dockerfile.worker · docker-compose.worker.yml · run_worker.sh
-     run    : docker buildx build ... -t <IMAGE_REGISTRY>/prefect-worker:latest --push .   # build host, once
+     files  : Dockerfile.worker · docker-compose.worker.yml · run_worker.sh · push_worker_image.sh
+     run    : push_worker_image.sh                  # multi-arch build + push, on the build host, once
               run_worker.sh --work-pool <tier>  # compose pull + up -d, on every worker machine
      config → ../docker-compose.env + shell
               IMAGE_REGISTRY  = <host>:<port>              # registry of the worker image
@@ -110,11 +110,13 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
        ▼
   ══ DOCKER 3 ── PIPELINE FLOW ═════════════════════════════════════════════
      dir    : PipelineFlow/
-     files  : Dockerfile.pipeline_flow · requirements.txt · pipeline.py
+     files  : Dockerfile.pipeline_flow · requirements.txt · pipeline.py · push_flow_image.sh
               high_deployment.yml · low_deployment.yml
-     run    : docker build -f Dockerfile.pipeline_flow -t pipeline-flow:latest .   # in PipelineFlow/
+     run    : push_flow_image.sh                    # multi-arch build + push, on the build host
               prefect deploy --prefect-file <tier>_deployment.yml --name <tier>_deployment --no-prompt
-     config → deployment parameters ({high,low}-deployment.yml)
+     config → ../docker-compose.env
+              IMAGE_REGISTRY  = <host>:<port>              # registry of the flow image
+              deployment parameters ({high,low}-deployment.yml)
               git_repo · git_commit_hash · minio_key · minio_bucket · submitter · payload
        │
        └─ Credential blocks (admin, once)         # Credentials blocks on server; needed before first run
@@ -161,34 +163,36 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
      PrefectWorker/
      ├─ Dockerfile.worker          image recipe (python + prefect + prefect-docker)
      ├─ docker-compose.worker.yml  container definition (mounts docker.sock)
-     └─ run_worker.sh              start: compose pull + up
+     ├─ run_worker.sh              start: compose pull + up
+     └─ push_worker_image.sh       multi-arch build + push of the worker image
      ```
 
      Run (from `PrefectWorker/`):
 
      ```bash
      # on the build host, once per Dockerfile change
-     docker buildx build --platform linux/amd64,linux/arm64 -f Dockerfile.worker \
-         -t <IMAGE_REGISTRY>/prefect-worker:latest --push .
+     ./push_worker_image.sh
      # on every worker machine; pulls the image from IMAGE_REGISTRY
      ./run_worker.sh --work-pool high_performance --worker-limit 8
      ./run_worker.sh --work-pool low_performance --worker-limit 4
      ```
 
-  3) **[PIPELINE FLOW](#6-pipeline-flow-container)** — job 마다 떴다 사라지는 컨테이너 · 직접 빌드
+  3) **[PIPELINE FLOW](#6-pipeline-flow-container)** — job 마다 떴다 사라지는 컨테이너 · image 는 registry 에서 받음
 
      ```
      PipelineFlow/
      ├─ Dockerfile.pipeline_flow       flow image recipe (FROM python:3.11.15)
+     ├─ .dockerignore                  build context = requirements.txt + pipeline.py only
      ├─ requirements.txt               team libraries (torch · mlflow · optuna …)
      ├─ pipeline.py                    orchestrator (copied into the image)
+     ├─ push_flow_image.sh             multi-arch build + push of the flow image
      └─ {high,low}-deployment.yml    deployment definitions (admin registers once)
      ```
 
      Run (from `PipelineFlow/`):
 
      ```bash
-     docker build -f Dockerfile.pipeline_flow -t pipeline-flow:latest .   # build the image once
+     ./push_flow_image.sh   # on the build host, after a change to the Dockerfile, requirements.txt or pipeline.py
      prefect deploy --prefect-file high_deployment.yml --name high_deployment --no-prompt   # register a deployment (host shell, once; repeat for low_deployment)
      ```
 
