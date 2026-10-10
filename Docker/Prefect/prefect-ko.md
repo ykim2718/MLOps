@@ -1,5 +1,5 @@
 # Prefect Pipeline Orchestration on Docker
-Rev. 619 | Created: 2026-06-13 | Updated: 2026-10-09 23:36 CDT
+Rev. 620 | Created: 2026-06-13 | Updated: 2026-10-09 23:55 CDT
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
@@ -536,18 +536,28 @@ worker 는 **`docker` work pool** 을 polling 해 job 마다 `pipeline_flow` 컨
 
   #### Execution Command
 
-  build 하는 machine 의 `PrefectWorker/` 에서 1회 실행합니다. Dockerfile 을 바꿀 때마다 다시 실행합니다.
+  build 하는 machine 의 `PrefectWorker/` 에서 `push_worker_image.sh` 를 1회 실행합니다. Dockerfile 을 바꿀 때마다 다시 실행합니다 (코드는 [Appendix N](#appendix-n-push_worker_imagesh)).
 
   ```bash
-  docker buildx build --platform linux/amd64,linux/arm64 -f Dockerfile.worker \
-      -t <IMAGE_REGISTRY>/prefect-worker:latest --push .
+  ./push_worker_image.sh                              # registry = IMAGE_REGISTRY of ../docker-compose.env
+  ./push_worker_image.sh --registry localhost:12357   # on the registry machine itself
   ```
 
-  - `--platform linux/amd64,linux/arm64` — 두 CPU architecture 의 이미지를 한 tag 로 묶어 만듭니다. Worker machine 은 pull 할 때 자기 architecture 의 것을 받습니다.
+  - `--registry <host:port>` — image 를 올릴 registry 입니다. 생략하면 `../docker-compose.env` (없으면 `_example`) 의 `IMAGE_REGISTRY` 를 쓰고, 값이 비었거나 자리표시자면 build 전에 멈춥니다.
+  - `--platform <list>` — build 할 CPU architecture 입니다. 기본값 `linux/amd64,linux/arm64` 는 두 architecture 의 이미지를 한 tag 로 묶고, worker machine 은 pull 할 때 자기 architecture 의 것을 받습니다.
+  - `--tag <tag>` — image tag 입니다 (기본 `latest`). Worker compose 는 `latest` 를 받습니다.
+
+  script 는 아래 `docker buildx build` 를 실행한 뒤, registry 의 tag 목록에 그 tag 가 올라갔는지 확인합니다.
+
+  ```bash
+  docker buildx build --platform <PLATFORM> -f Dockerfile.worker -t <REGISTRY>/prefect-worker:<TAG> --push .
+  ```
+
   - `-f Dockerfile.worker` — build 할 Dockerfile 입니다.
-  - `-t <IMAGE_REGISTRY>/prefect-worker:latest` — registry 주소가 든 image 이름입니다. `<IMAGE_REGISTRY>` 는 `docker-compose.env` 의 `IMAGE_REGISTRY` 와 같은 `<host>:<port>` 입니다.
   - `--push` — build 한 이미지를 그 registry 에 바로 올립니다.
   - `.` — build context 입니다 (이 Dockerfile 은 `COPY` 가 없어 보낼 파일은 없지만 인자는 필요합니다).
+
+  > 두 architecture 를 한 번에 build 하려면 build 하는 machine 의 Docker 가 containerd image store 를 써야 합니다 (Docker Desktop: Settings > General > "Use containerd for pulling and storing images").
 
   > registry 를 띄우는 방법과 worker machine 의 `insecure-registries` 설정은 [prefect-registry-ko.md](prefect-registry-ko.md) 를 따릅니다.
 
@@ -1878,3 +1888,98 @@ data = Path("/datasets") / minio_key
 ### Summary
 
   이력 관리와 과거 재현은 **`@flow` 에 파라미터 (git 커밋·MinIO 버전) 를 넘기는 것만으로 작동**합니다. 학습 소스가 클래스 덩어리라 `@task` 를 일일이 붙이기 번거롭다면, `@task` 를 생략하고 `@flow` 만 씌워도 MLOps 재현 목적에는 지장이 없습니다.
+
+## Appendix N. push_worker_image.sh
+
+build 하는 machine 에서 worker image 를 여러 CPU architecture 로 build 해 registry 에 올리는 script 입니다 ([§5.1](#51-image)).
+
+```bash
+#!/usr/bin/env bash
+# push_worker_image.sh — build the Prefect worker image for several CPU architectures and push it to the registry.
+# __version__ = "0.0.0"  # Semantic Versioning:  Version = Major.Minor.Patch
+# Author: yRocket
+#
+# Builds Dockerfile.worker as one multi-arch image <registry>/prefect-worker:<tag> and pushes it, so every worker
+# machine (amd64 PC, arm64 Mac) pulls its own variant through run_worker.sh. The registry defaults to IMAGE_REGISTRY
+# of ../docker-compose.env (else the _example), the same value run_worker.sh pulls from.
+#
+#   ./push_worker_image.sh                                  # registry = IMAGE_REGISTRY of ../docker-compose.env
+#   ./push_worker_image.sh --registry localhost:12357       # on the registry machine itself
+#   ./push_worker_image.sh --platform linux/arm64           # one architecture only
+#
+# A multi-arch build needs the containerd image store (Docker Desktop: Settings > General > "Use containerd for
+# pulling and storing images") or a docker-container buildx builder. The final tag check reads the HTTP API of a
+# plain registry:2 container.
+#
+set -euo pipefail
+
+IMAGE_NAME="prefect-worker"              # the name docker-compose.worker.yml pulls
+REGISTRY=""                              # <host>:<port>; empty = IMAGE_REGISTRY of the env file
+PLATFORM="linux/amd64,linux/arm64"       # CPU architectures of the worker machines
+TAG="latest"
+
+usage() { echo "Usage: $0 [--registry <host:port>] [--platform <list>] [--tag <tag>]" >&2; }
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --registry|--platform|--tag)
+            # a missing value would make 'shift 2' fail silently under set -e
+            [ $# -ge 2 ] || { echo "$1 needs a value." >&2; usage; exit 1; }
+            case "$1" in
+                --registry) REGISTRY="$2" ;;
+                --platform) PLATFORM="$2" ;;
+                --tag)      TAG="$2" ;;
+            esac
+            shift 2 ;;
+        -h|--help) usage; exit 0 ;;
+        *) echo "Unknown option: $1" >&2; usage; exit 1 ;;
+    esac
+done
+
+cd "$(dirname "$0")"   # Dockerfile.worker and ../docker-compose.env are relative to this folder
+[ -f Dockerfile.worker ] || { echo "Dockerfile.worker not found in $(pwd)." >&2; exit 1; }
+
+if [ -z "$REGISTRY" ]; then
+    ENV_FILE="../docker-compose.env"
+    [ -f "$ENV_FILE" ] || ENV_FILE="../docker-compose.env_example"
+    [ -f "$ENV_FILE" ] || { echo "env file not found: $ENV_FILE" >&2; exit 1; }
+    REGISTRY="$(sed -n 's/^IMAGE_REGISTRY=//p' "$ENV_FILE" | tail -n 1 | tr -d '\r')"
+    REGISTRY_SOURCE="IMAGE_REGISTRY in $ENV_FILE"
+else
+    REGISTRY_SOURCE="--registry"
+fi
+if [ -z "$REGISTRY" ] || [[ "$REGISTRY" == *"<"* ]] || [[ "$REGISTRY" == */* ]]; then
+    echo "Registry missing, a placeholder or not <host>:<port> (got '$REGISTRY' from $REGISTRY_SOURCE)." >&2
+    echo "Set IMAGE_REGISTRY in ../docker-compose.env or pass --registry <host:port>." >&2
+    exit 1
+fi
+if [ -z "$PLATFORM" ] || [ -z "$TAG" ]; then
+    echo "--platform and --tag need non-empty values." >&2
+    exit 1
+fi
+
+command -v docker >/dev/null 2>&1 || { echo "docker not found on PATH." >&2; exit 1; }
+docker buildx version >/dev/null 2>&1 || { echo "docker buildx is required (Docker Desktop ships it)." >&2; exit 1; }
+
+REF="$REGISTRY/$IMAGE_NAME:$TAG"
+echo "Building $REF for $PLATFORM"
+if ! docker buildx build --platform "$PLATFORM" -f Dockerfile.worker -t "$REF" --push .; then
+    echo "push_worker_image.sh: ERROR: build or push of $REF failed." >&2
+    echo "  A multi-arch build needs the containerd image store or a docker-container builder;" >&2
+    echo "  an HTTP registry other than localhost needs 'insecure-registries' in this docker daemon." >&2
+    exit 1
+fi
+
+# Confirm the registry now lists the tag, so a push that went elsewhere does not pass as done.
+if command -v curl >/dev/null 2>&1; then
+    tags="$(curl -s -m 10 "http://$REGISTRY/v2/$IMAGE_NAME/tags/list" || true)"
+    if ! printf '%s' "$tags" | grep -q "\"$TAG\""; then
+        echo "push_worker_image.sh: ERROR: pushed $REF, but the registry does not list tag '$TAG' (got: '$tags')." >&2
+        exit 1
+    fi
+    echo "Registry lists $IMAGE_NAME tags: $tags"
+else
+    echo "push_worker_image.sh: WARNING: curl not found; the registry's tag list was not checked." >&2
+fi
+echo "pushed $REF"
+```
