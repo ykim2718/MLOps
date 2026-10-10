@@ -1,6 +1,6 @@
 # Prefect AI/ML Workflow Automation
 
-Rev. 122 | Created: 2026-06-11 | Updated: 2026-09-30 15:31 UTC
+Rev. 123 | Created: 2026-06-11 | Updated: 2026-10-10 09:52 CDT
 
 Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환경입니다. 이 문서는 **전체 워크플로우의 인덱스 (개요)** 이고, 도구별 상세는 컴포넌트 문서로 잇습니다.
 
@@ -265,7 +265,7 @@ Prefect 3 기반 AI 학습 파이프라인을 Docker 로 띄워 실행하는 환
   real example/ file (train_prepare.py … optuna.json). No real ML — every stage just
   records that it ran, while train_prepare also counts the files under --data-folder.
 
-  Run by pipeline.py (orchestrator, prefect-ko.md §4.3):
+  Run by pipeline.py (orchestrator, prefect-flow-ko.md §5):
       python my_flow.py --submitter <m> --data-folder <dir>
 
   Local debugging — run ephemerally with no Prefect server (MLflow tracking also skipped):
