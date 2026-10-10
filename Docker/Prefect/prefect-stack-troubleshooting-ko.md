@@ -1,13 +1,12 @@
 # MLOps Prefect Stack: Troubleshooting
-
-Rev. 28 | Created: 2026-06-28 | Updated: 2026-10-10 15:07 CDT
+Rev. 29 | Created: 2026-06-28 | Updated: 2026-10-10 16:25 CDT
 
 운영 중 마주친 문제를 증상·원인·진단·해결 순으로 모읍니다. 새 이슈는 H2 항목으로 덧붙입니다.
 
 ## Prefect server unreachable on :4200 — empty reply / RemoteProtocolError
 
 - **증상** — host 에서 `prefect work-pool ls` 가 `httpx.RemoteProtocolError: Server disconnected without sending a response` 로 죽습니다. raw 확인도 `curl http://127.0.0.1:4200/api/health` 가 `curl: (52) Empty reply from server` 를 돌려줍니다. 정작 server 컨테이너는 `docker ps` 에서 `Up` 이고 `0.0.0.0:4200->4200/tcp` 를 게시 중입니다.
-- **원인** — server 프로세스 자체는 정상입니다. Docker Desktop (WSL2) 의 host → 컨테이너 4200 publish (docker-proxy) 가 wedge 되어, 연결은 받지만 컨테이너로 넘기지 못해 빈 응답이 납니다. 컨테이너가 오래 떠 있는 동안 Docker Desktop 갱신·WSL2 재시작 등으로 매핑이 깨질 때 나타납니다.
+- **원인** — server 프로세스는 계속 돌고 있습니다. Docker Desktop (WSL2) 의 host → 컨테이너 4200 publish (docker-proxy) 가 wedge 되어, 연결은 받지만 컨테이너로 넘기지 못해 빈 응답이 납니다. 컨테이너가 오래 떠 있는 동안 Docker Desktop 갱신·WSL2 재시작 등으로 매핑이 깨질 때 나타납니다.
 - **진단** — 컨테이너 **안에서** API 를 직접 두드려 server 와 포트 포워딩을 가립니다.
 
   ```text
@@ -25,7 +24,7 @@ Rev. 28 | Created: 2026-06-28 | Updated: 2026-10-10 15:07 CDT
   docker compose -f docker-compose.server.yml up -d --force-recreate prefect_server
   # still empty? restart Docker Desktop (resets WSL2 / vpnkit networking), then re-check
   ```
-- **확인** — `curl http://127.0.0.1:4200/api/health` 가 `true`, 이어서 `prefect work-pool ls` 가 정상 출력됩니다.
+- **확인** — `curl http://127.0.0.1:4200/api/health` 가 `true`, 이어서 `prefect work-pool ls` 가 pool 목록을 출력합니다.
 
   ```text
                                         Work Pools
@@ -41,7 +40,7 @@ Rev. 28 | Created: 2026-06-28 | Updated: 2026-10-10 15:07 CDT
 ## Deployment shows "(not registered)" in healthcheck after a successful prefect deploy
 
 - **증상** — `prefect deploy` 가 `Deployment '...' successfully created` 로 끝났는데도 `./healthcheck.sh` 가 `deployment pipeline/<tier>_deployment (not registered - prefect deploy) [FAIL]` 를 냅니다.
-- **원인** — healthcheck 는 deployment 이름을 **pool 이름에서 유도**합니다 — `tier="${name%%_*}"`, `dep="pipeline/${tier}_deployment"`. 즉 pool `low_performance` 는 `low_deployment`, `high_performance` 는 `high_deployment` 를 기대합니다. `prefect deploy --name` 에 다른 이름 (예: `pipeline-low`·`pipeline-flow`) 을 주면 deployment 는 정상 생성되지만 규칙과 어긋나 healthcheck 가 못 찾습니다. 실패가 아니라 **이름 불일치**입니다.
+- **원인** — healthcheck 는 deployment 이름을 **pool 이름에서 유도**합니다 — `tier="${name%%_*}"`, `dep="pipeline/${tier}_deployment"`. 즉 pool `low_performance` 는 `low_deployment`, `high_performance` 는 `high_deployment` 를 기대합니다. `prefect deploy --name` 에 다른 이름 (예: `pipeline-low`·`pipeline-flow`) 을 주면 deployment 는 만들어지지만 규칙과 어긋나 healthcheck 가 못 찾습니다. 실패가 아니라 **이름 불일치**입니다.
 - **진단** — 실제 이름을 기대값과 견줍니다.
 
   ```bash
@@ -62,7 +61,7 @@ Rev. 28 | Created: 2026-06-28 | Updated: 2026-10-10 15:07 CDT
 ## Stale OFFLINE workers never pruned (old server yaml without worker_pruner sidecar)
 
 - **증상** — healthcheck 의 `workers (server records)` 줄에 `N offline(stale)` 이 하루가 지나도 사라지지 않고 계속 쌓입니다.
-- **원인** — Prefect server 는 죽은 worker 를 OFFLINE 으로 표시만 하고 지우지 않습니다. 청소는 server stack 의 `worker_pruner` 사이드카 (`prune_loop.sh`, 1시간 주기) 가 맡습니다. 예전 `docker-compose.server.yml` 로 띄운 stack 에는 이 사이드카가 없어 stale 이 영영 남습니다. server 결함이 아니라 **사이드카 부재**입니다.
+- **원인** — Prefect server 는 죽은 worker 를 OFFLINE 으로 표시만 하고 지우지 않습니다. 청소는 server stack 의 `worker_pruner` 사이드카 (`prune_loop.sh`, 1시간마다) 가 맡습니다. 예전 `docker-compose.server.yml` 로 띄운 stack 에는 이 사이드카가 없어 stale 이 영영 남습니다. server 결함이 아니라 **사이드카 부재**입니다.
 - **진단** — 사이드카 컨테이너 유무를 봅니다.
 
   ```bash
@@ -143,7 +142,7 @@ Rev. 28 | Created: 2026-06-28 | Updated: 2026-10-10 15:07 CDT
   ```bash
   sudo docker compose -f docker-compose.server.yml up -d --force-recreate prefect_server
   sudo docker compose -f docker-compose.server.yml ps            # STATUS 가 Up N minutes 로 유지
-  sudo docker logs --tail 15 prefect-server-prefect_server-1     # 정상 기동, TimeoutError 없음
+  sudo docker logs --tail 15 prefect-server-prefect_server-1     # a clean start, no TimeoutError
   ```
 
   STATUS 가 유지되고 `TimeoutError` 가 사라지면 `register_pool.sh` 도 바로 `Created work pool ...` 를 냅니다. 같은 원리로 다른 backing service (MinIO 9000 · MLflow 5000 · MongoDB 27017) 도 원격 호스트의 인바운드 방화벽이 열려야 LAN 에서 붙습니다 — 설치 시 [prefect-stack-ko.md §5](prefect-stack-ko.md#5-network) 의 포트 도달성 선검증으로 미리 걸러야 합니다.
@@ -171,7 +170,7 @@ Rev. 28 | Created: 2026-06-28 | Updated: 2026-10-10 15:07 CDT
 
 - **발생일자** — 2026-07-26
 - **증상** — OS rebooting 후 healthcheck 가 backing service 하나 (예: minio :9000) 만 `[FAIL]` 을 냅니다. 정작 그 container 는 `docker ps` 에서 `Up (healthy)` 이고, host 에서 published port 를 두드리면 refused 가 아니라 `curl: (56) Recv failure: Connection reset by peer` 로 끊깁니다. 같은 방식으로 게시된 다른 service (예: mlflow :5000) 는 멀쩡해 일부 port 만 비대칭으로 죽습니다.
-- **원인** — Docker Desktop 은 published port 를 kernel iptables DNAT 이 아니라 Windows 의 userspace forwarder (`com.docker.backend`) 가 host port → VM → container 로 proxy 합니다. OS rebooting 시 forwarder 초기화와 container auto-restart (`restart: unless-stopped`) 사이의 race 로, Windows 쪽 listener 는 다시 bind 되지만 그 뒤의 container endpoint 매핑 재등록이 실패해 stale 하게 남습니다. 매핑이 없는 forwarder 는 TCP accept 직후 보낼 곳이 없어 RST 를 돌려주므로 reset by peer 가 됩니다. container 자체와 VM 내부 bridge 는 무관하게 정상이라 container 간 통신은 살아 있고, race 결과가 container 마다 달라 일부 port 만 걸립니다.
+- **원인** — Docker Desktop 은 published port 를 kernel iptables DNAT 이 아니라 Windows 의 userspace forwarder (`com.docker.backend`) 가 host port → VM → container 로 proxy 합니다. OS rebooting 시 forwarder 초기화와 container auto-restart (`restart: unless-stopped`) 사이의 race 로, Windows 쪽 listener 는 다시 bind 되지만 그 뒤의 container endpoint 매핑 재등록이 실패해 stale 하게 남습니다. 매핑이 없는 forwarder 는 TCP accept 직후 보낼 곳이 없어 RST 를 돌려주므로 reset by peer 가 됩니다. container 자체와 VM 내부 bridge 는 영향을 받지 않아 container 간 통신은 살아 있고, race 결과가 container 마다 달라 일부 port 만 걸립니다.
 - **진단** — container 안 → container 간 → host 순으로 두드려 forward 만 가립니다.
 
   ```bash
@@ -186,7 +185,7 @@ Rev. 28 | Created: 2026-06-28 | Updated: 2026-10-10 15:07 CDT
   curl -sS -m 5 http://127.0.0.1:9000/minio/health/live -o /dev/null
   ```
 
-  (1)(2) 정상 + (3) reset → **stale port-forward 확정**입니다. reset 대신 다른 프로세스가 응답하면 port 점유 문제이니, Windows 에서 `Get-NetTCPConnection -LocalPort 9000 -State Listen` 의 소유 프로세스가 `com.docker.backend` 인지 확인합니다.
+  (1) 이 200, (2) 가 open 인데 (3) 만 reset 이면 **stale port-forward 확정**입니다. reset 대신 다른 프로세스가 응답하면 port 점유 문제이니, Windows 에서 `Get-NetTCPConnection -LocalPort 9000 -State Listen` 의 소유 프로세스가 `com.docker.backend` 인지 확인합니다.
 - **해결** — container 를 재시작해 forwarder 가 그 port 매핑을 teardown → 재등록하게 합니다.
 
   ```bash
