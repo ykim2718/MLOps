@@ -1,5 +1,5 @@
 # MLflow — Experiment Tracking & Model Registry
-Rev. 59 | Created: 2026-06-15 | Updated: 2026-10-11 01:25 CDT
+Rev. 60 | Created: 2026-06-15 | Updated: 2026-10-11 01:27 CDT
 
 MLflow 는 실험의 **파라미터·지표를 추적** 하고, 학습된 **모델을 레지스트리로 관리·배포·서빙** 하는 도구입니다. 이 스택에서는 저장소를 두 곳으로 나눠, 가벼운 메타데이터는 메타데이터 DB 에, 실제 산출물은 오브젝트 스토리지에 둡니다.
 
@@ -22,17 +22,17 @@ Table 1. Backend and artifact stores
 
   ```
   Tracking ───────────► Registering ────────► Deploying ────────► Serving
-  (run_id 생성)          (이름 + 버전)         (Production 승격)    (REST API)
+  (creates run_id)      (name + version)      (to Production)     (REST API)
 
-  run 안에서             best run 의 모델을    best 버전을          Production 모델을
-  params·metrics·        레지스트리에          운영 단계로          예측 요청을 받는
-  artifacts 로깅         v1, v2... 로 등록     승격                추론 API 로 구동
-     │                      │                    │                   │
-     ▼                      ▼                    ▼                   ▼
-  Backend:               Backend:             Backend:            Backend:
-   params, metrics        이름·버전            Stage=Production     버전 조회
-  Artifact: 산출물        (모델 파일은          —                   Artifact: 모델 파일 로드
-                          Artifact 에 유지)
+  log params,           register the best     promote the best    serve the Production
+  metrics and           run's model as        version to the      model as an
+  artifacts in a run    v1, v2, ...           production stage    inference API
+     │                     │                     │                   │
+     ▼                     ▼                     ▼                   ▼
+  Backend:              Backend:              Backend:            Backend:
+   params, metrics      name, version         Stage=Production    version lookup
+  Artifact: outputs     (model file stays     —                   Artifact: load model file
+                        in Artifact)
   ```
 
   <a id="fig-1"></a>
