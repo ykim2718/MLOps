@@ -1,6 +1,5 @@
 # PostgreSQL — Backend Metadata Store
-
-Rev. 54 | Created: 2026-06-15 | Updated: 2026-09-30 00:17 CDT
+Rev. 55 | Created: 2026-06-15 | Updated: 2026-10-11 01:25 CDT
 
 PostgreSQL 은 Prefect Automation Workflow stack의 **Backend Metadata Store** 역할을 합니다. 한 인스턴스 안에서 `prefect` · `mlflow` · `optuna` · `catalog` **4개의 논리 DB** 를 함께 운영하며, 각 도구가 자기 DB 에만 접속합니다 — **Prefect** (오케스트레이터) → `prefect`, **MLflow** (실험 추적·모델 레지스트리) → `mlflow`, **Optuna** (하이퍼파라미터 튜닝) → `optuna`, **Python** (데이터 catalog 접근 계층) → `catalog`. 실제 대용량 데이터·모델·아티팩트는 여기 두지 않고 오브젝트 스토리지에 보관하며, PostgreSQL 에는 **메타데이터 (상태·기록·catalog) 만** 저장합니다.
 
@@ -8,8 +7,10 @@ PostgreSQL 은 Prefect Automation Workflow stack의 **Backend Metadata Store** �
 
 각 논리 DB 의 용도는 다음과 같습니다.
 
+Table 1. Logical databases
+
 | Database | Tool | Purpose |
-|----------|------|---------|
+| :---: | :---: | :---: |
 | `prefect` | Prefect | Prefect server 가 deployment·flow run·work pool 등 오케스트레이션 메타데이터를 저장합니다. |
 | `mlflow` | MLflow | MLflow 가 실험·run·파라미터·메트릭·모델 레지스트리 메타데이터를 저장합니다. |
 | `optuna` | Optuna | Optuna 가 하이퍼파라미터 탐색의 study·trial 기록을 저장합니다. |
@@ -90,7 +91,7 @@ networks:
 - `configs.init_sql` 은 별도 SQL 파일 없이 init SQL 을 yml 안에 인라인한 것이며, 컨테이너 최초 기동 시 `/docker-entrypoint-initdb.d/` 에서 한 번 실행되어 4개 DB 를 만듭니다.
 - `healthcheck` 는 `pg_isready` 로 기동 완료를 확인하여, 이 DB 에 의존하는 서비스가 준비 상태를 기다릴 수 있게 합니다.
 - `networks: mlops` 는 같은 호스트의 다른 서비스가 `postgres` 서비스명으로 접속하도록 공유 외부 네트워크에 연결합니다.
-- `restart: unless-stopped` 는 컨테이너가 비정상 종료되어도 자동으로 다시 띄웁니다 (사용자가 직접 멈춘 경우는 제외합니다).
+- `restart: unless-stopped` 는 컨테이너가 exit code ≠ 0 으로 끝나도 자동으로 다시 띄웁니다 (사용자가 직접 멈춘 경우는 제외합니다).
 - `pgadmin` 은 DB 를 브라우저에서 보고 다루는 웹 UI (`dpage/pgadmin4`) 로, `5050:80` 으로 노출해 `http://localhost:5050` 으로 띄우고 같은 `mlops` 네트워크 안에서 `postgres` 서버에 붙습니다. 로그인 계정은 `PGADMIN_DEFAULT_EMAIL`·`PGADMIN_DEFAULT_PASSWORD` 로 주입하고, 등록한 server 연결 정보는 `pgadmin-data` 볼륨에 영속 저장합니다. `depends_on: postgres` 로 DB 다음에 띄웁니다.
 
 #### Execution Command
@@ -167,8 +168,10 @@ docker compose up -d
 
   브라우저에서 DB 를 보고 싶으면 함께 띄운 `pgadmin` 컨테이너로 접속합니다. `http://localhost:5050` 을 열고 `PGADMIN_DEFAULT_EMAIL`·`PGADMIN_DEFAULT_PASSWORD` 로 로그인한 뒤, **Add New Server** 에서 PostgreSQL 연결을 등록합니다.
 
+  Table 2. pgAdmin server connection
+
   | Field | Value |
-  |-------|-------|
+  | :---: | :---: |
   | Host name/address | `postgres` |
   | Port | `5432` |
   | Username | `POSTGRES_USER` 값 |
@@ -255,8 +258,10 @@ docker compose exec -it postgres psql -U <superuser> -d catalog
 
 본문 ([§4](#4-granular-database-access-control) 등) 에서 쓰는 SQL 명령을 정리합니다. 슈퍼유저로 접속해 실행하며, 스키마·테이블 권한은 **대상 DB 에 접속한 상태**에서 실행합니다.
 
+Table 3. SQL commands
+
 | Category | Command | Description |
-|----------|---------|-------------|
+| :---: | :---: | :---: |
 | Role | `CREATE ROLE <name> LOGIN PASSWORD '<pwd>';` | 로그인 가능한 사용자 (role) 를 만듭니다. |
 | Grant (connect) | `GRANT CONNECT ON DATABASE <db> TO <role>;` | 그 DB 에 접속을 허용합니다. |
 | Grant (schema) | `GRANT USAGE, CREATE ON SCHEMA public TO <role>;` | 스키마 사용 (+ `CREATE` 면 테이블 생성) 을 허용합니다. |

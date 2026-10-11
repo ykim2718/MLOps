@@ -1,5 +1,5 @@
 # MongoDB — Document Database
-Rev. 57 | Created: 2026-06-15 | Updated: 2026-09-26 09:51 CDT
+Rev. 58 | Created: 2026-06-15 | Updated: 2026-10-11 01:25 CDT
 
 MongoDB 는 이 스택에서 **document 데이터베이스**로 쓰입니다. [DB-Engines 랭킹](https://db-engines.com/en/ranking) 기준 **2026년 현재 관계형 (relational) DB 를 제외하면 가장 인기 있는 DB 엔진** 으로, 비관계형 (NoSQL) 계열에서 1위입니다. 데이터를 행·열의 테이블이 아니라 **document (JSON 형태의 BSON)** 로 저장하며, 한 인스턴스 안에서 `yControl` · `yImprove` 같은 여러 **논리 DB** 를 함께 운영합니다. 각 DB 는 **collection** (관계형 DB 의 테이블에 해당) 을 담고, collection 은 document 를 담습니다. PostgreSQL 과 달리 빈 DB·collection 을 미리 만들지 않고, **첫 쓰기 (insert) 시점에 자동 생성** 됩니다.
 
@@ -7,8 +7,10 @@ MongoDB 는 이 스택에서 **document 데이터베이스**로 쓰입니다. [D
 
 MongoDB 는 schema 가 고정되지 않은 애플리케이션 document 를 저장하는 데 쓰입니다. 이 스택이 쓰는 논리 DB 와 collection 예시는 다음과 같습니다 (collection 은 코드가 처음 쓸 때 생깁니다).
 
+Table 1. Logical databases and collections
+
 | Database | Collections |
-|----------|-------------|
+| :---: | :---: |
 | `yControl` | `heatbeat` · `schedule_board` · `schedule_log` · `project_log` · `watching_usa` |
 | `yImprove` | `heatbeat` · `macro_trend` · `micro_trend` · `real_time_news__ebest` |
 
@@ -105,8 +107,10 @@ PostgreSQL 의 init SQL 같은 **DB 생성 단계가 없습니다** — DB·coll
 
   `mongo-data` 는 named volume 이라 저장 위치를 Docker 가 정합니다. 실제 경로는 OS 마다 다릅니다.
 
-  | OS | 실제 저장 위치 |
-  |----|----------------|
+  Table 2. Volume location by OS
+
+  | OS | Location |
+  | :---: | :---: |
   | Linux | `/var/lib/docker/volumes/<Project Name>_mongo-data/_data` |
   | Windows 11 (Docker Desktop) | WSL2 VM 내부에 저장되어 `C:\` 경로로는 직접 보이지 않음 |
 
@@ -249,8 +253,10 @@ db.dropUser("analyst")                                                 // delete
 
 `mongosh` 로 DB·collection·document·사용자를 다룹니다. 이 문서에서 쓰는 주요 명령만 정리합니다.
 
+Table 3. mongosh commands
+
 | Category | Command | Description |
-|----------|---------|-------------|
+| :---: | :---: | :---: |
 | Connect | `mongosh "mongodb://<user>:<pwd>@<host>:27017/?authSource=admin"` | 인증과 함께 접속합니다. |
 | Connect | `docker compose exec mongo mongosh -u <user> -p <pwd>` | 컨테이너 안의 mongosh 로 접속합니다. |
 | Database | `show dbs` · `use <db>` · `db.dropDatabase()` | DB 목록·선택·삭제. |
@@ -270,8 +276,10 @@ db.dropUser("analyst")                                                 // delete
 
 기동한 MongoDB 가 정상인지 빠르게 확인하는 절차입니다. 확인 명령을 컨테이너 안에서 실행하는 방법은 두 가지이며, **대상을 가리키는 방식**이 다릅니다.
 
+Table 4. docker compose exec and docker exec
+
 | Aspect | `docker compose exec` | `docker exec` |
-|--------|-----------------------|---------------|
+| :---: | :---: | :---: |
 | Target | compose 의 **service 이름** (`mongo`) | 실제 **container 이름** (`mongodb-mongo-1`) |
 | Needs compose file | 예 — `-f` 로 파일을, 또는 해당 폴더에서 | 아니요 — container 만 있으면 어디서나 |
 | Scaling | `--scale` 로 늘린 replica 중 자동 선택 | container 를 직접 지정해야 함 |

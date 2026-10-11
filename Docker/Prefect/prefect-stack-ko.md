@@ -1,5 +1,5 @@
 # MLOps Prefect Stack
-Rev. 631 | Created: 2026-06-13 | Updated: 2026-10-11 01:18 CDT
+Rev. 632 | Created: 2026-06-13 | Updated: 2026-10-11 01:25 CDT
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
@@ -115,8 +115,9 @@ Table 3. Backing services and their endpoints
 | `mlflow` | `:5000` | 실험 추적 + 모델 레지스트리 · backend `postgres` · artifact `minio` |
 | `prefect_server` | `:4200` | Prefect server + 대시보드 (UI) · backend `postgres` |
 | `prefect_worker` | — | job polling · dispatch · reporting · cleanup |
+| `registry` | `:12357` | Worker image · flow image 저장소 (HTTP) · [§6](#6-docker-registry) |
 
-> `postgres`·`minio`·`mlflow` 는 각자 폴더의 compose 로 띄웁니다. 이 문서는 **Prefect server·worker 와 `pipeline_flow` 이미지** 에 집중합니다.
+> `postgres`·`minio`·`mlflow`·`registry` 는 각자 폴더의 compose 로 띄웁니다. 이 문서는 **Prefect server·worker 와 `pipeline_flow` 이미지** 에 집중합니다.
 
 ## 4. Installation
 

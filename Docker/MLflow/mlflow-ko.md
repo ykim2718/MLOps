@@ -1,6 +1,5 @@
 # MLflow — Experiment Tracking & Model Registry
-
-Rev. 58 | Created: 2026-06-15 | Updated: 2026-09-30 13:12 CDT
+Rev. 59 | Created: 2026-06-15 | Updated: 2026-10-11 01:25 CDT
 
 MLflow 는 실험의 **파라미터·지표를 추적** 하고, 학습된 **모델을 레지스트리로 관리·배포·서빙** 하는 도구입니다. 이 스택에서는 저장소를 두 곳으로 나눠, 가벼운 메타데이터는 메타데이터 DB 에, 실제 산출물은 오브젝트 스토리지에 둡니다.
 
@@ -8,8 +7,10 @@ MLflow 는 실험의 **파라미터·지표를 추적** 하고, 학습된 **모�
 
 MLflow 는 저장소를 backend 와 artifact 두 층으로 나눕니다.
 
+Table 1. Backend and artifact stores
+
 | Store | Location | Contents |
-|-------|------|-----------|
+| :---: | :---: | :---: |
 | **Backend store** | PostgreSQL `mlflow` DB | params · metrics · tags · run · model registry 메타데이터를 저장합니다. |
 | **Artifact store** | MinIO `s3://mlflow/...` | 모델·plot·파일 등 실제 산출물 (아티팩트) 을 저장합니다. |
 
@@ -34,13 +35,16 @@ MLflow 는 저장소를 backend 와 artifact 두 층으로 나눕니다.
                           Artifact 에 유지)
   ```
 
+  <a id="fig-1"></a>
+  Fig 1. MLflow process flow
+
   - 모든 단계의 **메타데이터 (run, params, metrics, name, version, stage) 는 Backend store (PostgreSQL)** 에, **실제 모델 파일·산출물은 Artifact store (MinIO)** 에 나눠 저장됩니다. Register 이후로도 모델 파일은 복사되지 않고 Artifact store 에 그대로 머물며, 레지스트리는 그 위치를 가리키는 메타데이터만 Backend store 에 추가합니다.
   - **Tracking → Registering** 순서가 강제됩니다. Registering 이 `runs:/<run_id>/model` 로 Tracking 에서 생긴 `run_id` 를 입력받기 때문입니다.
   - **Tracking** 까지는 모든 실험의 공통 단계이고, **Registering → Deploying → Serving** 은 그 중 best 모델을 배포·서빙할 때만 진행합니다.
 
 ## 2. Docker Setup
 
-MLflow 는 도커 컨테이너로 실행됩니다. backend 인 PostgreSQL (`mlflow` DB) 과 artifact 인 MinIO (`mlflow` 버킷) 가 **먼저 떠 있어야** 정상 동작하므로, 같은 호스트에서 그 둘을 띄운 뒤 실행합니다. 이 컨테이너는 공유 네트워크 `mlops` 에서 `postgres` · `minio` 를 서비스명으로 접속하므로, 띄우기 전에 그 네트워크가 있어야 합니다.
+MLflow 는 도커 컨테이너로 실행됩니다. backend 인 PostgreSQL (`mlflow` DB) 과 artifact 인 MinIO (`mlflow` 버킷) 가 **먼저 떠 있어야** 동작하므로, 같은 호스트에서 그 둘을 띄운 뒤 실행합니다. 이 컨테이너는 공유 네트워크 `mlops` 에서 `postgres` · `minio` 를 서비스명으로 접속하므로, 띄우기 전에 그 네트워크가 있어야 합니다.
 
 #### Yaml
 
@@ -129,7 +133,7 @@ with mlflow.start_run(run_name="train"):
 ```
 
 - `with mlflow.start_run(...)` 의 `__enter__()` 는 새 run 을 만들어 **활성 run 으로 지정하고 `run_id` 를 발급** 합니다. 그래서 블록 안의 `log_params` · `log_metric` · `log_artifacts` 는 인자로 run 을 넘기지 않아도 모두 이 활성 run 에 자동으로 묶입니다.
-- 블록을 벗어날 때 호출되는 `__exit__()` 는 **run 을 종료 처리** 합니다 — 정상 종료면 상태를 `FINISHED`, 블록 안에서 예외가 나면 `FAILED` 로 기록하고 활성 run 을 해제합니다. `with` 를 쓰면 예외가 나도 run 이 끝까지 열린 채 남지 않습니다.
+- 블록을 벗어날 때 호출되는 `__exit__()` 는 **run 을 종료 처리** 합니다 — 예외 없이 끝나면 상태를 `FINISHED`, 블록 안에서 예외가 나면 `FAILED` 로 기록하고 활성 run 을 해제합니다. `with` 를 쓰면 예외가 나도 run 이 끝까지 열린 채 남지 않습니다.
 - `log_params` / `log_metric` 으로 남긴 값은 backend (PostgreSQL `mlflow` DB) 에 저장되어 UI 에서 실험 간 비교에 쓰입니다.
 - `log_artifacts` 로 올린 파일은 artifact store (MinIO `s3://mlflow/...`) 에 저장됩니다.
 - 여러 run 의 산출물은 `run_id` 별 폴더로 자동 격리되므로 (`s3://mlflow/<experiment>/<run_id>/...`), 이름 충돌을 사람이 신경 쓸 필요가 없습니다.

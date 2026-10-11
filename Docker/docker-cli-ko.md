@@ -1,6 +1,5 @@
 # Docker CLI (Command Line Interface)
-
-Rev. 109 | Created: 2026-06-15 | Updated: 2026-09-30 00:17 CDT
+Rev. 110 | Created: 2026-06-15 | Updated: 2026-10-11 01:25 CDT
 
 각 컴포넌트를 도커로 띄우고 운영할 때 공통으로 쓰는 명령을 모았습니다.
 
@@ -13,7 +12,7 @@ docker compose version             # check whether Compose v2 is installed, and 
 docker version                     # check the Docker Engine/CLI version.
 ```
 
-> 신버전은 `docker compose` (공백), 구버전은 `docker-compose` (하이픈) 입니다. `docker compose version` 이 정상 출력되면 v2 환경입니다.
+> 신버전은 `docker compose` (공백), 구버전은 `docker-compose` (하이픈) 입니다. `docker compose version` 이 버전을 출력하면 v2 환경입니다.
 
 ### Shared Network
 
@@ -55,7 +54,7 @@ docker run --rm -it <image> bash                       # run a throwaway contain
 docker run -d --restart unless-stopped <image>         # auto-restart on crash or reboot (until stopped by hand).
 ```
 
-> `--restart` 정책 — `no` (기본), `on-failure[:N]` (비정상 종료 시만), `always` (항상, 재부팅 뒤에도 무조건), `unless-stopped` (always 와 같되 `docker stop` 으로 직접 멈춘 것은 재시작 안 함). 오래 떠 있어야 하는 서비스에는 `unless-stopped` 가 무난합니다. compose 에서는 서비스에 `restart: unless-stopped` 로 같은 정책을 겁니다.
+> `--restart` 정책 — `no` (기본), `on-failure[:N]` (exit code ≠ 0 일 때만), `always` (항상, 재부팅 뒤에도 무조건), `unless-stopped` (always 와 같되 `docker stop` 으로 직접 멈춘 것은 재시작 안 함). 오래 떠 있어야 하는 서비스에는 `unless-stopped` 가 무난합니다. compose 에서는 서비스에 `restart: unless-stopped` 로 같은 정책을 겁니다.
 
 ## 3. Compose
 
@@ -86,8 +85,10 @@ docker compose -p <Project Name> -f <file>.yml up -d --scale <service>=3
 
 컨테이너는 명령에 따라 아래 상태를 오갑니다.
 
+Table 1. Container states and commands
+
 | State | Command | Process | CPU | Memory | Location |
-|-------|---------|---------|-----|--------|----------|
+| :---: | :---: | :---: | :---: | :---: | :---: |
 | Running | `docker run` · `docker compose up` | 실행 중 | 사용 | 사용 | 메모리 + 디스크 |
 | Stopped | `docker stop` | 종료됨 | 안 씀 | 안 씀 | 디스크에 상태만 |
 | Paused | `docker pause` | 얼려짐 | 안 씀 | 점유 (그대로) | 메모리에 그대로 |

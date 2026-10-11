@@ -1,6 +1,5 @@
 # Python — Application Runtime Container
-
-Rev. 12 | Created: 2026-06-17 | Updated: 2026-09-30 00:17 CDT
+Rev. 13 | Created: 2026-06-17 | Updated: 2026-10-11 01:25 CDT
 
 이 컨테이너는 이 스택에서 **파이썬 애플리케이션 실행 환경**으로 쓰입니다. 버전을 `3.11.15` 로 고정한 이미지를 빌드하여, 호스트에 파이썬이나 의존성을 따로 설치하지 않고도 동일한 환경에서 분석·학습 코드를 실행합니다. 데이터베이스 컨테이너 (예: MongoDB) 가 데이터를 저장하는 역할이라면, 이 컨테이너는 그 데이터를 읽어 **연산을 수행하고 결과를 만들어 내는 역할**을 맡습니다.
 
@@ -21,8 +20,10 @@ Rev. 12 | Created: 2026-06-17 | Updated: 2026-09-30 00:17 CDT
 
 세 파일이 함께 동작합니다.
 
+Table 1. Files of the image
+
 | File | Role |
-|------|------|
+| :---: | :---: |
 | `requirements.txt` | 설치할 파이썬 패키지와 버전 목록. 빌드 중 `pip install -r` 로 설치됩니다 ([Appendix C](#appendix-c-requirementstxt) 참고). |
 | `Dockerfile` | 베이스 이미지·네이티브 라이브러리·패키지 설치 절차와 기동 시 실행할 명령을 정의합니다. |
 | `docker-compose.yml` | 위 `Dockerfile` 로 이미지를 빌드하고, 볼륨·네트워크·재시작 정책을 붙여 컨테이너로 띄우는 방법을 정의합니다. |
@@ -150,6 +151,9 @@ Rev. 12 | Created: 2026-06-17 | Updated: 2026-09-30 00:17 CDT
       └── output.txt      # result file (created by the code)
   ```
 
+  <a id="fig-1"></a>
+  Fig 1. Host app folder layout
+
 ### Example Code (`app/example/example.py`)
 
   같은 폴더의 `input.txt` 를 읽어 원문과 응답을 담은 `output.txt` 를 생성합니다. 경로는 스크립트 위치 기준 (`/app/example`) 으로 적어, 호스트와 컨테이너 어느 쪽에서 실행해도 동일하게 동작하게 합니다.
@@ -213,8 +217,10 @@ Rev. 12 | Created: 2026-06-17 | Updated: 2026-09-30 00:17 CDT
 
   컨테이너 셸에서 `pip install` 한 패키지는 그 컨테이너에만 남고, 컨테이너를 삭제하거나 재생성하면 사라집니다. **계속 쓸 패키지는 셸이 아니라 `requirements.txt` 에 추가하고 재빌드**해야 이미지에 영구히 남습니다 ([Appendix C](#appendix-c-requirementstxt) 참고).
 
+  Table 2. Lifetime of a shell pip install
+
   | Action | Result of shell `pip install` |
-  |--------|-------------------------------|
+  | :---: | :---: |
   | 컨테이너 재시작 (`restart`) | 유지됨 |
   | 컨테이너 삭제 후 재생성 (`down` 후 `up`, `--rm`) | 사라짐 |
   | 이미지 재빌드 (`build`) | 사라짐 |
@@ -236,8 +242,10 @@ Rev. 12 | Created: 2026-06-17 | Updated: 2026-09-30 00:17 CDT
 
 이 문서에서 쓰는 주요 명령만 정리합니다. `docker compose` 명령은 `docker-compose.yml` 이 있는 폴더에서 실행합니다.
 
+Table 3. docker compose commands
+
 | Category | Command | Description |
-|----------|---------|-------------|
+| :---: | :---: | :---: |
 | Build | `docker compose build` | `Dockerfile` 로 image 를 빌드합니다. |
 | Build | `docker compose build --no-cache` | 레이어 캐시를 무시하고 처음부터 빌드합니다. |
 | Up | `docker compose up -d --build` | 빌드 후 컨테이너를 백그라운드로 띄웁니다. |
@@ -277,8 +285,10 @@ Rev. 12 | Created: 2026-06-17 | Updated: 2026-09-30 00:17 CDT
   pipreqs ./app --encoding=utf-8 --force
   ```
 
+  Table 4. pip freeze and pipreqs
+
   | Aspect | `pip freeze` | `pipreqs` |
-  |--------|--------------|-----------|
+  | :---: | :---: | :---: |
   | 기준 | 환경에 설치된 모든 패키지 | 코드가 import 하는 패키지 |
   | 간접 의존성 | 포함 (목록이 김) | 보통 제외 (목록이 간결) |
   | 쓰지 않는 패키지 | 포함됨 | 제외됨 |

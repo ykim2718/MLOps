@@ -1,6 +1,5 @@
 # Docker Network
-
-Rev. 5 | Created: 2026-07-12 | Updated: 2026-09-30 13:12 CDT
+Rev. 6 | Created: 2026-07-12 | Updated: 2026-10-11 01:25 CDT
 
 이 스택의 컨테이너 간 통신에 쓰는 docker network 를 정리합니다. 기본은 **Local Network** (호스트별 bridge + 크로스머신은 LAN IP) 이고, 전 노드가 LAN-native Linux 인 경우에 한해 **Swarm Overlay Network** 로 docker 서비스 이름을 머신 너머까지 통일할 수 있습니다.
 
@@ -36,8 +35,10 @@ Rev. 5 | Created: 2026-07-12 | Updated: 2026-09-30 13:12 CDT
 
   Swarm 노드끼리 아래 포트가 서로 열려 있어야 합니다.
 
+  Table 1. Swarm node ports
+
   | Port | Protocol | Purpose |
-  |------|----------|---------|
+  | :---: | :---: | :---: |
   | 2377 | tcp | cluster management (manager only) |
   | 7946 | tcp + udp | node-to-node communication (gossip / discovery) |
   | 4789 | udp | overlay data plane (VXLAN) |
@@ -91,7 +92,7 @@ Rev. 5 | Created: 2026-07-12 | Updated: 2026-09-30 13:12 CDT
   docker network create --driver overlay --attachable mlops
   ```
 
-  overlay network 는 매니저에서 생성되고, worker 에는 **컨테이너가 처음 attach 될 때** 나타납니다 (그 전에는 worker 의 `docker network ls` 에 안 보여도 정상). 생성 직후 확인은 매니저에서 driver·scope 만 봅니다.
+  overlay network 는 매니저에서 생성되고, worker 에는 **컨테이너가 처음 attach 될 때** 나타납니다 (그 전에는 worker 의 `docker network ls` 에 안 보이는 것이 기본 동작). 생성 직후 확인은 매니저에서 driver·scope 만 봅니다.
 
   ```bash
   # on the manager: confirm it is an overlay on the swarm scope

@@ -1,6 +1,5 @@
 # Docker Automatic Restart
-
-Rev. 10 | Created: 2026-07-20 | Updated: 2026-08-14 21:32 CDT
+Rev. 11 | Created: 2026-07-20 | Updated: 2026-10-11 01:25 CDT
 
 docker compose 만으로 스스로 복구되는 container 를 구성하는 방법을 다룹니다. container 가 죽거나 고장났을 때 자동으로 다시 띄우는 두 경로를 정리합니다. **restart policy** 는 container 가 **exit** 될 때, **healthcheck + autoheal** 은 container 는 살아있는데 안의 process 만 죽거나 hang 될 때를 담당합니다. 둘은 보완 관계이며, 두 경로 모두 최종적으로 `docker restart` 에 도달합니다. 예시로 Temporal server 1.25 의 dev/quickstart image (`temporalio/auto-setup:1.25`) 를 사용합니다.
 
@@ -33,6 +32,9 @@ docker compose 만으로 스스로 복구되는 container 를 구성하는 방�
                   └────────────────┘
 ```
 
+<a id="fig-1"></a>
+Fig 1. Two restart paths
+
 ## 1. Restart Policy
 
 container 의 **exit** 에 반응합니다. exit 은 곧 **PID 1 종료** 이므로 (→ [Container Lifecycle & PID 1](#container-lifecycle--pid-1)), server process 가 PID 1 이면 그 죽음이 container exit 으로 전파되어 여기서 복구됩니다.
@@ -44,8 +46,10 @@ container 의 **exit** 에 반응합니다. exit 은 곧 **PID 1 종료** 이므
       restart: unless-stopped        # auto-recovery from crash / reboot
   ```
 
+Table 1. Restart policies
+
 | Policy | Behavior |
-| --- | --- |
+| :---: | :---: |
 | `no` | 재시작하지 않습니다 (기본). |
 | `on-failure[:N]` | exit code ≠ 0 일 때만, 최대 N 회 재시작합니다. |
 | `always` | 항상 재시작합니다 (수동 stop 후 daemon 재시작 시에도 다시 뜸). |
