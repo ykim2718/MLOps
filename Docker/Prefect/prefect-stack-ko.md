@@ -1,5 +1,5 @@
 # MLOps Prefect Stack
-Rev. 632 | Created: 2026-06-13 | Updated: 2026-10-11 01:25 CDT
+Rev. 633 | Created: 2026-06-13 | Updated: 2026-10-11 08:52 CDT
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
@@ -24,6 +24,10 @@ Rev. 632 | Created: 2026-06-13 | Updated: 2026-10-11 01:25 CDT
 - [Appendix A. Terminology](#appendix-a-terminology)
 - [Appendix B. backing_ports.sh](#appendix-b-backing_portssh)
 - [Appendix C. credentials.py](#appendix-c-credentialspy)
+- [Appendix D. Worker Machine Setup](#appendix-d-worker-machine-setup)
+  - [D.1 Registry Machine](#d1-registry-machine)
+  - [D.2 Worker Machine](#d2-worker-machine)
+  - [D.3 Push Script Options](#d3-push-script-options)
 
 ## 1. Purpose
 
@@ -121,7 +125,7 @@ Table 3. Backing services and their endpoints
 
 ## 4. Installation
 
-설치는 **2 routings** (docker · pool) + **3 dockers** (server → worker → pipeline_flow) 입니다. [Installation Sequence](#41-installation-sequence) 가 설치 순서와 단계별 configuration 을, [Setup Files](#42-setup-files) 가 구성요소별 파일과 실행 명령을 정리합니다.
+설치는 **2 routings** (docker · pool) + **3 dockers** (server → worker → pipeline_flow) 입니다. [Installation Sequence](#41-installation-sequence) 가 설치 순서와 단계별 configuration 을, [Setup Files](#42-setup-files) 가 구성요소별 파일과 실행 명령을 정리합니다. 이미 돌고 있는 stack 에 worker machine 을 더하는 절차는 [Appendix D](#appendix-d-worker-machine-setup) 에 있습니다.
 
 ### 4.1 Installation Sequence
 
@@ -689,3 +693,71 @@ if __name__ == "__main__":
             print(f"[credentials] error: {e}", file=sys.stderr)
             sys.exit(1)
 ```
+
+## Appendix D. Worker Machine Setup
+
+이미 돌고 있는 stack 에 worker machine 을 하나 더하는 절차입니다. arm64 Mac 도 같은 절차를 따릅니다. Flow image 는 worker 가 run 마다 registry 에서 받으므로 worker machine 에 따로 설치하지 않습니다.
+
+### D.1 Registry Machine
+
+Worker machine 을 띄우기 전에, registry 를 띄운 machine 에서 한 번 합니다.
+
+1. Docker Desktop 의 Settings > General 에서 "Use containerd for pulling and storing images" 를 켭니다. Multi-arch build 는 containerd image store 나 docker-container buildx builder 가 있어야 됩니다.
+2. Worker image 와 flow image 를 amd64 · arm64 두 판으로 push 합니다. 옵션은 [D.3](#d3-push-script-options) 에 있습니다.
+
+   ```bash
+   cd Docker/Prefect/PrefectWorker && ./push_worker_image.sh --registry localhost:12357
+   cd ../PrefectFlow && ./push_flow_image.sh --registry localhost:12357
+   ```
+
+3. Flow image 를 push 한 뒤, server 에서 `PrefectServer/register_pool.sh` 를 pool 마다 다시 돌립니다 ([§4.2](#42-setup-files)). Pool template 의 image 기본값이 `<IMAGE_REGISTRY>/pipeline-flow:latest` 로 바뀝니다.
+
+### D.2 Worker Machine
+
+1. Docker Desktop 의 Settings > Docker Engine 에 registry 주소를 넣고 Apply & Restart 합니다. Docker daemon 은 `insecure-registries` 에 든 주소만 HTTP registry 로 받아들입니다.
+
+   ```json
+   // Docker Desktop > Settings > Docker Engine  (Linux: /etc/docker/daemon.json)
+   {
+     "insecure-registries": ["<REGISTRY_IP>:12357"]
+   }
+   ```
+
+2. Host 에 `jq` 와 `prefect` CLI 를 설치하고, CLI 가 server 를 가리키게 합니다. `PrefectWorker/run_worker.sh` 는 `jq` 와 `prefect` CLI 로 server 에 등록된 pool 을 확인합니다.
+
+   ```bash
+   brew install jq pipx                  # macOS; on Linux use the distro package manager
+   pipx install prefect && pipx ensurepath
+   prefect config set PREFECT_API_URL=http://<SERVER_IP>:4200/api
+   ```
+
+3. MLOps local repository 를 clone 하고, `docker-compose.env_example` 을 `Docker/Prefect/docker-compose.env` 로 복사해 두 값을 채웁니다 ([§7.1](#71-docker-composeenv_example)). DB 접속 값은 `prefect_server` 만 읽으므로 worker machine 에서는 `CHANGE_ME` 로 두어도 됩니다.
+
+   ```dotenv
+   # Docker/Prefect/docker-compose.env  (worker machine)
+   PREFECT_API_URL=http://<SERVER_IP>:4200/api
+   IMAGE_REGISTRY=<REGISTRY_IP>:12357
+   ```
+
+4. Worker 를 띄웁니다. `run_worker.sh` 가 `IMAGE_REGISTRY` 에서 worker image 를 받습니다. LAN IP 를 찾지 못하면 `--worker-ip <LAN_IP>` 를 붙입니다.
+
+   ```bash
+   cd Docker/Prefect/PrefectWorker && ./run_worker.sh --work-pool low_performance
+   ```
+
+5. Open-source Prefect server UI 의 Work Pools 화면에서 `<hostname>@<LAN IP>` worker 가 ONLINE 인지 확인합니다. 이어서 deployment 를 한 번 run 하고, worker machine 이 `pipeline-flow` image 를 pull 하는지 `docker images` 로 확인합니다.
+
+### D.3 Push Script Options
+
+`PrefectWorker/push_worker_image.sh` 와 `PrefectFlow/push_flow_image.sh` 는 옵션 없이 돌리면 Table 4 의 기본값으로 동작합니다. 기본값은 두 script 머리의 변수에 있고, registry 만 env file 에서 읽습니다.
+
+Table 4. Push script options
+
+| Option       | Default                                                         | Recorded in                                         |
+| :----------: | :-------------------------------------------------------------: | :-------------------------------------------------: |
+| `--registry` | `../docker-compose.env` 의 `IMAGE_REGISTRY` (없으면 `_example`) | script 의 `REGISTRY=""` · 값은 `docker-compose.env` |
+| `--platform` | `linux/amd64,linux/arm64`                                       | script 의 `PLATFORM=`                               |
+| `--tag`      | `latest`                                                        | script 의 `TAG=`                                    |
+
+- `IMAGE_REGISTRY` 가 비었거나 `<REGISTRY_IP>` 같은 placeholder 이면 script 가 멈춥니다.
+- Registry machine 에서 옵션 없이 돌리면 `localhost:12357` 대신 `IMAGE_REGISTRY` 의 `<REGISTRY_IP>:12357` 로 push 합니다. Docker daemon 은 `localhost` 만 HTTP registry 로 허용하므로, 그 machine 의 daemon 도 `insecure-registries` 에 자기 주소를 가져야 합니다.
