@@ -1,5 +1,5 @@
 # MLOps Prefect Stack: Flow
-Rev. 2 | Created: 2026-10-10 | Updated: 2026-10-10 15:07 CDT
+Rev. 3 | Created: 2026-10-10 | Updated: 2026-10-11 01:18 CDT
 
 - [1. Purpose](#1-purpose)
 - [2. Role](#2-role)
@@ -315,6 +315,9 @@ Pipeline Flow 는 worker 가 job 마다 띄우는 per-flow 컨테이너입니다
   └─ data/                         # MinIO download target (bucket/key → here)
      └─ <object>                   # files or folders/files
   ```
+
+  <a id="fig-1"></a>
+  Fig 1. Per-run folders inside the flow container
 
   - **팀원별 repo** — `git_repo` 가 **flow 파라미터** 라 deployment 마다 다른 repo 를 기본값으로 등록할 수 있습니다. 팀원은 각자 repo·커밋을 쓰고, run 마다 사설 `script/` 에 펼쳐져 서로 간섭하지 않습니다. Prefect 가 `git_repo`·`git_commit_hash` 을 run 파라미터로 자동 기록해 재현·lineage 가 남습니다.
   - **데이터 준비** — `pipeline.py` 가 MinIO 에서 `minio_bucket`/`minio_key` 객체를 `data/` 로 미리 내려받고 `--data-folder` 로 경로를 넘깁니다. 접속 자격증명 (그 블록의 `minio` 섹션) 은 [prefect-stack-ko.md §7](../prefect-stack-ko.md#7-credentials) 의 Credential Blocks 로 받습니다. 팀원 코드는 자격증명·다운로드를 각자 짤 필요 없이 `--data-folder` 폴더의 파일을 읽기만 하면 됩니다 (`pipeline.py` 가 `boto3` 로 받으므로 flow image 에 `boto3` 가 있어야 합니다 — [§3](#3-image)).

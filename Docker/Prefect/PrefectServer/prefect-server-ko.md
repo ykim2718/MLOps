@@ -1,5 +1,5 @@
 # MLOps Prefect Stack: Server
-Rev. 2 | Created: 2026-10-10 | Updated: 2026-10-10 15:07 CDT
+Rev. 3 | Created: 2026-10-10 | Updated: 2026-10-11 01:18 CDT
 
 - [1. Purpose](#1-purpose)
 - [2. Server Setup](#2-server-setup)
@@ -186,8 +186,10 @@ Rev. 2 | Created: 2026-10-10 | Updated: 2026-10-10 15:07 CDT
 
   > **여러 pool** — pool 마다 이 템플릿을 하나씩 등록합니다 (`docker-pool-template-high.json`·`docker-pool-template-low.json`). 등급 차이는 worker 의 `--limit` (머신당 동시 컨테이너 수) 과 템플릿의 `mem_limit` 로 주고, 이미지·repo 는 같습니다.
   >
+  > Table 1. What differs between the high and low pools
+  >
   > | Field | Target | High | Low | Source |
-  > |---|---|---|---|---|
+  > | :---: | :---: | :---: | :---: | :---: |
   > | `mem_limit` | memory | `16g` | `4g` | base job template (`docker-pool-template-high.json`·`docker-pool-template-low.json`) |
   > | `--limit` | worker | `8` | `4` | `prefect worker start` (`WORKER_LIMIT`) |
   > | `--concurrency-limit` | pool | `16` | `8` | `work-pool set-concurrency-limit` (`register_pool.sh`) |
@@ -240,8 +242,10 @@ Rev. 2 | Created: 2026-10-10 | Updated: 2026-10-10 15:07 CDT
   [register_variables] set: minio_endpoint, postgresql_host_port, mlflow_tracking_uri
   ```
 
+  Table 2. Service address Variables
+
   | Variable | Value (LAN IP) | Used by |
-  |----------|----------------|---------|
+  | :---: | :---: | :---: |
   | `minio_endpoint` | `http://<MinIO IP>:9000` | pipeline.py·catalog.py (S3) |
   | `postgresql_host_port` | `<PostgreSQL IP>:5432` | catalog·optuna DSN (host:port, 소비 코드가 분리) |
   | `mlflow_tracking_uri` | `http://<MLflow IP>:5000` | payload MLflow 로깅 |

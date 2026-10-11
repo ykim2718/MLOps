@@ -1,5 +1,5 @@
 # MLOps Prefect Stack
-Rev. 630 | Created: 2026-06-13 | Updated: 2026-10-10 15:07 CDT
+Rev. 631 | Created: 2026-06-13 | Updated: 2026-10-11 01:18 CDT
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
@@ -58,8 +58,10 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
 
 기본 구성은 한 호스트에서 공유 네트워크 `mlops` 로 묶입니다. `prefect_server` 와 `prefect_worker` 가 상시 떠 있고, job 마다 **`pipeline_flow` 컨테이너** 가 일시적으로 실행됩니다. Work pool 은 server 에 등록된 메타데이터입니다 (컨테이너가 아닙니다).
 
+Table 2. Components of the stack
+
 | Component | Prefect term | Role | Lifetime |
-|----------|--------------|------|----------|
+| :---: | :---: | :---: | :---: |
 | **Prefect Server** | server | job 수집·스케줄링·UI·**work pool 등록**.<br>실행 파라미터를 entrypoint 에 전달.<br>코드는 실행하지 않습니다. | 상시 |
 | **Prefect Worker** | worker | pool 을 polling 해 job 마다<br>`pipeline_flow` 컨테이너를 띄웁니다.<br>코드는 실행하지 않습니다. | 상시 |
 | **Pipeline Flow** | execution unit | flow (코드) 가 실행되는 곳입니다.<br>job 마다 뜨는 전용 일시적 컨테이너입니다. | 일시적 |
@@ -94,6 +96,9 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
       +----+  +----+                 +----+  +----+            +----+  +----+
 ```
 
+<a id="fig-1"></a>
+Fig 1. Two pools by performance tier, two flows per worker
+
 - **pool = 라우팅 라벨** — server 가 run 을 `work_pool_name` 으로 해당 등급 pool 에 보냅니다 (pool 은 큐일 뿐 컨테이너가 아닙니다).
 - **worker = 머신마다 1개** — 각 컴퓨터가 자기 등급 pool 의 worker 를 띄웁니다. 한 등급에 머신이 여럿이면 그 pool 에 worker 가 여럿 붙어 큐를 나눕니다 (위 그림: high 는 2대 → worker 2개).
 - **worker 마다 flow 여럿** — 각 worker 가 `--limit` 까지 pipeline_flow 컨테이너를 동시에 띄웁니다 (그림은 2개씩).
@@ -101,8 +106,10 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
 
 각 서비스의 역할입니다.
 
+Table 3. Backing services and their endpoints
+
 | Service | Endpoint | Role |
-|---------|----------|------|
+| :---: | :---: | :---: |
 | `postgres` | `:5432` | Metadata DB · `prefect`/`mlflow`/`optuna`/`catalog` 4 논리 DB |
 | `minio` | `:9000` (S3 API) · `:9001` (console) | Object storage · `datasets`/`models`/`mlflow` 3 buckets |
 | `mlflow` | `:5000` | 실험 추적 + 모델 레지스트리 · backend `postgres` · artifact `minio` |
@@ -171,6 +178,9 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
   shared : docker-compose.env                      # at Docker/Prefect/ root; server & worker read ../docker-compose.env
   ```
 
+  <a id="fig-2"></a>
+  Fig 2. Installation sequence and the configuration of each step
+
   > 전제 — 이 3 docker 앞에 **PostgreSQL → (MinIO/MLflow)** 가 먼저 떠 있어야 합니다. `docker-compose.env` 의 DB URL 과 Secret 의 MinIO 키가 그 스택을 가리키므로, 각 폴더 compose 로 먼저 띄웁니다 (이 문서 범위 밖).
 
 ### 4.2 Setup Files
@@ -191,6 +201,9 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
      └─ docker-pool-template-low.json    low-tier base job template (mem_limit 4g)
      ```
 
+     <a id="fig-3"></a>
+     Fig 3. Files of PrefectServer
+
      Run (from `PrefectServer/`):
 
      ```bash
@@ -209,6 +222,9 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
      ├─ run_worker.sh              start: compose pull + up
      └─ push_worker_image.sh       multi-arch build + push of the worker image
      ```
+
+     <a id="fig-4"></a>
+     Fig 4. Files of PrefectWorker
 
      Run (from `PrefectWorker/`):
 
@@ -232,6 +248,9 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
      └─ {high,low}-deployment.yml    deployment definitions (admin registers once)
      ```
 
+     <a id="fig-5"></a>
+     Fig 5. Files of PrefectFlow
+
      Run (from `PrefectFlow/`):
 
      ```bash
@@ -246,6 +265,9 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
      <name>.json                       credential JSON (e.g. yrocket.json)
      ```
 
+     <a id="fig-6"></a>
+     Fig 6. Credential files at the Docker/Prefect root
+
      Run (from `Docker/Prefect/`, `PREFECT_API_URL` → server):
 
      ```bash
@@ -257,6 +279,9 @@ Prefect server (`prefect_server`) 는 job 을 수집·스케줄링하는 **단�
      ```
      docker-compose.env             credentials · PREFECT_API_URL   (Docker/Prefect/ root)
      ```
+
+     <a id="fig-7"></a>
+     Fig 7. Shared env file at the Docker/Prefect root
 
 ## 5. Network
 
@@ -392,6 +417,9 @@ Worker image 와 flow image 는 같은 docker registry 에서 받습니다. 두 
   └─ postgresql_optuna  : username, password, database
   ```
 
+  <a id="fig-8"></a>
+  Fig 8. Layout of one Credentials block
+
   자격증명을 **JSON 파일** 로 적고 `credentials.py` 로 등록합니다 — 블록 이름은 Prefect 규칙상 **소문자·숫자·하이픈만** 가능하므로 `--block-name` 으로 소문자 이름을 지정합니다 (예: 파일 `yrocket.json` → 블록 이름 `yrocket`). `credentials.py` 코드는 [Appendix C](#appendix-c-credentialspy).
 
   `yrocket.json`:
@@ -474,6 +502,9 @@ Flow Runs
     ├─ train_model    Completed
     └─ test_model     Completed
 ```
+
+<a id="fig-9"></a>
+Fig 9. Dashboard after one job is triggered
 
 같은 job 이 **flow run 두 개** 로 보입니다 — orchestrator (`pipeline`) 와 팀 payload (`my_flow`). orchestrator 는 `flow_run_name` 이 `submitter@commit`, 팀 payload 는 `submitter` (pipeline.py 가 payload 엔 실행자 이름만 넘김) 이라 누구의 run 인지 묶어 보기 좋고, 팀 run 아래에 네 단계 task 가 달립니다. 팀 payload 가 plain 스크립트면 `my_flow` run·task 없이 orchestrator run 만 보입니다.
 
