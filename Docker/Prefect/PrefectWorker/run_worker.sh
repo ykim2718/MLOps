@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # run_worker.sh — start the Prefect worker compose stack on a worker machine.
-# __version__ = "0.0.27"  # Semantic Versioning:  Version = Major.Minor.Patch
+# __version__ = "0.0.30"  # Semantic Versioning:  Version = Major.Minor.Patch
 #
 # Brings up prefect_worker, which polls the given work pool. WORK_POOL/WORKER_LIMIT are read from
 # this shell at "docker compose up" (compose interpolation), so they are exported below.
@@ -10,43 +10,55 @@
 # this script checks the work pool against the pools registered on the server; if it is missing, it lists
 # the registered pools and lets you pick one (guards against typos / not-yet-registered pools).
 #
-#   ./run_worker.sh --work-pool high_performance    # a high-tier machine
-#   ./run_worker.sh --work-pool low_performance     # a low-tier machine
+#   ./run_worker.sh --work-pool high_performance    # a high-tier machine, 'default' queue
+#   ./run_worker.sh --work-pool low_performance     # a low-tier machine, 'default' queue
 #   ./run_worker.sh --work-pool low_performance --worker-ip <LAN_IP>   # when the LAN IP is not detected
-#   ./run_worker.sh --work-pool low_performance --work-queue urgent --worker-limit 2   # a second worker, one queue only
+#   ./run_worker.sh --work-pool low_performance --work-queue urgent --worker-limit 2   # a second worker, 'urgent' only
 #
-# The worker is named '<hostname>@<LAN IP>' so the Prefect server (and dashboards reading it) can tell
-# which machine each worker runs on; the Prefect API records no host for a worker otherwise.
-# With --work-queue the worker polls that queue of the pool only, is named '<hostname>-<queue>@<LAN IP>', and runs
-# as its own compose project (prefect-worker-<queue>), so it starts and stops beside the pool-wide worker.
+# A worker always polls exactly one queue: --work-queue, else 'default'. Without a queue, prefect would poll every
+# queue of the pool, so a priority queue such as 'urgent' would also go to the default workers.
+# The 'default' worker is named '<hostname>@<LAN IP>' so the Prefect server (and dashboards reading it) can tell
+# which machine each worker runs on; the Prefect API records no host for a worker otherwise. It keeps the compose
+# project prefect-worker, so a re-run replaces an older pool-wide worker in place.
+# Any other queue's worker is named '<hostname>-<queue>@<LAN IP>' and runs as its own compose project
+# (prefect-worker-<queue>), so it starts and stops beside the 'default' worker.
 #
-# The worker image is pulled from IMAGE_REGISTRY (read from ../docker-compose.env, else the _example), so a new
+# The worker image is pulled from IMAGE_REGISTRY (read from ../docker-compose.env, which must exist), so a new
 # machine needs no local build; re-running this script pulls the latest pushed image.
+#
+# After the worker is up, its --worker-limit is recorded in the server Variable worker_limits as
+# {"<worker name>": <limit>}, since the Prefect API keeps no limit for a worker (the /finance page shows it).
 #
 set -euo pipefail
 
 WORK_POOL="high_performance"   # the work pool this machine polls: high_performance | low_performance
 WORKER_LIMIT=8                 # max pipeline_flow containers this machine spawns concurrently
 WORKER_IP=""                   # LAN IP of this machine; empty = detected below
-WORK_QUEUE=""                  # one work queue of the pool to poll; empty = every queue of the pool
+DEFAULT_WORK_QUEUE="default"   # the queue every pool has; polled when --work-queue is not given
+WORK_QUEUE="$DEFAULT_WORK_QUEUE"   # the one work queue of the pool this worker polls
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --work-pool)    WORK_POOL="$2"; shift 2 ;;
         --worker-limit) WORKER_LIMIT="$2"; shift 2 ;;
         --worker-ip)    WORKER_IP="$2"; shift 2 ;;
-        --work-queue)   WORK_QUEUE="$2"; shift 2 ;;
+        --work-queue)   WORK_QUEUE="${2:-$DEFAULT_WORK_QUEUE}"; shift 2 ;;
         *) echo "Unknown option: $1" >&2; exit 1 ;;
     esac
 done
 
 COMPOSE="docker-compose.worker.yml"
-ENV_FILE="../docker-compose.env"   # shared address source; falls back to the committed _example
+ENV_FILE="../docker-compose.env"   # shared address source; the committed _example (placeholders) is never read
+
+# The real env file is required; the _example holds placeholders only.
+if [ ! -f "$ENV_FILE" ]; then
+    echo "env file not found: $ENV_FILE" >&2
+    echo "Copy ../docker-compose.env_example to ../docker-compose.env and set the real values there." >&2
+    exit 1
+fi
 
 # --- Registry of the worker image: read only IMAGE_REGISTRY (sourcing the whole file would override the
 # host's PREFECT_API_URL with a possible placeholder) ------------------------------------------------
-[ -f "$ENV_FILE" ] || ENV_FILE="../docker-compose.env_example"
-[ -f "$ENV_FILE" ] || { echo "env file not found: $ENV_FILE" >&2; exit 1; }
 IMAGE_REGISTRY="$(sed -n 's/^IMAGE_REGISTRY=//p' "$ENV_FILE" | tail -n 1 | tr -d '\r')"
 if [ -z "$IMAGE_REGISTRY" ] || [[ "$IMAGE_REGISTRY" == *"<"* ]]; then
     echo "IMAGE_REGISTRY missing or still a placeholder in $ENV_FILE (got '$IMAGE_REGISTRY')." >&2
@@ -65,6 +77,7 @@ fi
 WORKER_ENV_FILE="$ENV_FILE"   # compose env_file; relative to this folder, which is also the compose file's folder
 
 command -v jq >/dev/null 2>&1 || { echo "jq is required to parse 'prefect work-pool ls --output json'. Install jq and retry." >&2; exit 1; }
+command -v curl >/dev/null 2>&1 || { echo "curl is required to record the worker limit on the server. Install curl and retry." >&2; exit 1; }
 
 # The pool validation below uses the host 'prefect' CLI, so it must be installed and on PATH.
 if ! command -v prefect >/dev/null 2>&1; then
@@ -125,7 +138,7 @@ else
 fi
 
 # --- Validate the work queue: prefect worker start would silently create a mistyped queue ------------
-if [ -n "$WORK_QUEUE" ] && ! prefect work-queue inspect "$WORK_QUEUE" --pool "$WORK_POOL" >/dev/null 2>&1; then
+if ! prefect work-queue inspect "$WORK_QUEUE" --pool "$WORK_POOL" >/dev/null 2>&1; then
     echo "Work queue '$WORK_QUEUE' is not in work pool '$WORK_POOL'. Create it first, e.g.:" >&2
     echo "  prefect work-queue create $WORK_QUEUE --pool $WORK_POOL --priority 1" >&2
     exit 1
@@ -154,13 +167,13 @@ if ! printf '%s' "$WORKER_IP" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; the
     exit 1
 fi
 PROJECT="prefect-worker"       # the compose file's top-level name
-WORK_QUEUE_OPTION=""
+WORK_QUEUE_OPTION="--work-queue ${WORK_QUEUE}"   # always one queue, never the whole pool
 WORKER_NAME="$(hostname)@${WORKER_IP}"
-if [ -n "$WORK_QUEUE" ]; then
+if [ "$WORK_QUEUE" != "$DEFAULT_WORK_QUEUE" ]; then
     PROJECT="prefect-worker-${WORK_QUEUE}"
-    WORK_QUEUE_OPTION="--work-queue ${WORK_QUEUE}"
     WORKER_NAME="$(hostname)-${WORK_QUEUE}@${WORKER_IP}"
 fi
+echo "Work queue: $WORK_QUEUE (pool $WORK_POOL)"
 echo "Worker name: $WORKER_NAME"
 
 # For the worker compose ${...} interpolation — export so this docker compose up sees them.
@@ -178,3 +191,38 @@ docker compose -p "$PROJECT" -f "$COMPOSE" pull
 # -p names the project, so down only ever touches this stack (the pool-wide worker or one queue's worker).
 docker compose -p "$PROJECT" -f "$COMPOSE" down
 docker compose -p "$PROJECT" -f "$COMPOSE" up -d
+
+# --- Record this worker's --limit in the server Variable worker_limits ({worker name: limit}) -------------
+# The Prefect API keeps no limit for a worker, so dashboards read it from here. Read-merge-write over REST
+# (the CLI's 'variable get' pretty-prints, which is not safe to parse); two hosts writing at the same moment
+# could drop one entry, which the next run of either fixes.
+VARIABLES_URL="${CONTAINER_API_URL%/}/variables"
+LIMITS_VARIABLE="worker_limits"
+response_file="$(mktemp)"
+trap 'rm -f "$response_file"' EXIT
+status="$(curl -sS -o "$response_file" -w '%{http_code}' "$VARIABLES_URL/name/$LIMITS_VARIABLE")"
+case "$status" in
+    200) current="$(jq -c '.value' "$response_file")" ;;
+    404) current='{}' ;;
+    *) echo "worker is up, but reading Variable $LIMITS_VARIABLE failed (HTTP $status): $(cat "$response_file")" >&2
+       exit 1 ;;
+esac
+if [ "$(printf '%s' "$current" | jq -r 'type')" != "object" ]; then
+    echo "worker is up, but Variable $LIMITS_VARIABLE is not a JSON object: $current" >&2
+    exit 1
+fi
+updated="$(printf '%s' "$current" | jq -c --arg name "$WORKER_NAME" --argjson limit "$WORKER_LIMIT" '. + {($name): $limit}')"
+if [ "$status" = "200" ]; then
+    write_status="$(jq -n --argjson value "$updated" '{value: $value}' \
+        | curl -sS -o "$response_file" -w '%{http_code}' -X PATCH -H 'Content-Type: application/json' \
+              --data @- "$VARIABLES_URL/name/$LIMITS_VARIABLE")"
+else
+    write_status="$(jq -n --arg name "$LIMITS_VARIABLE" --argjson value "$updated" '{name: $name, value: $value}' \
+        | curl -sS -o "$response_file" -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
+              --data @- "$VARIABLES_URL/")"
+fi
+case "$write_status" in
+    2??) echo "Recorded limit $WORKER_LIMIT for $WORKER_NAME in Variable $LIMITS_VARIABLE." ;;
+    *) echo "worker is up, but writing Variable $LIMITS_VARIABLE failed (HTTP $write_status): $(cat "$response_file")" >&2
+       exit 1 ;;
+esac
