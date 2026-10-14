@@ -1,5 +1,5 @@
 # Prefect Work Queue
-Rev. 3 | Created: 2026-09-30 | Updated: 2026-09-30 13:01 CDT
+Rev. 4 | Created: 2026-09-30 | Updated: 2026-10-14 11:13 CDT
 
 - [1. Purpose](#1-purpose)
 - [2. Summary](#2-summary)
@@ -13,7 +13,7 @@ Rev. 3 | Created: 2026-09-30 | Updated: 2026-09-30 13:01 CDT
   - [4.5 Worker Polling](#45-worker-polling)
 - [5. Application](#5-application)
   - [5.1 Creating a Queue](#51-creating-a-queue)
-  - [5.2 Moving the Concurrency Limit](#52-moving-the-concurrency-limit)
+  - [5.2 Setting the Concurrency Limits](#52-setting-the-concurrency-limits)
   - [5.3 Assigning a Deployment](#53-assigning-a-deployment)
   - [5.4 Starting a Dedicated Worker](#54-starting-a-dedicated-worker)
   - [5.5 Verification](#55-verification)
@@ -35,14 +35,14 @@ Rev. 3 | Created: 2026-09-30 | Updated: 2026-09-30 13:01 CDT
 
 ## 2. Summary
 
-Work queue 는 work pool 안의 대기열이며, priority 와 concurrency limit 과 pause 를 queue 단위로 둔다. Pool 은 실행 방식과 pool 전체 한도를 정하고, queue 는 그 pool 안에서 어느 run 을 먼저 내줄지와 몇 개까지 내줄지를 정한다. Deployment 는 `work_queue_name` 으로 자기 run 이 들어갈 queue 를 정하고, 정하지 않으면 pool 의 `default` queue 에 들어간다. Worker 는 pool 하나에 붙어 그 pool 의 queue 전부를 polling 하거나, `--work-queue` 로 지정한 queue 만 polling 한다.
+Work queue 는 work pool 안의 대기열이며, priority 와 concurrency limit 과 pause 를 queue 단위로 둔다. Pool 은 실행 방식과 pool 전체 한도를 정하고, queue 는 그 pool 안에서 어느 run 을 먼저 내줄지와 몇 개까지 내줄지를 정한다. Deployment 는 `work_queue_name` 으로 자기 run 이 들어갈 queue 를 정하고, 정하지 않으면 pool 의 `default` queue 에 들어간다. Worker 는 pool 하나에 붙어 `--work-queue` 로 지정한 queue 만 polling 하며, 이 stack 은 모든 worker 를 queue 하나에 묶는다.
 
 급한 deployment 는 아래 네 단계로 전용 queue 에 넣고 전용 worker 를 붙인다.
 
 1. `prefect work-queue create <QUEUE> --pool <POOL> --priority 1` 로 queue 를 만든다 ([5.1](#51-creating-a-queue)).
-2. Pool 의 concurrency limit 을 지우고 같은 값을 `default` queue 에 건다. Pool 한도는 그 pool 의 모든 queue 에 함께 걸리므로, 남겨 두면 전용 queue 의 run 도 pool 한도에 막힌다 ([5.2](#52-moving-the-concurrency-limit)).
+2. Queue 의 concurrency limit 은 두지 않고, pool 의 concurrency limit 을 그 pool 의 모든 worker 의 `--limit` 합 이상으로 둔다. Queue 의 동시 실행 수는 그 queue 를 polling 하는 worker 의 `--limit` 합이 정하고, 전용 queue 의 run 은 pool 한도에 막히지 않는다 ([5.2](#52-setting-the-concurrency-limits)).
 3. Deployment 를 `work_queue_name=<QUEUE>` 로 등록한다 ([5.3](#53-assigning-a-deployment)).
-4. `prefect worker start --pool <POOL> --work-queue <QUEUE> --limit <N>` 으로 그 queue 만 polling 하는 worker 를 pool 전체를 맡는 worker 옆에 띄운다 ([5.4](#54-starting-a-dedicated-worker)).
+4. `prefect worker start --pool <POOL> --work-queue <QUEUE> --limit <N>` 으로 그 queue 만 polling 하는 worker 를 띄우고, 나머지 worker 는 `--work-queue default` 로 띄운다 ([5.4](#54-starting-a-dedicated-worker)).
 
 네 단계를 실제 pool 에 적용한 예와 그 server 의 상태는 [Appendix C](#appendix-c-urgent-queue) 에 있다.
 
@@ -59,7 +59,7 @@ Prefect server
     │   └── flow run, flow run, ...      runs of deployments whose work_queue_name = <QUEUE>
     └── work queue ...
 
-worker A   --pool <POOL>                        polls every queue of the pool, up to --limit runs at once
+worker A   --pool <POOL> --work-queue default   polls "default" only, up to its own --limit
 worker B   --pool <POOL> --work-queue <QUEUE>   polls <QUEUE> only, up to its own --limit
 ```
 
@@ -85,7 +85,7 @@ Table 2. Mechanism by need
 
 | Need                                              | Mechanism                                        | Section                                   |
 | :-----------------------------------------------: | :----------------------------------------------: | :---------------------------------------: |
-| pool 이 차 있어도 특정 run 을 바로 시작            | dedicated queue with priority 1 + dedicated worker | [5.1](#51-creating-a-queue), [5.4](#54-starting-a-dedicated-worker) |
+| pool 이 차 있어도 특정 run 을 바로 시작            | dedicated queue with priority 1 + dedicated worker, pool limit ≥ sum of worker limits | [5.1](#51-creating-a-queue), [5.2](#52-setting-the-concurrency-limits), [5.4](#54-starting-a-dedicated-worker) |
 | 특정 종류 run 의 동시 수를 제한                    | queue concurrency limit                          | [4.3](#43-concurrency-limit)              |
 | 특정 종류 run 을 잠시 멈춤                          | queue pause                                      | [5.6](#56-operation)                      |
 | 특정 machine 에서만 특정 run 을 실행                | dedicated queue + every other worker on `--work-queue` of its own queues | [4.5](#45-worker-polling) |
@@ -117,7 +117,7 @@ Table 3. Three concurrency limits
 | work queue | `prefect work-queue set-concurrency-limit <QUEUE> <N> --pool <POOL>` | runs of that queue                          |
 | worker     | `prefect worker start --limit <N>`                  | runs that one worker process has started    |
 
-Pool 한도는 그 pool 의 모든 queue 에 함께 걸린다 [[3](#ref-3)]. 전용 queue 와 전용 worker 를 두어도 pool 한도가 차 있으면 전용 queue 의 run 도 기다린다. 그래서 급한 run 을 위한 자리를 떼어 두려면 pool 한도를 지우고 같은 값을 `default` queue 에 걸어, 한도를 나머지 run 에만 남긴다 ([5.2](#52-moving-the-concurrency-limit)). Worker 의 `--limit` 은 그 worker 하나가 동시에 띄우는 run 의 수이며, 같은 queue 를 polling 하는 worker 가 둘이면 queue 의 run 은 두 worker 의 `--limit` 을 합한 수까지 동시에 돌 수 있다.
+Pool 한도는 그 pool 의 모든 queue 에 함께 걸린다 [[3](#ref-3)]. 전용 queue 와 전용 worker 를 두어도 pool 한도가 차 있으면 전용 queue 의 run 도 기다린다. Worker 의 `--limit` 은 그 worker 하나가 동시에 띄우는 run 의 수이며, 같은 queue 를 polling 하는 worker 가 둘이면 queue 의 run 은 두 worker 의 `--limit` 을 합한 수까지 동시에 돌 수 있다. 그래서 worker 마다 queue 하나를 맡기면 queue 한도 없이도 queue 의 상한이 그 queue 의 worker `--limit` 합으로 정해지고, pool 한도를 모든 worker 의 `--limit` 합 이상으로 두면 어느 queue 의 run 도 pool 한도에 막히지 않는다 ([5.2](#52-setting-the-concurrency-limits)). Queue 한도는 실행만 제한하며, 한도를 넘는 run 은 queue 에서 기다린다.
 
 ### 4.4 Status
 
@@ -131,7 +131,7 @@ Queue 는 `READY`, `NOT_READY`, `PAUSED` 세 상태를 갖는다 [[3](#ref-3)].
 
 Worker 는 pool 하나에 붙고, `--work-queue` 를 주지 않으면 그 pool 의 모든 queue 를 polling 한다 [[4](#ref-4)]. `--work-queue` 는 여러 번 줄 수 있고, 주면 그 queue 들만 polling 한다 [[4](#ref-4)].
 
-Queue 의 run 은 그 queue 를 polling 하는 worker 가운데 먼저 가져간 쪽이 실행한다. Pool 전체를 맡는 worker 도 전용 queue 를 polling 하므로, 전용 worker 는 그 queue 에 한도를 더할 뿐이다. 특정 queue 의 run 을 특정 machine 에서만 돌리려면, 다른 machine 의 worker 가 모두 `--work-queue` 로 자기 queue 만 polling 하게 하여 그 queue 를 polling 하는 worker 를 그 machine 의 것 하나로 남긴다.
+Queue 의 run 은 그 queue 를 polling 하는 worker 가운데 먼저 가져간 쪽이 실행한다. `--work-queue` 없이 띄운 worker 는 전용 queue 도 polling 하므로, 전용 queue 의 run 을 전용 worker 에게만 맡기려면 나머지 worker 를 모두 `--work-queue default` 로 띄운다. 특정 queue 의 run 을 특정 machine 에서만 돌리는 것도 같은 방법으로, 그 queue 를 polling 하는 worker 를 그 machine 의 것 하나로 남긴다.
 
 ## 5. Application
 
@@ -150,18 +150,18 @@ prefect work-queue ls --pool <POOL>                               # name, priori
 - `--limit <N>` 을 함께 주면 queue concurrency limit 을 만들 때 건다. 뒤에 `set-concurrency-limit` 으로 바꿀 수 있다.
 - Queue 이름은 deployment 의 `work_queue_name` 과 worker 의 `--work-queue` 에 그대로 들어가므로, 세 곳에서 같은 글자를 쓴다.
 
-### 5.2 Moving the Concurrency Limit
+### 5.2 Setting the Concurrency Limits
 
-Pool 한도를 지우고 같은 값을 `default` queue 에 건다.
+Queue 한도는 지우고, pool 한도를 그 pool 의 모든 worker 의 `--limit` 합 이상으로 둔다.
 
 ```bash
-prefect work-pool clear-concurrency-limit <POOL>                        # a pool limit caps every queue
-prefect work-queue set-concurrency-limit default <N> --pool <POOL>      # keep the old cap on the other runs
+prefect work-queue clear-concurrency-limit <QUEUE> --pool <POOL>      # each queue: its workers' --limit sum caps it
+prefect work-pool set-concurrency-limit <POOL> <SUM>                  # SUM >= --limit of every worker of the pool
 ```
 
-- `<N>` 은 지우기 전 pool 한도와 같은 값으로 두어, 전용 queue 밖의 run 이 받는 한도를 그대로 유지한다.
-- 전용 queue 의 한도는 전용 worker 의 `--limit` 이 맡는다 ([5.4](#54-starting-a-dedicated-worker)). Queue 에도 한도를 걸려면 `set-concurrency-limit <QUEUE> <M> --pool <POOL>` 을 더한다.
-- Pool 한도를 남겨 두면 전용 worker 가 떠 있어도 전용 queue 의 run 이 pool 한도에 막힌다 ([4.3](#43-concurrency-limit)).
+- `<SUM>` 은 그 pool 에 붙은 모든 worker 의 `--limit` 을 더한 값이다. 이보다 작으면 `default` queue 의 run 이 pool 한도를 채운 동안 전용 queue 의 run 이 막힌다 ([4.3](#43-concurrency-limit)).
+- Worker 를 더하거나 `--limit` 을 바꾸면 `<SUM>` 도 다시 계산해 pool 한도를 맞춘다.
+- Queue 한도를 남겨 두면 그 queue 의 상한이 worker `--limit` 합보다 작아지고, worker 를 더해도 처리량이 늘지 않는다.
 
 ### 5.3 Assigning a Deployment
 
@@ -207,7 +207,7 @@ prefect work-queue inspect <QUEUE> --pool <POOL>                      # stop her
 prefect worker start --pool <POOL> --work-queue <QUEUE> --limit <N> --name <HOSTNAME>-<QUEUE>
 ```
 
-- `--work-queue <QUEUE>` 로 이 worker 는 `<QUEUE>` 만 polling 한다. Pool 전체를 맡는 worker 는 그대로 두고 옆에 띄운다.
+- `--work-queue <QUEUE>` 로 이 worker 는 `<QUEUE>` 만 polling 한다. 같은 pool 의 나머지 worker 는 `--work-queue default` 로 띄워 `<QUEUE>` 의 run 을 가져가지 않게 한다 ([4.5](#45-worker-polling)).
 - `--limit <N>` 은 이 worker 가 동시에 띄우는 run 의 수이며, 급한 run 에 떼어 두는 한도가 된다.
 - `--name` 에 queue 이름을 넣어 두면 UI 의 worker 목록에서 어느 worker 가 전용인지 이름으로 가려진다.
 - 띄우기 전에 `inspect` 로 queue 가 pool 에 있는지 확인한다. 이름이 틀린 worker 는 deployment 의 run 이 들어가는 queue 를 polling 하지 않으므로 그 run 을 받지 못한다.
@@ -247,8 +247,8 @@ Table 4. Symptom, cause and fix
 
 | Symptom                                                     | Cause                                                        | Fix                                                    |
 | :---------------------------------------------------------: | :----------------------------------------------------------: | :----------------------------------------------------: |
-| 전용 worker 가 `READY` 인데 전용 queue 의 run 이 `Late`     | pool concurrency limit 이 남아 있음                           | [5.2](#52-moving-the-concurrency-limit)                |
-| 전용 queue 의 run 을 pool 전체 worker 가 실행                | 두 worker 가 같은 queue 를 polling 하며 먼저 가져간 쪽이 실행  | 의도한 동작, [4.5](#45-worker-polling)                  |
+| 전용 worker 가 `READY` 인데 전용 queue 의 run 이 `Late`     | pool concurrency limit 이 worker `--limit` 합보다 작음         | [5.2](#52-setting-the-concurrency-limits)              |
+| 전용 queue 의 run 을 다른 worker 가 실행                     | `--work-queue` 없이 띄운 worker 가 전용 queue 도 polling        | 그 worker 를 `--work-queue default` 로 재기동, [4.5](#45-worker-polling) |
 | 전용 worker 가 떠 있는데 run 을 하나도 받지 않음              | `--work-queue` 이름이 deployment 의 `work_queue_name` 과 다름  | `inspect` 로 이름 대조, [5.4](#54-starting-a-dedicated-worker) |
 | Queue 가 `NOT_READY`                                        | 60 초 넘게 polling 하는 worker 가 없음                          | worker 기동, [4.4](#44-status)                          |
 | 한도에 여유가 있는데 뒤 순위 queue 의 run 이 기다림           | 앞 순위 queue 에 기다리는 run 이 남아 있음                      | 의도한 동작, [4.2](#42-priority)                        |
@@ -320,22 +320,23 @@ Table 6. Deployments of the pool that the urgent queue serves
 
 ### C.2 Method
 
-[2. Summary](#2-summary) 의 네 단계 가운데 1, 3, 4 를 `low_performance` pool 에 적용했고, step 2 는 [C.3](#c3-server-state) 의 상태대로 아직 남아 있다.
+[2. Summary](#2-summary) 의 네 단계를 모두 `low_performance` pool 에 적용했다.
 
 ```bash
-prefect work-queue create urgent --pool low_performance --priority 1        # step 1
-prefect work-pool clear-concurrency-limit low_performance                  # step 2, first half
-prefect work-queue set-concurrency-limit default 6 --pool low_performance  # step 2, second half
-prefect worker start --pool low_performance --work-queue urgent --name <HOSTNAME>-urgent@<LAN_IP>   # step 4
+prefect work-queue create urgent --pool low_performance --priority 1                # step 1
+prefect work-queue clear-concurrency-limit default --pool low_performance           # step 2, no queue limit
+prefect work-pool set-concurrency-limit low_performance <SUM>                       # step 2, SUM of every --limit
+prefect worker start --pool low_performance --work-queue urgent --limit <N> --name <HOSTNAME>-urgent@<LAN_IP>   # step 4
+prefect worker start --pool low_performance --work-queue default --limit <N> --name <HOSTNAME>@<LAN_IP>         # step 4, each other machine
 ```
 
 - Step 3 은 `finance/webull-subscribe-stop` 을 `work_pool_name="low_performance"`, `work_queue_name="urgent"` 로 등록한 것이다 ([5.3](#53-assigning-a-deployment)).
-- 전용 worker 는 pool 전체를 맡는 worker `<HOSTNAME>@<LAN_IP>` 와 같은 machine 에서 돈다. 이름 뒤의 `-urgent` 가 전용 worker 를 가리킨다 ([5.4](#54-starting-a-dedicated-worker)).
-- Step 2 의 `6` 은 pool 에 걸려 있던 한도이다 ([C.3](#c3-server-state)).
+- 전용 worker 는 이름 뒤의 `-urgent` 로 가려진다. 나머지 worker 는 machine 마다 하나씩 `--work-queue default` 로 돌며, 그 machine 의 `<HOSTNAME>@<LAN_IP>` 를 이름으로 쓴다 ([5.4](#54-starting-a-dedicated-worker)).
+- Step 2 의 `<SUM>` 은 이 pool 에 붙은 모든 worker 의 `--limit` 합이며, worker 를 더하거나 `--limit` 을 바꿀 때마다 다시 맞춘다 ([5.2](#52-setting-the-concurrency-limits)).
 
 ### C.3 Server State
 
-적용 뒤 `prefect` CLI 로 읽은 server 의 상태이다. Queue 와 deployment 와 worker 는 C.2 대로 있고, pool 한도는 아직 pool 에 남아 있다.
+적용 뒤 `prefect` CLI 로 읽은 server 의 상태이다. Queue 와 deployment 와 worker 와 한도가 모두 C.2 대로 있다.
 
 ```text
 Work Queues in Work Pool 'low_performance'
@@ -348,6 +349,6 @@ Work Queues in Work Pool 'low_performance'
 ```
 
 - `urgent` 가 priority 1 이고, pool 을 만들 때 1 이었던 `default` 는 2 로 밀렸다 ([4.2](#42-priority)).
-- `prefect work-pool inspect low_performance` 의 `concurrency_limit` 은 `6` 이고, 두 queue 의 한도는 `None` 이다. Step 2 의 두 명령은 아직 적용되지 않은 상태이며, pool 의 run 이 6 개 돌면 `urgent` queue 의 run 도 pool 한도에 막혀 기다린다 ([4.3](#43-concurrency-limit)). C.2 의 두 번째와 세 번째 명령을 실행하면 한도가 `default` queue 로 옮겨 간다.
-- `low_performance` pool 의 worker 는 `<HOSTNAME>@<LAN_IP>` 와 `<HOSTNAME>-urgent@<LAN_IP>` 둘이고 모두 `ONLINE` 이다. `urgent` queue 는 두 worker 가 함께 polling 하므로, 취소 run 은 둘 중 먼저 가져간 쪽이 실행한다 ([4.5](#45-worker-polling)).
+- 두 queue 의 한도는 `None` 이고, `prefect work-pool inspect low_performance` 의 `concurrency_limit` 은 모든 worker 의 `--limit` 합과 같다. `default` queue 가 그 worker 들의 `--limit` 합까지 차도 `urgent` queue 의 run 은 pool 한도에 막히지 않는다 ([4.3](#43-concurrency-limit)).
+- `urgent` queue 는 `<HOSTNAME>-urgent@<LAN_IP>` 하나만 polling 하므로 취소 run 은 그 worker 가 실행한다. `default` queue 는 machine 마다 하나인 `<HOSTNAME>@<LAN_IP>` worker 들이 나눠 polling 하며, 모두 `ONLINE` 이다 ([4.5](#45-worker-polling)).
 - `prefect deployment inspect "finance/webull-subscribe-stop"` 의 `work_queue_name` 은 `urgent` 이고, `finance/webull-subscribe` 의 것은 `default` 이다.

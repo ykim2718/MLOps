@@ -1,5 +1,5 @@
 # MLOps Prefect Stack
-Rev. 633 | Created: 2026-06-13 | Updated: 2026-10-11 08:52 CDT
+Rev. 634 | Created: 2026-06-13 | Updated: 2026-10-14 11:35 CDT
 
 <img src="assets/prefect-wordmark.png" alt="Prefect" height="100">
 
@@ -731,7 +731,7 @@ Worker machine 을 띄우기 전에, registry 를 띄운 machine 에서 한 번 
    prefect config set PREFECT_API_URL=http://<SERVER_IP>:4200/api
    ```
 
-3. MLOps local repository 를 clone 하고, `docker-compose.env_example` 을 `Docker/Prefect/docker-compose.env` 로 복사해 두 값을 채웁니다 ([§7.1](#71-docker-composeenv_example)). DB 접속 값은 `prefect_server` 만 읽으므로 worker machine 에서는 `CHANGE_ME` 로 두어도 됩니다.
+3. MLOps local repository 를 clone 하고, `docker-compose.env_example` 을 `Docker/Prefect/docker-compose.env` 로 복사해 두 값을 채웁니다 ([§7.1](#71-docker-composeenv_example)). `run_worker.sh` 는 `docker-compose.env` 만 읽고, 이 파일이 없으면 멈춥니다. `_example` 은 자리표시자만 담으므로 직접 고치지 않습니다. DB 접속 값은 `prefect_server` 만 읽으므로 worker machine 에서는 `CHANGE_ME` 로 두어도 됩니다.
 
    ```dotenv
    # Docker/Prefect/docker-compose.env  (worker machine)
@@ -739,7 +739,7 @@ Worker machine 을 띄우기 전에, registry 를 띄운 machine 에서 한 번 
    IMAGE_REGISTRY=<REGISTRY_IP>:12357
    ```
 
-4. Worker 를 띄웁니다. `run_worker.sh` 가 `IMAGE_REGISTRY` 에서 worker image 를 받습니다. LAN IP 를 찾지 못하면 `--worker-ip <LAN_IP>` 를 붙입니다.
+4. Worker 를 띄웁니다. `run_worker.sh` 가 `IMAGE_REGISTRY` 에서 worker image 를 받고, `--work-queue` 가 없으면 `default` queue 만 polling 하며, `--worker-limit` 을 Prefect Variable `worker_limits` 에 기록합니다. LAN IP 를 찾지 못하면 `--worker-ip <LAN_IP>` 를 붙입니다. 띄운 뒤에는 pool 의 concurrency limit 을 그 pool 의 모든 worker 의 `--limit` 합 이상으로 맞춥니다.
 
    ```bash
    cd Docker/Prefect/PrefectWorker && ./run_worker.sh --work-pool low_performance

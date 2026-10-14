@@ -1,5 +1,5 @@
 # MLOps Prefect Stack: Server
-Rev. 3 | Created: 2026-10-10 | Updated: 2026-10-11 01:18 CDT
+Rev. 4 | Created: 2026-10-10 | Updated: 2026-10-14 11:35 CDT
 
 - [1. Purpose](#1-purpose)
 - [2. Server Setup](#2-server-setup)
@@ -193,6 +193,8 @@ Rev. 3 | Created: 2026-10-10 | Updated: 2026-10-11 01:18 CDT
   > | `mem_limit` | memory | `16g` | `4g` | base job template (`docker-pool-template-high.json`·`docker-pool-template-low.json`) |
   > | `--limit` | worker | `8` | `4` | `prefect worker start` (`WORKER_LIMIT`) |
   > | `--concurrency-limit` | pool | `16` | `8` | `work-pool set-concurrency-limit` (`register_pool.sh`) |
+  >
+  > Pool 의 `--concurrency-limit` 은 그 pool 에 붙은 모든 worker 의 `--limit` 합 이상으로 둡니다. 합보다 작으면 `default` queue 의 run 이 pool 한도를 채운 동안 우선 queue 의 run 도 기다립니다. Worker 를 더하거나 `--limit` 을 바꾸면 `prefect work-pool set-concurrency-limit <POOL> <SUM>` 으로 다시 맞추며, 기준은 [prefect-work-queue-ko.md §5.2](../prefect-work-queue-ko.md#52-setting-the-concurrency-limits) 에 있습니다.
 
   #### Registration
 
@@ -261,7 +263,7 @@ Rev. 3 | Created: 2026-10-10 | Updated: 2026-10-11 01:18 CDT
 - **`prefect_server`**: API · UI · scheduler · work pool 대기열을 제공하는 중앙 진입점입니다. 메타데이터 (`prefect` DB) 만 관리하고 코드는 실행하지 않습니다.
 - **base job template**: pool 이 띄우는 flow 컨테이너의 공통 설정 (image · env · network · 메모리 상한 등) 입니다.
 - **compose project**: `docker compose` 가 container · network 이름 앞에 붙이는 묶음 이름입니다. `-p` 로 정하며, `down` 은 같은 project 의 container 만 내립니다.
-- **concurrency limit**: 동시에 실행할 수 있는 run 수의 상한입니다. Work pool 과 work queue 에 각각 둘 수 있고, pool 의 상한은 그 pool 의 모든 queue 에 함께 걸립니다.
+- **concurrency limit**: 동시에 실행할 수 있는 run 수의 상한입니다. Work pool, work queue, worker (`--limit`) 에 각각 둘 수 있고, run 은 셋 가운데 가장 작은 값을 넘지 않습니다. Pool 의 상한은 그 pool 의 모든 queue 에 함께 걸립니다.
 - **deployment**: flow 를 어떤 work pool 과 parameter 로 실행할지 묶어 server DB (`prefect`) 에 저장한 레코드입니다.
 - **flow image**: Pipeline Flow 컨테이너를 띄우는 image 입니다. deployment 의 `image` (없으면 base job template 의 `image` 기본값) 가 가리키며, 이 stack 에서는 `pipeline-flow:latest` 입니다.
 - **Host**: 모든 컨테이너 (server · worker · pipeline_flow · postgres · minio · mlflow) 가 올라가는 한 대의 컴퓨터입니다.
