@@ -1,5 +1,10 @@
-# __version__ = "0.0.1"  # Semantic Versioning:  Version = Major.Minor.Patch
+# __version__ = "0.0.3"  # Semantic Versioning:  Version = Major.Minor.Patch
 # Worker image — a Prefect docker worker (prefect + prefect-docker only, no team libraries).
 # Built once; the worker container then runs `prefect worker start` with no per-boot install.
 FROM python:3.11.15-slim
-RUN pip install --no-cache-dir "prefect>=3,<4" prefect-docker
+# short timeout + many retries: a stalled download is retried after 15s instead of waiting 120s
+ENV PIP_DEFAULT_TIMEOUT=15 \
+    PIP_RETRIES=20 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install "prefect>=3,<4" prefect-docker

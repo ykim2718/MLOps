@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # push_flow_image.sh — build the Pipeline Flow image (flow image) for several CPU architectures and push it.
-# __version__ = "0.0.0"  # Semantic Versioning:  Version = Major.Minor.Patch
+# __version__ = "0.0.1"  # Semantic Versioning:  Version = Major.Minor.Patch
 # Author: yRocket
 #
 # Builds Dockerfile.pipeline_flow as one multi-arch image <registry>/pipeline-flow:<tag> and pushes it, so every
@@ -75,7 +75,9 @@ docker buildx version >/dev/null 2>&1 || { echo "docker buildx is required (Dock
 
 REF="$REGISTRY/$IMAGE_NAME:$TAG"
 echo "Building $REF for $PLATFORM"
-if ! docker buildx build --platform "$PLATFORM" -f Dockerfile.pipeline_flow -t "$REF" --push .; then
+# registry.insecure=true: push over plain HTTP (the LAN registry has no TLS); no buildkitd.toml needed
+if ! docker buildx build --platform "$PLATFORM" -f Dockerfile.pipeline_flow \
+        --output "type=image,name=$REF,push=true,registry.insecure=true" .; then
     echo "push_flow_image.sh: ERROR: build or push of $REF failed." >&2
     echo "  A multi-arch build needs the containerd image store or a docker-container builder;" >&2
     echo "  an HTTP registry other than localhost needs 'insecure-registries' in this docker daemon." >&2
