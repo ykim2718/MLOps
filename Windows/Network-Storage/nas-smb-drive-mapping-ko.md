@@ -1,5 +1,5 @@
 # NAS SMB Drive Mapping
-Rev. 0 | Created: 2026-10-15 | Updated: 2026-10-15 17:28 UTC
+Rev. 1 | Created: 2026-10-15 | Updated: 2026-10-15 17:33 UTC
 
 - [1. Purpose](#1-purpose)
 - [2. Summary](#2-summary)
@@ -32,18 +32,21 @@ SMB drive 는 NAS 전체가 아니라 공유 폴더 하나에 연결하며, 관�
 - NAS 비밀번호를 Windows 에 저장한다. `/pass` 뒤에 값을 적지 않으면 비밀번호를 묻는다.
 
 ```powershell
+# PowerShell
 cmdkey /add:<NAS_IP> /user:<NAS_USER> /pass
 ```
 
 - 공유 폴더를 drive 문자에 연결한다. `/persistent:yes` 와 저장된 비밀번호로 재부팅 뒤에도 자동으로 다시 연결된다.
 
 ```powershell
+# PowerShell
 net use <DRIVE>: \\<NAS_IP>\<SHARE_NAME> /persistent:yes
 ```
 
 - 관리자 창에서 연결한 drive 도 탐색기에 보이게 하려면, 관리자 PowerShell 에서 아래 설정을 한 번 넣고 재부팅한다. 이 설정만으로는 drive 가 생기지 않으며, 위의 연결은 따로 해야 한다.
 
 ```powershell
+# PowerShell (Administrator)
 New-ItemProperty -Path HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System -Name EnableLinkedConnections -Value 1 -PropertyType DWord -Force
 ```
 
@@ -54,6 +57,7 @@ New-ItemProperty -Path HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\
 아래 명령은 drive 의 목록 조회 시간과 50MB 이상 파일 하나의 복사 속도를 보여 준다. 1GbE LAN 이면 복사 속도가 100MB/s 안팎이다.
 
 ```powershell
+# PowerShell
 $sw = [Diagnostics.Stopwatch]::StartNew()
 (Get-ChildItem <DRIVE>:\ -Recurse -Depth 2 -Force | Measure-Object).Count
 "list $($sw.ElapsedMilliseconds) ms"
